@@ -1428,7 +1428,7 @@ export const CharacterInventoryModal: React.FC<CharacterInventoryModalProps> = (
                       <div className="text-[10px] text-[#A19FAF] tabular-nums">
                         Base: {(stats.tacticalBaseCooldownMs / 1000).toFixed(1)}s
                         {activeTactical.id === 'crimson_frenzy'
-                          ? ` · +${Math.round(ARMAMENT_TUNING.weapons.crimson.frenzyDamageBonusPct * 100)}% DMG / ${Math.round(ARMAMENT_TUNING.weapons.crimson.frenzyLifestealPct * 100)}% LS / +${Math.round(ARMAMENT_TUNING.weapons.crimson.frenzyAttackSpeedBonusPct * 100)}% SPD`
+                          ? ` · +${Math.round(ARMAMENT_TUNING.weapons.crimson.frenzyDamageBonusPct * 100)}% DMG / ${Math.round(ARMAMENT_TUNING.weapons.crimson.frenzyLifestealPct * 100)}% LS / +${Math.round(ARMAMENT_TUNING.weapons.crimson.frenzyAttackSpeedBonusPct * 100)}% SPD / +${Math.round(ARMAMENT_TUNING.weapons.crimson.frenzyMoveSpeedBonusPct * 100)}% Fading MS`
                           : ''}
                       </div>
                     </div>

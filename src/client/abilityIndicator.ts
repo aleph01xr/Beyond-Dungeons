@@ -612,8 +612,9 @@ export function drawAbilityTargetingIndicator(
     const endX = playerX + Math.cos(aim.aimAngle) * lineLen;
     const endY = playerY + Math.sin(aim.aimAngle) * lineLen;
 
-    if (spec.aoeRadius > 24 && player.equippedScrollId === 'fireball') {
-      // Snap Fireball AoE preview ring to the first enemy along its path if one is in line
+    if (spec.aoeRadius > 24 && (player.equippedScrollId === 'fireball' || spec.label === 'Cyclone Break')) {
+      const isCyclone = spec.label === 'Cyclone Break';
+      // Snap AoE preview ring to first enemy along its path (plus carry distance for Cyclone Arrow)
       let blastX = endX;
       let blastY = endY;
       let closestHitDist = lineLen;
@@ -623,8 +624,9 @@ export function drawAbilityTargetingIndicator(
           const d = Math.hypot(en.x - playerX, en.y - playerY);
           if (d < closestHitDist) {
             closestHitDist = d;
-            blastX = playerX + Math.cos(aim.aimAngle) * d;
-            blastY = playerY + Math.sin(aim.aimAngle) * d;
+            const carryDist = isCyclone ? Math.min(lineLen, d + 96) : d;
+            blastX = playerX + Math.cos(aim.aimAngle) * carryDist;
+            blastY = playerY + Math.sin(aim.aimAngle) * carryDist;
           }
         }
       }
@@ -639,6 +641,20 @@ export function drawAbilityTargetingIndicator(
       ctx.arc(blastX, blastY, spec.aoeRadius, 0, Math.PI * 2);
       ctx.stroke();
       ctx.setLineDash([]);
+      if (isCyclone) {
+        ctx.save();
+        ctx.translate(blastX, blastY);
+        ctx.rotate(now * 0.008);
+        ctx.strokeStyle = hexToRgba(secondary, 0.82);
+        ctx.lineWidth = 1.6;
+        for (let arm = 0; arm < 3; arm++) {
+          const a0 = (arm * Math.PI * 2) / 3;
+          ctx.beginPath();
+          ctx.arc(0, 0, spec.aoeRadius * 0.62, a0, a0 + 1.0);
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
     }
 
     for (const en of snap.enemies) {

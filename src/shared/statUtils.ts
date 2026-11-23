@@ -402,10 +402,11 @@ export function calculatePlayerStatProjections(p: PlayerState, floor = 1): Playe
       rawDirectDps * ((1 + dmgBoost) * (1 + spdBoost) - 1) * frenzyUptime;
   } else if (activeTactical.id === 'cyclone_break') {
     const gCfg = ARMAMENT_TUNING.weapons.galewind;
+    const arrowDmg = Math.round(gCfg.cycloneArrowBaseDamage * tacticalDamageMult);
     const tickDmg = Math.round(gCfg.cycloneTickBaseDamage * tacticalDamageMult);
     const detDmg = Math.round(gCfg.cycloneDetonationBaseDamage * tacticalDamageMult);
     activeTacticalHitDamage = detDmg;
-    rawTacticalAbilityDps = (tickDmg * 6 + detDmg) / safeTacCdSec;
+    rawTacticalAbilityDps = (arrowDmg + tickDmg * 6 + detDmg) / safeTacCdSec;
   } else if (activeTactical.id === 'black_sun') {
     const eCfg = ARMAMENT_TUNING.weapons.eclipse;
     const tickDmg = Math.round(eCfg.blackSunTickBaseDamage * tacticalDamageMult);

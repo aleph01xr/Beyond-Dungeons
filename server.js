@@ -304,6 +304,205 @@ var FLOOR_BLESSINGS = {
   }
 };
 
+// src/shared/arcanist.ts
+var STAR_RIFT_REQUIRED_ATTACKS = 4;
+var STAR_RIFT_PROC_COOLDOWN_MS = 8e3;
+var ARCANIST_SPELL_ORDER = [
+  "fireball",
+  "disintegration",
+  "frost_lance",
+  "chain_lightning",
+  "arcane_meteor",
+  "arcane_orb",
+  "arcane_barrage"
+];
+var ARCANIST_SPELLS = {
+  fireball: {
+    id: "fireball",
+    name: "Fireball",
+    scrollName: "Scroll of Fireball",
+    tacticalTitle: "Fireball",
+    role: "Burst / Burning AoE",
+    baseDamage: 42,
+    intCoeff: 0.015,
+    cooldownMs: 6e3,
+    castTimeMs: 350,
+    explosionRadius: 105,
+    burnRadius: 88,
+    burnTickRatio: 0.22,
+    durationMs: 3500,
+    hitIntervalMs: 500,
+    maxRange: 360,
+    projectileSpeed: 380,
+    damageCategory: "fire",
+    accentColor: "#F97316",
+    summary: "Replaces Astral Nova [Q]. 0.35s cast; hurls a large fireball that explodes on hit (105u AoE) and leaves a 3.5s burning ground zone.",
+    chronoInteraction: "Fireball projectile and lingering burn zone freeze inside ANY Chrono Well (including caster zones) until time resumes."
+  },
+  disintegration: {
+    id: "disintegration",
+    name: "Disintegration",
+    scrollName: "Scroll of Disintegration",
+    tacticalTitle: "Disintegration",
+    role: "Sustained Beam",
+    baseDamage: 10,
+    intCoeff: 0.012,
+    cooldownMs: 12e3,
+    castTimeMs: 0,
+    tickIntervalMs: 200,
+    beamWidth: 42,
+    maxRange: 450,
+    activationMs: 150,
+    maxRotationRadPerSec: Math.PI,
+    // 180 deg/s
+    isChannel: true,
+    damageCategory: "arcane",
+    accentColor: "#A855F7",
+    summary: "Replaces Astral Nova [Q]. Hold [Q / RMB] to channel a 450u violet beam (5 ticks/s, stationary, 180\xB0/s turn cap; 12s CD starts on end).",
+    chronoInteraction: "Interrupted if caster is suspended by another Chrono Well; own Chrono Well lets caster channel freely."
+  },
+  frost_lance: {
+    id: "frost_lance",
+    name: "Frost Lance",
+    scrollName: "Scroll of Frost Lance (Ice Lance)",
+    tacticalTitle: "Frost Lance",
+    role: "Precision / Piercing",
+    baseDamage: 36,
+    intCoeff: 0.018,
+    cooldownMs: 4500,
+    castTimeMs: 200,
+    pierce: 3,
+    maxRange: 420,
+    projectileSpeed: 480,
+    damageCategory: "frost",
+    accentColor: "#38BDF8",
+    summary: "Replaces Astral Nova [Q]. 0.2s cast; fires a straight crystalline ice lance piercing up to 3 enemies (no homing/freeze).",
+    chronoInteraction: "Ice lance projectile suspends mid-air inside ANY Chrono Well until the field ends."
+  },
+  chain_lightning: {
+    id: "chain_lightning",
+    name: "Chain Lightning",
+    scrollName: "Scroll of Chain Lightning",
+    tacticalTitle: "Chain Lightning",
+    role: "Cone Discharge",
+    baseDamage: 32,
+    intCoeff: 0.015,
+    cooldownMs: 7e3,
+    castTimeMs: 0,
+    maxRange: 340,
+    coneHalfAngleRad: 0.56,
+    // ~±32 deg (64 deg total cone)
+    damageCategory: "lightning",
+    accentColor: "#FACC15",
+    summary: "Replaces Astral Nova [Q]. Unleashes a 340u cone-shaped lightning blast (64\xB0 arc) shocking all foes inside.",
+    chronoInteraction: "Instant lightning cone hits suspended foes inside Chrono Well; blocked while caster is Chrono-suspended."
+  },
+  arcane_meteor: {
+    id: "arcane_meteor",
+    name: "Arcane Meteor",
+    scrollName: "Scroll of Arcane Meteor",
+    tacticalTitle: "Arcane Meteor",
+    role: "Heavy AoE Burst",
+    baseDamage: 75,
+    intCoeff: 0.0195,
+    cooldownMs: 11e3,
+    castTimeMs: 500,
+    impactDelayMs: 1e3,
+    explosionRadius: 125,
+    maxRange: 280,
+    damageCategory: "arcane",
+    accentColor: "#E879F9",
+    summary: "Replaces Astral Nova [Q]. 0.5s cast + 1.0s warning delay; drops an arcane meteor for heavy 125u AoE damage (no burn).",
+    chronoInteraction: "Marked meteor impact timer freezes while covered by ANY Chrono Well and detonates once time resumes."
+  },
+  arcane_orb: {
+    id: "arcane_orb",
+    name: "Arcane Orb",
+    scrollName: "Scroll of Arcane Orb",
+    tacticalTitle: "Arcane Orb",
+    role: "Persistent Pressure",
+    baseDamage: 12,
+    intCoeff: 0.0105,
+    cooldownMs: 9e3,
+    castTimeMs: 0,
+    durationMs: 4e3,
+    hitIntervalMs: 500,
+    maxHitsPerEnemy: 2,
+    projectileSpeed: 115,
+    damageCategory: "arcane",
+    accentColor: "#818CF8",
+    summary: "Replaces Astral Nova [Q]. 4s slow sphere damaging enemies every 0.5s (max 2 hits/enemy) without vanishing on hit.",
+    chronoInteraction: "Orb movement and lifetime freeze completely inside ANY Chrono Well without losing hit cooldown timing."
+  },
+  arcane_barrage: {
+    id: "arcane_barrage",
+    name: "Arcane Barrage",
+    scrollName: "Scroll of Arcane Barrage",
+    tacticalTitle: "Arcane Barrage",
+    role: "Multi-Wave Barrage",
+    baseDamage: 12,
+    intCoeff: 675e-5,
+    cooldownMs: 8e3,
+    castTimeMs: 0,
+    projectileCount: 8,
+    barrageWaves: 4,
+    barrageWaveIntervalMs: 95,
+    projectileSpeed: 420,
+    maxRange: 450,
+    damageCategory: "arcane",
+    accentColor: "#60A5FA",
+    summary: "Replaces Astral Nova [Q]. Launches a 4-wave rapid arcane barrage (8 bolts) that streams forward and strikes targets 3-4+ times.",
+    chronoInteraction: "Barrage projectiles suspend inside ANY Chrono Well (including the caster\u2019s own) and burst forward together on resume."
+  }
+};
+var ARCANIST_SCROLLS = ARCANIST_SPELL_ORDER.map(
+  (id) => ARCANIST_SPELLS[id]
+);
+function getArcanistScrollDef(scrollId) {
+  if (!scrollId) return null;
+  return ARCANIST_SPELLS[scrollId] || null;
+}
+function computeArcanistSpellDamage(baseDamage, params, intCoeff) {
+  const level = Math.max(1, Math.min(MAX_LEVEL, params.level || 1));
+  const intStat = Math.max(0, params.intelligence || 0);
+  const levelMult = 1 + 0.025 * (level - 1);
+  const intMult = 1 + intCoeff * intStat;
+  let total = baseDamage * levelMult * intMult;
+  if (params.relics?.includes("sunfire_signet")) {
+    total *= 1.12;
+  }
+  const fury = Math.max(0, params.furyStacks || 0);
+  if (fury > 0) {
+    total *= 1 + fury * 0.06;
+  }
+  return Math.max(1, Math.round(total));
+}
+function normalizeAngle(angle) {
+  let a = angle;
+  while (a > Math.PI) a -= Math.PI * 2;
+  while (a < -Math.PI) a += Math.PI * 2;
+  return a;
+}
+function rotateAngleToward(currentAngle, targetAngle, maxDeltaRad) {
+  const diff = normalizeAngle(targetAngle - currentAngle);
+  if (Math.abs(diff) <= maxDeltaRad) {
+    return normalizeAngle(targetAngle);
+  }
+  return normalizeAngle(currentAngle + Math.sign(diff) * maxDeltaRad);
+}
+function distancePointToSegment(px, py, ax, ay, bx, by) {
+  const abx = bx - ax;
+  const aby = by - ay;
+  const lenSq = abx * abx + aby * aby;
+  if (lenSq <= 1e-6) {
+    return Math.hypot(px - ax, py - ay);
+  }
+  const t = Math.max(0, Math.min(1, ((px - ax) * abx + (py - ay) * aby) / lenSq));
+  const closestX = ax + t * abx;
+  const closestY = ay + t * aby;
+  return Math.hypot(px - closestX, py - closestY);
+}
+
 // src/shared/armaments.ts
 var ARMAMENT_TUNING = {
   weapons: {
@@ -311,16 +510,32 @@ var ARMAMENT_TUNING = {
       shockwaveDamageRatio: 0.55,
       shockwaveRangePx: 118,
       shockwaveHalfAngleRad: 0.58,
-      shockwaveZoneTtlMs: 240
+      shockwaveZoneTtlMs: 240,
+      bastionBraceMs: 1400,
+      bastionDamageReduction: 0.6,
+      bastionCleaveRadiusPx: 116,
+      bastionCleaveHalfAngleRad: 1.05,
+      bastionCleaveBaseDamage: 46,
+      bastionBlockedBonusPerHitRatio: 0.25,
+      bastionMaxBonusStacks: 3,
+      bastionCleaveZoneTtlMs: 280,
+      bastionCooldownMs: 7e3
     },
     crimson: {
       bonusPierce: 3,
-      rangeBonusPx: 26
+      rangeBonusPx: 26,
+      frenzyDurationMs: 5e3,
+      frenzyCooldownMs: 10500,
+      frenzyDamageBonusPct: 0.25,
+      frenzyLifestealPct: 0.14,
+      frenzyAttackSpeedBonusPct: 0.25,
+      frenzyMoveSpeedBonusPct: 0.25
     },
     stormbreaker: {
-      tempestRadiusPx: 92,
-      tempestDamageRatio: 1,
-      tempestZoneTtlMs: 240
+      slamForwardOffsetPx: 54,
+      slamRadiusPx: 62,
+      slamDamageRatio: 1.15,
+      slamZoneTtlMs: 260
     },
     galewind: {
       counterScope: "per_target",
@@ -329,7 +544,19 @@ var ARMAMENT_TUNING = {
       aoeDamageRatio: 0.85,
       dexScalingMult: 0.78,
       attackSpeedMult: 0.92,
-      novaZoneTtlMs: 260
+      novaZoneTtlMs: 260,
+      cycloneArrowRangePx: 330,
+      cycloneArrowSpeedPx: 540,
+      cycloneArrowRadiusPx: 14,
+      cycloneArrowCarryDurationMs: 180,
+      cycloneArrowBaseDamage: 24,
+      cycloneRadiusPx: 132,
+      cycloneDurationMs: 2400,
+      cycloneTickIntervalMs: 300,
+      cyclonePullSpeedPxPerSec: 245,
+      cycloneTickBaseDamage: 11,
+      cycloneDetonationBaseDamage: 36,
+      cycloneCooldownMs: 8500
     },
     eclipse: {
       minChargeMs: 120,
@@ -338,7 +565,15 @@ var ARMAMENT_TUNING = {
       maxDamageRatio: 2.15,
       minProjSpeedMult: 1.05,
       maxProjSpeedMult: 1.55,
-      scalingStat: "intelligence"
+      scalingStat: "intelligence",
+      blackSunRangePx: 240,
+      blackSunRadiusPx: 115,
+      blackSunZoneDurationMs: 1400,
+      blackSunTickIntervalMs: 350,
+      blackSunTickBaseDamage: 10,
+      blackSunStrikeBaseDamage: 68,
+      blackSunBurstZoneTtlMs: 360,
+      blackSunCooldownMs: 9e3
     },
     cinderflare: {
       aoeRadiusPx: 64,
@@ -433,12 +668,13 @@ var WEAPON_CATALOG = [
     slot: "weapon",
     heroClass: "vanguard",
     name: HERO_CLASSES.vanguard.weapon,
-    rarity: "Standard",
-    archetype: "Shield-Wave Greatsword",
-    summary: "Broad Vanguard greatsword that unleashes a golden forward shockwave whenever you hold Shield.",
+    rarity: "Ascendant",
+    archetype: "Shield-Wave Bastion Greatsword",
+    summary: "Sunforged greatsword releasing golden forward shockwaves with Shield, and replacing Bulwark Dash with Bastion Counter.",
     effectLines: [
       "+10px primary cleave reach & +3% Critical Chance",
       "Sunforged Shockwave: While Shield > 0, swings release a golden cone shockwave (55% dmg, 118px)",
+      `Bastion Counter (Tactical): Brace ${(ARMAMENT_TUNING.weapons.sunforged.bastionBraceMs / 1e3).toFixed(1)}s (-${Math.round(ARMAMENT_TUNING.weapons.sunforged.bastionDamageReduction * 100)}% incoming dmg), then retaliate with a ${ARMAMENT_TUNING.weapons.sunforged.bastionCleaveRadiusPx}px golden cleave (${(ARMAMENT_TUNING.weapons.sunforged.bastionCooldownMs / 1e3).toFixed(1)}s CD)`,
       "Restores +2 Shield when primary cleave hits a foe"
     ],
     unlockHint: "Starter Vanguard armament",
@@ -453,21 +689,22 @@ var WEAPON_CATALOG = [
       critChanceBonus: 0.03,
       rangeBonusPx: 10,
       shieldOnPrimaryHit: 2,
-      sunforgedShockwave: true
+      sunforgedShockwave: true,
+      tacticalId: "bastion_counter"
     }
   },
   {
     id: "vanguard_crimson_halberd",
     slot: "weapon",
     heroClass: "vanguard",
-    name: "Crimson War Halberd & Buckler",
-    rarity: "Forged",
-    archetype: "Long-Reach Piercing Polearm",
-    summary: "Extended polearm engineered to thrust deeply and pierce entire frontline formations in one sweep.",
+    name: "Crimson War Axe",
+    rarity: "Ascendant",
+    archetype: "Shield-Locked Berserker Great-Axe",
+    summary: "Extended-reach war axe that permanently locks all Shield gain in exchange for piercing cleaves, Bleed, and Crimson Frenzy.",
     effectLines: [
-      `+10% Offensive Damage, +${ARMAMENT_TUNING.weapons.crimson.rangeBonusPx}px Reach & +${ARMAMENT_TUNING.weapons.crimson.bonusPierce} Pierce (-6% cadence)`,
-      "Impaling Reach: Extended forward halberd profile hits each target once per swing",
-      "45% chance on primary hit to inflict Bleed (4s) & +1 Shield"
+      `+10% Offensive Damage, +${ARMAMENT_TUNING.weapons.crimson.rangeBonusPx}px Reach & +${ARMAMENT_TUNING.weapons.crimson.bonusPierce} Pierce (-6% cadence); 45% Bleed (4s)`,
+      "Permanent Shield Lock: While equipped, you cannot gain Shield from any source (existing Shield stays; unequipping restores Shield gain)",
+      `Crimson Frenzy (Tactical): For ${(ARMAMENT_TUNING.weapons.crimson.frenzyDurationMs / 1e3).toFixed(1)}s, gain +${Math.round(ARMAMENT_TUNING.weapons.crimson.frenzyDamageBonusPct * 100)}% Damage, +${Math.round(ARMAMENT_TUNING.weapons.crimson.frenzyLifestealPct * 100)}% Lifesteal, +${Math.round(ARMAMENT_TUNING.weapons.crimson.frenzyAttackSpeedBonusPct * 100)}% Attack Speed & a fading +${Math.round(ARMAMENT_TUNING.weapons.crimson.frenzyMoveSpeedBonusPct * 100)}% Movement Speed buff (${(ARMAMENT_TUNING.weapons.crimson.frenzyCooldownMs / 1e3).toFixed(1)}s CD)`
     ],
     unlockHint: "Defeat Floor Bosses as Vanguard",
     accent: "#EF4444",
@@ -480,7 +717,8 @@ var WEAPON_CATALOG = [
       bonusPierce: ARMAMENT_TUNING.weapons.crimson.bonusPierce,
       rangeBonusPx: ARMAMENT_TUNING.weapons.crimson.rangeBonusPx,
       bleedChance: 0.45,
-      shieldOnPrimaryHit: 1
+      shieldGainLocked: true,
+      tacticalId: "crimson_frenzy"
     }
   },
   {
@@ -488,12 +726,12 @@ var WEAPON_CATALOG = [
     slot: "weapon",
     heroClass: "vanguard",
     name: "Stormbreaker Flail & Bastion Wall",
-    rarity: "Ascendant",
-    archetype: "Tempest Wheel War Flail",
-    summary: "Thunder-forged flail replacing directional cleaves with a 360\xB0 Tempest Wheel vortex around you.",
+    rarity: "Forged",
+    archetype: "Heavy Slam War Flail",
+    summary: "Thunder-forged flail smashing downward into a localized forward Shock AoE while retaining Bulwark Dash.",
     effectLines: [
-      `Tempest Wheel: 360\xB0 circular flail sweep (${ARMAMENT_TUNING.weapons.stormbreaker.tempestRadiusPx}px radius around you)`,
-      "+5% Damage, +12% Attack Speed, +5% Crit Chance & +3 Shield on hit",
+      `Heavy Slam: Downward overhead slam crushes a localized ${ARMAMENT_TUNING.weapons.stormbreaker.slamRadiusPx}px forward AoE (${Math.round(ARMAMENT_TUNING.weapons.stormbreaker.slamDamageRatio * 100)}% dmg, ${ARMAMENT_TUNING.weapons.stormbreaker.slamForwardOffsetPx}px ahead)`,
+      "+5% Damage, +12% Attack Speed, +5% Crit Chance & +3 Shield on hit (retains Bulwark Dash)",
       "25% chance on primary hit to Shock foes (3.5s)"
     ],
     unlockHint: "Defeat Floor 3+ Bosses as Vanguard",
@@ -507,7 +745,7 @@ var WEAPON_CATALOG = [
       critChanceBonus: 0.05,
       shieldOnPrimaryHit: 3,
       shockChance: 0.25,
-      tempestWheel: true
+      heavySlamAoe: true
     }
   },
   // ================= RANGER WEAPONS =================
@@ -516,11 +754,11 @@ var WEAPON_CATALOG = [
     slot: "weapon",
     heroClass: "ranger",
     name: HERO_CLASSES.ranger.weapon,
-    rarity: "Standard",
+    rarity: "Forged",
     archetype: "Precision Hunter Recurve",
-    summary: "Supple Thornwood recurve strung with barbed arrows that punish slowed or poisoned prey.",
+    summary: "Supple Thornwood recurve strung with barbed arrows that punish slowed or poisoned prey while retaining Frost Volley.",
     effectLines: [
-      "+4% Critical Chance & +10% Arrow Velocity",
+      "+4% Critical Chance & +10% Arrow Velocity (retains Frost Volley)",
       "Barbed Broadheads: +15% arrow damage vs Slowed, Frozen, or Poisoned foes",
       "+5% bonus Longshot damage beyond 180u"
     ],
@@ -544,13 +782,13 @@ var WEAPON_CATALOG = [
     slot: "weapon",
     heroClass: "ranger",
     name: "Galewind Twinbow & Split Quiver",
-    rarity: "Forged",
-    archetype: "Galeburst 3-Hit Windbow",
-    summary: "Twin-limbed composite bow whose arrows mark targets and detonate a violent air burst on every third hit.",
+    rarity: "Ascendant",
+    archetype: "Galeburst Cyclone Twinbow",
+    summary: "Twin-limbed composite bow triggering 3-hit Galeburst wind bursts and replacing Frost Volley with Cyclone Break.",
     effectLines: [
-      `Galeburst: Every ${ARMAMENT_TUNING.weapons.galewind.hitsToTrigger}rd confirmed hit on a target triggers an ${ARMAMENT_TUNING.weapons.galewind.aoeRadiusPx}px wind AoE (${Math.round(ARMAMENT_TUNING.weapons.galewind.aoeDamageRatio * 100)}% dmg)`,
-      "+12% Arrow Velocity & +4% Crit Chance",
-      `Tuned for burst cadence (${Math.round(ARMAMENT_TUNING.weapons.galewind.attackSpeedMult * 100)}% cadence, ${Math.round(ARMAMENT_TUNING.weapons.galewind.dexScalingMult * 100)}% DEX scaling)`
+      `Galeburst: Every ${ARMAMENT_TUNING.weapons.galewind.hitsToTrigger}rd confirmed hit on a target triggers an ${ARMAMENT_TUNING.weapons.galewind.aoeRadiusPx}px wind AoE (${Math.round(ARMAMENT_TUNING.weapons.galewind.aoeDamageRatio * 100)}% dmg) & primes Cyclone Break`,
+      `Cyclone Break (Tactical): Shoot a straight Cyclone Greatarrow that drags hit foes forward and erupts into a ${ARMAMENT_TUNING.weapons.galewind.cycloneRadiusPx}px whirlwind (${(ARMAMENT_TUNING.weapons.galewind.cycloneDurationMs / 1e3).toFixed(1)}s), strongly pulling enemies inward & detonating Galeburst marks (${(ARMAMENT_TUNING.weapons.galewind.cycloneCooldownMs / 1e3).toFixed(1)}s CD)`,
+      `+12% Arrow Velocity & +4% Crit Chance (${Math.round(ARMAMENT_TUNING.weapons.galewind.attackSpeedMult * 100)}% cadence, ${Math.round(ARMAMENT_TUNING.weapons.galewind.dexScalingMult * 100)}% DEX scaling)`
     ],
     unlockHint: "Defeat Floor Bosses as Ranger",
     accent: "#38BDF8",
@@ -565,7 +803,8 @@ var WEAPON_CATALOG = [
       dexScalingMult: ARMAMENT_TUNING.weapons.galewind.dexScalingMult,
       galeburstTriggerHits: ARMAMENT_TUNING.weapons.galewind.hitsToTrigger,
       galeburstRadiusPx: ARMAMENT_TUNING.weapons.galewind.aoeRadiusPx,
-      galeburstDamageRatio: ARMAMENT_TUNING.weapons.galewind.aoeDamageRatio
+      galeburstDamageRatio: ARMAMENT_TUNING.weapons.galewind.aoeDamageRatio,
+      tacticalId: "cyclone_break"
     }
   },
   {
@@ -574,12 +813,12 @@ var WEAPON_CATALOG = [
     heroClass: "ranger",
     name: "Eclipse Siege Longbow & Bodkins",
     rarity: "Ascendant",
-    archetype: "INT-Scaled Charged Siege Bow",
-    summary: "Heavy arcane-sinew siege longbow; hold Basic Attack to draw massive INT-scaled piercing shots.",
+    archetype: "INT-Scaled Eclipse Siege Bow",
+    summary: "Heavy arcane-sinew bow with hold-to-charge INT shots that replaces Frost Volley with Black Sun.",
     effectLines: [
-      `Hold-to-Charge (${ARMAMENT_TUNING.weapons.eclipse.minChargeMs}-${ARMAMENT_TUNING.weapons.eclipse.maxChargeMs}ms): Deals ${Math.round(ARMAMENT_TUNING.weapons.eclipse.minDamageRatio * 100)}%-${Math.round(ARMAMENT_TUNING.weapons.eclipse.maxDamageRatio * 100)}% Arcane arrow damage`,
-      "Arcane Sinew: Deals Arcane damage and scales with Intelligence (INT) instead of Dexterity",
-      "+2 Arrow Pierce, +6% Crit Chance & +10% Crit Multiplier"
+      `Hold-to-Charge (${ARMAMENT_TUNING.weapons.eclipse.minChargeMs}-${ARMAMENT_TUNING.weapons.eclipse.maxChargeMs}ms): Deals ${Math.round(ARMAMENT_TUNING.weapons.eclipse.minDamageRatio * 100)}%-${Math.round(ARMAMENT_TUNING.weapons.eclipse.maxDamageRatio * 100)}% Arcane arrow damage (+2 Pierce, +6% Crit, +10% Crit Mult)`,
+      `Black Sun (Tactical): Create a ${ARMAMENT_TUNING.weapons.eclipse.blackSunRadiusPx}px eclipse zone (${(ARMAMENT_TUNING.weapons.eclipse.blackSunZoneDurationMs / 1e3).toFixed(1)}s) before a celestial arrow strike & explosion (${(ARMAMENT_TUNING.weapons.eclipse.blackSunCooldownMs / 1e3).toFixed(1)}s CD)`,
+      "Arcane Sinew: Deals Arcane damage and scales with Intelligence (INT) instead of Dexterity"
     ],
     unlockHint: "Defeat Floor 3+ Bosses as Ranger",
     accent: "#FBBF24",
@@ -594,7 +833,8 @@ var WEAPON_CATALOG = [
       critMultBonus: 0.1,
       projectileSpeedMult: 1.2,
       chargeToFire: true,
-      usesIntScaling: true
+      usesIntScaling: true,
+      tacticalId: "black_sun"
     }
   },
   // ================= ARCANIST WEAPONS =================
@@ -603,9 +843,9 @@ var WEAPON_CATALOG = [
     slot: "weapon",
     heroClass: "arcanist",
     name: HERO_CLASSES.arcanist.weapon,
-    rarity: "Standard",
+    rarity: "Forged",
     archetype: "Astral Rift Conduit",
-    summary: "Crystalline focus rod attuned with orbiting astral spheres that draw power from Star Rifts.",
+    summary: "Crystalline focus rod attuned with orbiting astral spheres that draw power from Star Rifts; retains Astral Nova and Scroll spells.",
     effectLines: [
       "+1 Cosmic Bolt Pierce & +3% Critical Chance",
       "Rift Resonance: +12% primary bolt damage while your Star Rift is active",
@@ -633,7 +873,7 @@ var WEAPON_CATALOG = [
     name: "Cinderflare Catalyst & Ember Crown",
     rarity: "Forged",
     archetype: "Detonating Pyromancy Catalyst",
-    summary: "Obsidian-gold catalyst firing volatile ember bolts that erupt into fiery AoE blasts on hit.",
+    summary: "Obsidian-gold catalyst firing volatile ember bolts that erupt into fiery AoE blasts on hit; retains Astral Nova and Scroll spells.",
     effectLines: [
       "+8% Arcane Bolt Damage, +1 Pierce & +10% Crit Multiplier",
       `Ember Detonation: Confirmed hits trigger a ${ARMAMENT_TUNING.weapons.cinderflare.aoeRadiusPx}px Fire AoE blast (${Math.round(ARMAMENT_TUNING.weapons.cinderflare.aoeDamageRatio * 100)}% dmg)`,
@@ -659,9 +899,9 @@ var WEAPON_CATALOG = [
     slot: "weapon",
     heroClass: "arcanist",
     name: "Chronostar Scepter & Twin Orbs",
-    rarity: "Ascendant",
+    rarity: "Forged",
     archetype: "Seeking Temporal Star-Orb Scepter",
-    summary: "Celestial astrolabe scepter launching homing Star-Orbs that curve mid-flight and siphon spell cooldowns.",
+    summary: "Celestial astrolabe scepter launching homing Star-Orbs that siphon spell cooldowns while retaining Astral Nova and Scroll spells.",
     effectLines: [
       `Seeking Star-Orb: Curves toward foes within ${ARMAMENT_TUNING.weapons.chronostar.seekingRadiusPx}px (+8% dmg, +8% cadence)`,
       `Temporal Siphon: Confirmed orb hits trim -${ARMAMENT_TUNING.weapons.chronostar.tacticalSiphonMs}ms Tactical & -${ARMAMENT_TUNING.weapons.chronostar.ultSiphonMs}ms Ultimate CD once per orb`,
@@ -691,12 +931,12 @@ var WEAPON_CATALOG = [
     slot: "weapon",
     heroClass: "cleric",
     name: HERO_CLASSES.cleric.weapon,
-    rarity: "Standard",
+    rarity: "Forged",
     archetype: "Consecrated Sanctuary Mace",
-    summary: "Flanged sun-gold mace paired with a consecrated reliquary of undead-banishing judgment.",
+    summary: "Flanged sun-gold mace paired with a consecrated reliquary of undead-banishing judgment; retains Sanctified Pulse.",
     effectLines: [
       "+20% Smite damage vs Undead, Cultists & Bosses",
-      "+4% Critical Strike Chance",
+      "+4% Critical Strike Chance (retains Sanctified Pulse)",
       "Sanctuary Judgment: Pure radiant Smite attacks without Shield mechanics"
     ],
     unlockHint: "Starter Cleric armament",
@@ -719,9 +959,9 @@ var WEAPON_CATALOG = [
     name: "Solaris War-Censer & Thurible",
     rarity: "Forged",
     archetype: "Mending Incense Focus",
-    summary: "Swinging emerald-gold war-censer whose confirmed hits mend the lowest-HP nearby injured ally.",
+    summary: "Swinging emerald-gold war-censer whose confirmed hits mend the lowest-HP nearby injured ally while retaining Sanctified Pulse.",
     effectLines: [
-      "+16% Healing Power, +6% Divine Damage & +1 Radiant Bolt Pierce",
+      "+16% Healing Power, +6% Divine Damage & +1 Radiant Bolt Pierce (retains Sanctified Pulse)",
       `Incense Mending: Confirmed hits heal lowest-HP injured ally within ${ARMAMENT_TUNING.weapons.solaris.healRangePx}px (+${ARMAMENT_TUNING.weapons.solaris.allyHealBase} scaled HP, ${ARMAMENT_TUNING.weapons.solaris.procCooldownMs}ms CD)`,
       "30% chance on primary hit to Chill targets (2.5s)"
     ],
@@ -766,10 +1006,161 @@ var WEAPON_CATALOG = [
       critChanceBonus: 0.05,
       healingBonusPct: 0.1,
       undeadBossBonusPct: 0.15,
-      seraphimTacticalBurst: true
+      seraphimTacticalBurst: true,
+      tacticalId: "seraphic_judgment"
     }
   }
 ];
+var WEAPON_TACTICALS = {
+  bastion_counter: {
+    id: "bastion_counter",
+    weaponTacticalId: "bastion_counter",
+    name: "Bastion Counter",
+    shortTitle: "Bastion Counter",
+    description: `Brace defensively for ${(ARMAMENT_TUNING.weapons.sunforged.bastionBraceMs / 1e3).toFixed(1)}s (-${Math.round(ARMAMENT_TUNING.weapons.sunforged.bastionDamageReduction * 100)}% incoming dmg), then retaliate with a ${ARMAMENT_TUNING.weapons.sunforged.bastionCleaveRadiusPx}px golden cleave (+${Math.round(ARMAMENT_TUNING.weapons.sunforged.bastionBlockedBonusPerHitRatio * 100)}% dmg per blocked hit).`,
+    cooldownMs: ARMAMENT_TUNING.weapons.sunforged.bastionCooldownMs,
+    accentColor: "#FBBF24",
+    secondaryColor: "#FEF08A",
+    damageCategory: "physical"
+  },
+  crimson_frenzy: {
+    id: "crimson_frenzy",
+    weaponTacticalId: "crimson_frenzy",
+    name: "Crimson Frenzy",
+    shortTitle: "Crimson Frenzy",
+    description: `Unleash bloodlust for ${(ARMAMENT_TUNING.weapons.crimson.frenzyDurationMs / 1e3).toFixed(1)}s: +${Math.round(ARMAMENT_TUNING.weapons.crimson.frenzyDamageBonusPct * 100)}% Damage, +${Math.round(ARMAMENT_TUNING.weapons.crimson.frenzyLifestealPct * 100)}% Lifesteal, +${Math.round(ARMAMENT_TUNING.weapons.crimson.frenzyAttackSpeedBonusPct * 100)}% Attack Speed, and a fading +${Math.round(ARMAMENT_TUNING.weapons.crimson.frenzyMoveSpeedBonusPct * 100)}% Movement Speed buff. Shield gain remains permanently locked.`,
+    cooldownMs: ARMAMENT_TUNING.weapons.crimson.frenzyCooldownMs,
+    accentColor: "#EF4444",
+    secondaryColor: "#FCA5A5",
+    damageCategory: "physical"
+  },
+  cyclone_break: {
+    id: "cyclone_break",
+    weaponTacticalId: "cyclone_break",
+    name: "Cyclone Break",
+    shortTitle: "Cyclone Break",
+    description: `Fire a large Cyclone Greatarrow straight ahead that drags struck foes forward before erupting into a ${ARMAMENT_TUNING.weapons.galewind.cycloneRadiusPx}px whirlwind (${(ARMAMENT_TUNING.weapons.galewind.cycloneDurationMs / 1e3).toFixed(1)}s), violently pulling enemies inward and detonating Galeburst marks.`,
+    cooldownMs: ARMAMENT_TUNING.weapons.galewind.cycloneCooldownMs,
+    accentColor: "#38BDF8",
+    secondaryColor: "#6EE7B7",
+    damageCategory: "physical"
+  },
+  black_sun: {
+    id: "black_sun",
+    weaponTacticalId: "black_sun",
+    name: "Black Sun",
+    shortTitle: "Black Sun",
+    description: `Create a ${ARMAMENT_TUNING.weapons.eclipse.blackSunRadiusPx}px eclipse zone for ${(ARMAMENT_TUNING.weapons.eclipse.blackSunZoneDurationMs / 1e3).toFixed(1)}s pulsing Arcane damage before a celestial arrow strikes and detonates.`,
+    cooldownMs: ARMAMENT_TUNING.weapons.eclipse.blackSunCooldownMs,
+    accentColor: "#A855F7",
+    secondaryColor: "#FBBF24",
+    damageCategory: "arcane"
+  },
+  seraphic_judgment: {
+    id: "seraphic_judgment",
+    weaponTacticalId: "seraphic_judgment",
+    name: "Seraphic Judgment",
+    shortTitle: "Seraphic Judgment",
+    description: `Targeted ${ARMAMENT_TUNING.weapons.seraphim.tacticalRadiusPx}px AoE Holy Burst dealing immediate Faith-scaled Divine damage (no healing).`,
+    cooldownMs: ARMAMENT_TUNING.weapons.seraphim.tacticalCooldownMs,
+    accentColor: "#FDE047",
+    secondaryColor: "#F59E0B",
+    damageCategory: "divine"
+  }
+};
+var CLASS_DEFAULT_TACTICAL_BY_CLASS = {
+  vanguard: {
+    id: "bulwark_dash",
+    name: HERO_CLASSES.vanguard.tacticalName,
+    shortTitle: "Bulwark Dash",
+    description: HERO_CLASSES.vanguard.tacticalDesc,
+    cooldownMs: HERO_CLASSES.vanguard.tacticalCooldownMs,
+    accentColor: "#F59E0B",
+    secondaryColor: "#93C5FD",
+    source: "class",
+    damageCategory: "physical"
+  },
+  ranger: {
+    id: "frost_volley",
+    name: HERO_CLASSES.ranger.tacticalName,
+    shortTitle: "Frost Volley",
+    description: HERO_CLASSES.ranger.tacticalDesc,
+    cooldownMs: HERO_CLASSES.ranger.tacticalCooldownMs,
+    accentColor: "#38BDF8",
+    secondaryColor: "#BAE6FD",
+    source: "class",
+    damageCategory: "frost"
+  },
+  arcanist: {
+    id: "astral_nova",
+    name: HERO_CLASSES.arcanist.tacticalName,
+    shortTitle: "Astral Nova",
+    description: HERO_CLASSES.arcanist.tacticalDesc,
+    cooldownMs: HERO_CLASSES.arcanist.tacticalCooldownMs,
+    accentColor: "#818CF8",
+    secondaryColor: "#38BDF8",
+    source: "class",
+    damageCategory: "arcane"
+  },
+  cleric: {
+    id: "sanctified_pulse",
+    name: HERO_CLASSES.cleric.tacticalName,
+    shortTitle: "Sanctified Pulse",
+    description: HERO_CLASSES.cleric.tacticalDesc,
+    cooldownMs: HERO_CLASSES.cleric.tacticalCooldownMs,
+    accentColor: "#34D399",
+    secondaryColor: "#FACC15",
+    source: "class",
+    damageCategory: "divine"
+  }
+};
+function resolveActiveTacticalDef(heroClass, equippedWeaponId, equippedScrollId) {
+  if (heroClass === "arcanist" && equippedScrollId) {
+    const scroll = getArcanistScrollDef(equippedScrollId);
+    if (scroll) {
+      return {
+        id: scroll.id,
+        scrollId: scroll.id,
+        name: scroll.scrollName,
+        shortTitle: scroll.tacticalTitle,
+        description: scroll.summary,
+        cooldownMs: scroll.cooldownMs,
+        accentColor: scroll.accentColor,
+        secondaryColor: "#E9D5FF",
+        source: "scroll",
+        damageCategory: scroll.damageCategory
+      };
+    }
+  }
+  const equippedWeapon = resolveEquippedWeaponForClass(heroClass, equippedWeaponId);
+  const tacticalId = equippedWeapon?.modifiers.tacticalId ?? (equippedWeapon?.modifiers.seraphimTacticalBurst ? "seraphic_judgment" : void 0);
+  if (equippedWeapon && tacticalId && WEAPON_TACTICALS[tacticalId]) {
+    const def = WEAPON_TACTICALS[tacticalId];
+    return {
+      ...def,
+      source: "weapon",
+      weaponId: equippedWeapon.id,
+      weaponName: equippedWeapon.name
+    };
+  }
+  return {
+    ...CLASS_DEFAULT_TACTICAL_BY_CLASS[heroClass],
+    weaponId: equippedWeapon?.id ?? null,
+    weaponName: equippedWeapon?.name ?? null
+  };
+}
+function getWeaponTacticalDef(weapon) {
+  const def = typeof weapon === "string" ? getWeaponDef(weapon) : weapon;
+  if (!def) return null;
+  const tacticalId = def.modifiers.tacticalId ?? (def.modifiers.seraphimTacticalBurst ? "seraphic_judgment" : void 0);
+  if (!tacticalId || !WEAPON_TACTICALS[tacticalId]) return null;
+  return {
+    ...WEAPON_TACTICALS[tacticalId],
+    source: "weapon",
+    weaponId: def.id,
+    weaponName: def.name
+  };
+}
 var VESTMENT_CATALOG = [
   // ================= VANGUARD VESTMENTS =================
   {
@@ -1300,6 +1691,10 @@ function pickNextUnlockableArmamentForClass(heroClass, ownedWeapons, ownedVestme
   const pool = floor < 3 && forgedPool.length > 0 ? forgedPool : unowned;
   return pool[Math.floor(Math.random() * pool.length)] ?? unowned[0];
 }
+var PRIMARY_COMBO_RESET_WINDOW_MS = 1400;
+function getWeaponComboStepCount(_heroClass, _equippedWeapon) {
+  return 3;
+}
 
 // src/shared/playerMovement.ts
 var propGateCache = /* @__PURE__ */ new WeakMap();
@@ -1436,6 +1831,11 @@ function computePlayerMoveSpeed(player) {
   }
   if (player.relics.includes("zephyr_greaves")) moveSpeed *= 1.15;
   if ((player.hasteMs || 0) > 0) moveSpeed *= 1.22;
+  if ((player.crimsonFrenzyMs || 0) > 0) {
+    const maxMs = player.crimsonFrenzyMaxMs || ARMAMENT_TUNING.weapons.crimson.frenzyDurationMs;
+    const ratio = Math.max(0, Math.min(1, player.crimsonFrenzyMs / maxMs));
+    moveSpeed *= 1 + ARMAMENT_TUNING.weapons.crimson.frenzyMoveSpeedBonusPct * ratio;
+  }
   if (player.floorBlessings && player.floorBlessings.length > 0) {
     let swiftStacks = 0;
     for (let i = 0; i < player.floorBlessings.length; i++) {
@@ -1671,23 +2071,71 @@ var ARCANIST_SCROLL_TARGET_SPECS = {
     secondaryColor: "#BFDBFE"
   }
 };
+var WEAPON_TACTICAL_TARGET_SPECS = {
+  bastion_counter: {
+    action: "tactical",
+    label: "Bastion Counter",
+    kind: "cone",
+    range: ARMAMENT_TUNING.weapons.sunforged.bastionCleaveRadiusPx,
+    aoeRadius: ARMAMENT_TUNING.weapons.sunforged.bastionCleaveRadiusPx,
+    coneHalfAngleRad: ARMAMENT_TUNING.weapons.sunforged.bastionCleaveHalfAngleRad,
+    defaultDist: ARMAMENT_TUNING.weapons.sunforged.bastionCleaveRadiusPx,
+    accentColor: "#FBBF24",
+    secondaryColor: "#FEF08A"
+  },
+  crimson_frenzy: {
+    action: "tactical",
+    label: "Crimson Frenzy",
+    kind: "self_aoe",
+    range: 0,
+    aoeRadius: 56,
+    defaultDist: 0,
+    accentColor: "#EF4444",
+    secondaryColor: "#FCA5A5"
+  },
+  cyclone_break: {
+    action: "tactical",
+    label: "Cyclone Break",
+    kind: "line",
+    range: ARMAMENT_TUNING.weapons.galewind.cycloneArrowRangePx,
+    aoeRadius: ARMAMENT_TUNING.weapons.galewind.cycloneRadiusPx,
+    lineWidth: 34,
+    defaultDist: ARMAMENT_TUNING.weapons.galewind.cycloneArrowRangePx,
+    accentColor: "#38BDF8",
+    secondaryColor: "#6EE7B7"
+  },
+  black_sun: {
+    action: "tactical",
+    label: "Black Sun",
+    kind: "ground_aoe",
+    range: ARMAMENT_TUNING.weapons.eclipse.blackSunRangePx,
+    aoeRadius: ARMAMENT_TUNING.weapons.eclipse.blackSunRadiusPx,
+    defaultDist: 155,
+    accentColor: "#A855F7",
+    secondaryColor: "#FBBF24"
+  },
+  seraphic_judgment: {
+    action: "tactical",
+    label: "Seraphic Judgment",
+    kind: "ground_aoe",
+    range: ARMAMENT_TUNING.weapons.seraphim.tacticalRangePx,
+    aoeRadius: ARMAMENT_TUNING.weapons.seraphim.tacticalRadiusPx,
+    defaultDist: 120,
+    accentColor: "#FDE047",
+    secondaryColor: "#F59E0B"
+  }
+};
 function getAbilityTargetSpec(heroClass, action, equippedScrollId, equippedWeaponId) {
   if (action === "dash") return DASH_TARGET_SPEC;
-  if (heroClass === "arcanist" && action === "tactical" && equippedScrollId) {
-    const scrollSpec = ARCANIST_SCROLL_TARGET_SPECS[equippedScrollId];
-    if (scrollSpec) return scrollSpec;
-  }
-  if (heroClass === "cleric" && action === "tactical" && equippedWeaponId === "cleric_seraphim_crozier") {
-    return {
-      action: "tactical",
-      label: "Seraphic Judgment",
-      kind: "ground_aoe",
-      range: 210,
-      aoeRadius: 110,
-      defaultDist: 120,
-      accentColor: "#FDE047",
-      secondaryColor: "#F59E0B"
-    };
+  if (action === "tactical") {
+    const active = resolveActiveTacticalDef(heroClass, equippedWeaponId, equippedScrollId);
+    if (active.source === "scroll" && active.scrollId) {
+      const scrollSpec = ARCANIST_SCROLL_TARGET_SPECS[active.scrollId];
+      if (scrollSpec) return scrollSpec;
+    }
+    if (active.source === "weapon" && active.weaponTacticalId) {
+      return WEAPON_TACTICAL_TARGET_SPECS[active.weaponTacticalId];
+    }
   }
   return CLASS_ABILITY_SPECS[heroClass][action];
 }
@@ -2872,205 +3320,6 @@ function generateTavernFloor() {
   };
 }
 
-// src/shared/arcanist.ts
-var STAR_RIFT_REQUIRED_ATTACKS = 4;
-var STAR_RIFT_PROC_COOLDOWN_MS = 8e3;
-var ARCANIST_SPELL_ORDER = [
-  "fireball",
-  "disintegration",
-  "frost_lance",
-  "chain_lightning",
-  "arcane_meteor",
-  "arcane_orb",
-  "arcane_barrage"
-];
-var ARCANIST_SPELLS = {
-  fireball: {
-    id: "fireball",
-    name: "Fireball",
-    scrollName: "Scroll of Fireball",
-    tacticalTitle: "Fireball",
-    role: "Burst / Burning AoE",
-    baseDamage: 42,
-    intCoeff: 0.015,
-    cooldownMs: 6e3,
-    castTimeMs: 350,
-    explosionRadius: 105,
-    burnRadius: 88,
-    burnTickRatio: 0.22,
-    durationMs: 3500,
-    hitIntervalMs: 500,
-    maxRange: 360,
-    projectileSpeed: 380,
-    damageCategory: "fire",
-    accentColor: "#F97316",
-    summary: "Replaces Astral Nova [Q]. 0.35s cast; hurls a large fireball that explodes on hit (105u AoE) and leaves a 3.5s burning ground zone.",
-    chronoInteraction: "Fireball projectile and lingering burn zone freeze inside ANY Chrono Well (including caster zones) until time resumes."
-  },
-  disintegration: {
-    id: "disintegration",
-    name: "Disintegration",
-    scrollName: "Scroll of Disintegration",
-    tacticalTitle: "Disintegration",
-    role: "Sustained Beam",
-    baseDamage: 10,
-    intCoeff: 0.012,
-    cooldownMs: 12e3,
-    castTimeMs: 0,
-    tickIntervalMs: 200,
-    beamWidth: 42,
-    maxRange: 450,
-    activationMs: 150,
-    maxRotationRadPerSec: Math.PI,
-    // 180 deg/s
-    isChannel: true,
-    damageCategory: "arcane",
-    accentColor: "#A855F7",
-    summary: "Replaces Astral Nova [Q]. Hold [Q / RMB] to channel a 450u violet beam (5 ticks/s, stationary, 180\xB0/s turn cap; 12s CD starts on end).",
-    chronoInteraction: "Interrupted if caster is suspended by another Chrono Well; own Chrono Well lets caster channel freely."
-  },
-  frost_lance: {
-    id: "frost_lance",
-    name: "Frost Lance",
-    scrollName: "Scroll of Frost Lance (Ice Lance)",
-    tacticalTitle: "Frost Lance",
-    role: "Precision / Piercing",
-    baseDamage: 36,
-    intCoeff: 0.018,
-    cooldownMs: 4500,
-    castTimeMs: 200,
-    pierce: 3,
-    maxRange: 420,
-    projectileSpeed: 480,
-    damageCategory: "frost",
-    accentColor: "#38BDF8",
-    summary: "Replaces Astral Nova [Q]. 0.2s cast; fires a straight crystalline ice lance piercing up to 3 enemies (no homing/freeze).",
-    chronoInteraction: "Ice lance projectile suspends mid-air inside ANY Chrono Well until the field ends."
-  },
-  chain_lightning: {
-    id: "chain_lightning",
-    name: "Chain Lightning",
-    scrollName: "Scroll of Chain Lightning",
-    tacticalTitle: "Chain Lightning",
-    role: "Cone Discharge",
-    baseDamage: 32,
-    intCoeff: 0.015,
-    cooldownMs: 7e3,
-    castTimeMs: 0,
-    maxRange: 340,
-    coneHalfAngleRad: 0.56,
-    // ~±32 deg (64 deg total cone)
-    damageCategory: "lightning",
-    accentColor: "#FACC15",
-    summary: "Replaces Astral Nova [Q]. Unleashes a 340u cone-shaped lightning blast (64\xB0 arc) shocking all foes inside.",
-    chronoInteraction: "Instant lightning cone hits suspended foes inside Chrono Well; blocked while caster is Chrono-suspended."
-  },
-  arcane_meteor: {
-    id: "arcane_meteor",
-    name: "Arcane Meteor",
-    scrollName: "Scroll of Arcane Meteor",
-    tacticalTitle: "Arcane Meteor",
-    role: "Heavy AoE Burst",
-    baseDamage: 75,
-    intCoeff: 0.0195,
-    cooldownMs: 11e3,
-    castTimeMs: 500,
-    impactDelayMs: 1e3,
-    explosionRadius: 125,
-    maxRange: 280,
-    damageCategory: "arcane",
-    accentColor: "#E879F9",
-    summary: "Replaces Astral Nova [Q]. 0.5s cast + 1.0s warning delay; drops an arcane meteor for heavy 125u AoE damage (no burn).",
-    chronoInteraction: "Marked meteor impact timer freezes while covered by ANY Chrono Well and detonates once time resumes."
-  },
-  arcane_orb: {
-    id: "arcane_orb",
-    name: "Arcane Orb",
-    scrollName: "Scroll of Arcane Orb",
-    tacticalTitle: "Arcane Orb",
-    role: "Persistent Pressure",
-    baseDamage: 12,
-    intCoeff: 0.0105,
-    cooldownMs: 9e3,
-    castTimeMs: 0,
-    durationMs: 4e3,
-    hitIntervalMs: 500,
-    maxHitsPerEnemy: 2,
-    projectileSpeed: 115,
-    damageCategory: "arcane",
-    accentColor: "#818CF8",
-    summary: "Replaces Astral Nova [Q]. 4s slow sphere damaging enemies every 0.5s (max 2 hits/enemy) without vanishing on hit.",
-    chronoInteraction: "Orb movement and lifetime freeze completely inside ANY Chrono Well without losing hit cooldown timing."
-  },
-  arcane_barrage: {
-    id: "arcane_barrage",
-    name: "Arcane Barrage",
-    scrollName: "Scroll of Arcane Barrage",
-    tacticalTitle: "Arcane Barrage",
-    role: "Multi-Wave Barrage",
-    baseDamage: 12,
-    intCoeff: 675e-5,
-    cooldownMs: 8e3,
-    castTimeMs: 0,
-    projectileCount: 8,
-    barrageWaves: 4,
-    barrageWaveIntervalMs: 95,
-    projectileSpeed: 420,
-    maxRange: 450,
-    damageCategory: "arcane",
-    accentColor: "#60A5FA",
-    summary: "Replaces Astral Nova [Q]. Launches a 4-wave rapid arcane barrage (8 bolts) that streams forward and strikes targets 3-4+ times.",
-    chronoInteraction: "Barrage projectiles suspend inside ANY Chrono Well (including the caster\u2019s own) and burst forward together on resume."
-  }
-};
-var ARCANIST_SCROLLS = ARCANIST_SPELL_ORDER.map(
-  (id) => ARCANIST_SPELLS[id]
-);
-function getArcanistScrollDef(scrollId) {
-  if (!scrollId) return null;
-  return ARCANIST_SPELLS[scrollId] || null;
-}
-function computeArcanistSpellDamage(baseDamage, params, intCoeff) {
-  const level = Math.max(1, Math.min(MAX_LEVEL, params.level || 1));
-  const intStat = Math.max(0, params.intelligence || 0);
-  const levelMult = 1 + 0.025 * (level - 1);
-  const intMult = 1 + intCoeff * intStat;
-  let total = baseDamage * levelMult * intMult;
-  if (params.relics?.includes("sunfire_signet")) {
-    total *= 1.12;
-  }
-  const fury = Math.max(0, params.furyStacks || 0);
-  if (fury > 0) {
-    total *= 1 + fury * 0.06;
-  }
-  return Math.max(1, Math.round(total));
-}
-function normalizeAngle(angle) {
-  let a = angle;
-  while (a > Math.PI) a -= Math.PI * 2;
-  while (a < -Math.PI) a += Math.PI * 2;
-  return a;
-}
-function rotateAngleToward(currentAngle, targetAngle, maxDeltaRad) {
-  const diff = normalizeAngle(targetAngle - currentAngle);
-  if (Math.abs(diff) <= maxDeltaRad) {
-    return normalizeAngle(targetAngle);
-  }
-  return normalizeAngle(currentAngle + Math.sign(diff) * maxDeltaRad);
-}
-function distancePointToSegment(px, py, ax, ay, bx, by) {
-  const abx = bx - ax;
-  const aby = by - ay;
-  const lenSq = abx * abx + aby * aby;
-  if (lenSq <= 1e-6) {
-    return Math.hypot(px - ax, py - ay);
-  }
-  const t = Math.max(0, Math.min(1, ((px - ax) * abx + (py - ay) * aby) / lenSq));
-  const closestX = ax + t * abx;
-  const closestY = ay + t * aby;
-  return Math.hypot(px - closestX, py - closestY);
-}
-
 // src/shared/combatMechanics.ts
 function computeEclipseChargeProfile(holdDurationMs) {
   const cfg = ARMAMENT_TUNING.weapons.eclipse;
@@ -3120,7 +3369,7 @@ function resolveEnemyResistance(res, category) {
       rawRes = res.physical ?? 0;
       break;
   }
-  return Math.min(0.75, Math.max(-0.5, rawRes));
+  return Number(Math.min(0.75, Math.max(-0.5, rawRes)).toFixed(6));
 }
 function computePlayerMaxHp(heroClass, level, vitality, relics = [], equippedVestment) {
   const def = HERO_CLASSES[heroClass];
@@ -3156,11 +3405,22 @@ function computePlayerHealingAmount(baseHealing, healer, target) {
   }
   return Math.max(1, Math.round(healing));
 }
+function isShieldGainLocked(p) {
+  if (!p) return false;
+  return Boolean(
+    resolveEquippedWeaponForClass(p.heroClass, p.equippedWeapon)?.modifiers.shieldGainLocked
+  );
+}
+function isCrimsonFrenzyActive(p) {
+  if (!p || !(p.crimsonFrenzyMs && p.crimsonFrenzyMs > 0)) return false;
+  return resolveEquippedWeaponForClass(p.heroClass, p.equippedWeapon)?.modifiers.tacticalId === "crimson_frenzy";
+}
 function computePlayerMaxShieldCap(p) {
   const vestmentBonus = p.heroClass === "vanguard" ? resolveEquippedVestmentForClass(p.heroClass, p.equippedVestment)?.modifiers.maxShieldBonus || 0 : 0;
   return 60 + countFloorBlessingStacks(p.floorBlessings, "bastion") * 15 + vestmentBonus;
 }
 function computePlayerStartingShield(p) {
+  if (isShieldGainLocked(p)) return 0;
   const startShieldBonus = p.heroClass === "vanguard" ? resolveEquippedVestmentForClass(p.heroClass, p.equippedVestment)?.modifiers.startingShieldBonus || 0 : 0;
   return Math.min(computePlayerMaxShieldCap(p), 15 + startShieldBonus);
 }
@@ -3184,7 +3444,8 @@ function computePlayerAttackSpeedMult(p, weaponDefOverride) {
   const weaponAttackSpeedMult = wDef?.modifiers.attackSpeedMult ?? 1;
   const vestmentAttackSpeedBonus = resolveEquippedVestmentForClass(p.heroClass, p.equippedVestment)?.modifiers.attackSpeedBonus || 0;
   const momentumBonus = resolveActiveVestmentPassive(p.heroClass, p.equippedVestment) === "momentum" && (p.rangerMomentum || 0) > 0 ? Math.min(ARMAMENT_TUNING.passives.momentum.cap, p.rangerMomentum || 0) / ARMAMENT_TUNING.passives.momentum.cap * ARMAMENT_TUNING.passives.momentum.maxAttackSpeedBonusPct : 0;
-  return dexSpeedMult * weaponAttackSpeedMult * (1 + vestmentAttackSpeedBonus + momentumBonus);
+  const crimsonFrenzyBonus = isCrimsonFrenzyActive(p) ? ARMAMENT_TUNING.weapons.crimson.frenzyAttackSpeedBonusPct : 0;
+  return dexSpeedMult * weaponAttackSpeedMult * (1 + vestmentAttackSpeedBonus + momentumBonus + crimsonFrenzyBonus);
 }
 function computePlayerAttackCooldownMs(p, weaponDefOverride) {
   const baseAttackCooldownMs = HERO_CLASSES[p.heroClass]?.attackCooldownMs || 400;
@@ -3309,6 +3570,9 @@ function computePlayerDamageMultiplier(p, category = "physical", options) {
   if (options?.activeStarRift && weaponMods?.activeRiftBonusPct) {
     mult *= 1 + weaponMods.activeRiftBonusPct;
   }
+  if (isCrimsonFrenzyActive(p)) {
+    mult *= 1 + ARMAMENT_TUNING.weapons.crimson.frenzyDamageBonusPct;
+  }
   return mult;
 }
 function computePlayerDotMultiplier(p, options) {
@@ -3362,12 +3626,15 @@ var GameRoom = class _GameRoom {
     this.statusDotAccumMs = 0;
     this.clericAuraAccumMs = 0;
     this.floorMasteryAwarded = false;
+    this.runEndRecorded = false;
     this.entityStatusTextCooldowns = /* @__PURE__ */ new Map();
     this.primaryAttackProjIds = /* @__PURE__ */ new Set();
     this.tacticalProjIds = /* @__PURE__ */ new Set();
     this.voidCreditedProjIds = /* @__PURE__ */ new Set();
     this.temporalCreditedProjIds = /* @__PURE__ */ new Set();
     this.triggeredOnceProjIds = /* @__PURE__ */ new Set();
+    this.weaponZoneTickAccum = /* @__PURE__ */ new Map();
+    this.cycloneArrowStates = /* @__PURE__ */ new Map();
     this.recentStatusEvents = /* @__PURE__ */ new Map();
     this.roomId = opts.roomId;
     this.name = opts.name;
@@ -3432,6 +3699,41 @@ var GameRoom = class _GameRoom {
     }
     enemy.galeburstMarks = maxStacks;
   }
+  clearPlayerTacticalState(pr, opts) {
+    const p = pr.state;
+    p.bastionCounterMs = 0;
+    p.bastionCounterMaxMs = 0;
+    pr.bastionBlockedHits = 0;
+    pr.bastionAimAngle = p.aimAngle || 0;
+    p.crimsonFrenzyMs = 0;
+    p.crimsonFrenzyMaxMs = 0;
+    if (opts?.removeOwnedZones) {
+      for (let i = this.zones.length - 1; i >= 0; i--) {
+        const z = this.zones[i];
+        if (z.ownerId === p.id && (z.kind === "cyclone_break" || z.kind === "black_sun_zone" || z.kind === "bastion_counter_cleave" || z.kind === "bulwark_dash_shockwave" || z.kind === "frost_volley_cone" || z.kind === "sanctified_pulse_wave")) {
+          this.weaponZoneTickAccum.delete(z.id);
+          this.zones.splice(i, 1);
+        }
+      }
+      for (let i = this.projectiles.length - 1; i >= 0; i--) {
+        const proj = this.projectiles[i];
+        if (proj.ownerId === p.id && proj.style === "cyclone_arrow") {
+          this.cleanupProjectileTracking(proj.id);
+          this.projectiles.splice(i, 1);
+        }
+      }
+    }
+  }
+  syncPlayerTacticalCooldownOnEquipmentChange(p) {
+    const cdrMult = this.getPlayerCdrMult(p);
+    const activeTac = resolveActiveTacticalDef(
+      p.heroClass,
+      p.equippedWeapon,
+      p.equippedScrollId
+    );
+    p.maxSkillCooldownMs = Math.round(activeTac.cooldownMs * cdrMult);
+    p.skillCooldownMs = Math.min(p.skillCooldownMs, p.maxSkillCooldownMs);
+  }
   resetPassiveState(pr) {
     const p = pr.state;
     p.vanguardHeat = 0;
@@ -3449,6 +3751,7 @@ var GameRoom = class _GameRoom {
     pr.solarisLastHealAtMs = 0;
     this.clearEclipseCharge(pr);
     this.clearGaleburstForPlayer(p.id);
+    this.clearPlayerTacticalState(pr, { removeOwnedZones: true });
     this.syncPassiveMetadata(pr);
   }
   getPlayerCritChance(p, weaponMods) {
@@ -3511,6 +3814,46 @@ var GameRoom = class _GameRoom {
     this.voidCreditedProjIds.delete(projId);
     this.temporalCreditedProjIds.delete(projId);
     this.triggeredOnceProjIds.delete(projId);
+    this.cycloneArrowStates.delete(projId);
+  }
+  getActiveSingularityAt(x, y, extraRadius = 0) {
+    let best = null;
+    let bestDist = Infinity;
+    for (let i = 0; i < this.zones.length; i++) {
+      const z = this.zones[i];
+      if (z.kind !== "singularity" || z.ttlMs <= 0) continue;
+      const d = Math.hypot(x - z.x, y - z.y);
+      if (d <= z.radius + extraRadius && d < bestDist) {
+        best = z;
+        bestDist = d;
+      }
+    }
+    return best;
+  }
+  spawnCycloneBreakWhirlwind(ownerId, x, y) {
+    const ownerPr = this.players.get(ownerId);
+    const ownerState = ownerPr?.state ?? null;
+    if (!ownerState || resolveActiveTacticalDef(
+      ownerState.heroClass,
+      ownerState.equippedWeapon,
+      ownerState.equippedScrollId
+    ).id !== "cyclone_break") {
+      return;
+    }
+    const gwCfg = ARMAMENT_TUNING.weapons.galewind;
+    const zoneId = this.nextId("zone");
+    this.zones.push({
+      id: zoneId,
+      kind: "cyclone_break",
+      x,
+      y,
+      radius: gwCfg.cycloneRadiusPx,
+      ttlMs: gwCfg.cycloneDurationMs,
+      maxTtlMs: gwCfg.cycloneDurationMs,
+      ownerId
+    });
+    this.weaponZoneTickAccum.set(zoneId, gwCfg.cycloneTickIntervalMs);
+    this.emitEvent("status", x, y - 24, "CYCLONE BREAK!", "#38BDF8");
   }
   applyEffectiveHealing(healer, target, preComputedAmount, source) {
     if (!target || target.downed || preComputedAmount <= 0) return 0;
@@ -4079,7 +4422,7 @@ var GameRoom = class _GameRoom {
     const p = this.players.get(playerId)?.state;
     if (!p) return;
     p.hp = p.maxHp;
-    p.shield = Math.max(p.shield, 50);
+    this.grantShield(p, 50, "floor_to");
     this.emitEvent("heal", p.x, p.y - 18, "ADMIN HEAL", "#34D399");
     this.pushSystemChat(`[ADMIN] Fully restored health & shield for ${p.username}.`);
   }
@@ -4142,7 +4485,7 @@ var GameRoom = class _GameRoom {
   }
   resetPlayersForNewRun() {
     for (const pr of this.players.values()) {
-      pr.state.shield = 15;
+      pr.state.shield = 0;
       pr.state.gold = 0;
       pr.state.potions = 2;
       pr.state.relics = [];
@@ -4152,15 +4495,17 @@ var GameRoom = class _GameRoom {
       pr.state.downed = false;
       pr.state.downedTimerMs = 0;
       pr.state.reviveProgress = 0;
+      pr.state.skillCooldownMs = 0;
+      pr.state.ultCooldownMs = 0;
+      pr.state.dashCooldownMs = 0;
       pr.state.kills = 0;
       pr.state.damageDealt = 0;
       pr.state.revives = 0;
       pr.state.readyNextFloor = false;
       pr.state.ready = false;
-      pr.state.skillCooldownMs = 0;
-      pr.state.ultCooldownMs = 0;
-      pr.state.dashCooldownMs = 0;
       pr.state.attackAnimMs = 0;
+      pr.state.attackComboStep = 0;
+      pr.lastPrimaryAttackAtMs = -99999;
       pr.state.hasteMs = 0;
       pr.state.slowedMs = 0;
       pr.state.stunnedMs = 0;
@@ -4179,6 +4524,7 @@ var GameRoom = class _GameRoom {
       pr.state.chronoSuspendedMs = 0;
       pr.pendingBarrage = null;
       this.resetPassiveState(pr);
+      this.syncPlayerTacticalCooldownOnEquipmentChange(pr.state);
       pr.input = {
         up: false,
         down: false,
@@ -4203,6 +4549,7 @@ var GameRoom = class _GameRoom {
     this.status = "playing";
     this.startedAt = Date.now();
     this.endedAt = null;
+    this.runEndRecorded = false;
     this.resetPlayersForNewRun();
     this.loadFloor(1, Math.max(1, this.players.size));
     this.pushSystemChat(`Host ${this.hostName} started the expedition! Entering Floor 1.`);
@@ -4245,6 +4592,7 @@ var GameRoom = class _GameRoom {
     this.status = "waiting";
     this.startedAt = Date.now();
     this.endedAt = null;
+    this.runEndRecorded = false;
     let idx = 0;
     for (const pr of this.players.values()) {
       const offsetAngle = idx * Math.PI / 2;
@@ -4263,6 +4611,7 @@ var GameRoom = class _GameRoom {
     this.status = "playing";
     this.startedAt = Date.now();
     this.endedAt = null;
+    this.runEndRecorded = false;
     this.resetPlayersForNewRun();
     const restartFloor = this.roomId === "TAVERN-HUB" ? 0 : 1;
     this.loadFloor(restartFloor, Math.max(1, this.players.size));
@@ -4381,6 +4730,12 @@ var GameRoom = class _GameRoom {
         existing.state.storedGrace = existing.state.storedGrace ?? 0;
         existing.state.clericSanctity = existing.state.clericSanctity ?? 0;
         existing.state.eclipseChargeRatio = 0;
+        existing.state.attackComboStep = existing.state.attackComboStep ?? 0;
+        existing.state.bastionCounterMs = existing.state.bastionCounterMs ?? 0;
+        existing.state.bastionCounterMaxMs = existing.state.bastionCounterMaxMs ?? 0;
+        existing.state.crimsonFrenzyMs = existing.state.crimsonFrenzyMs ?? 0;
+        existing.state.crimsonFrenzyMaxMs = existing.state.crimsonFrenzyMaxMs ?? 0;
+        this.syncPlayerTacticalCooldownOnEquipmentChange(existing.state);
         this.syncPassiveMetadata(existing);
       }
       if (wasDisconnected && this.roomId !== "TAVERN-HUB") {
@@ -4404,10 +4759,15 @@ var GameRoom = class _GameRoom {
     const armaments = normalizeArmamentLoadout(heroClass, savedStats);
     const initialShield = computePlayerStartingShield({
       heroClass,
+      equippedWeapon: armaments.equippedWeapon,
       equippedVestment: armaments.equippedVestment,
       floorBlessings: []
     });
-    const initialTacticalCd = heroClass === "cleric" && armaments.equippedWeapon === "cleric_seraphim_crozier" ? ARMAMENT_TUNING.weapons.seraphim.tacticalCooldownMs : def.tacticalCooldownMs;
+    const initialTacticalCd = resolveActiveTacticalDef(
+      heroClass,
+      armaments.equippedWeapon,
+      null
+    ).cooldownMs;
     const state = {
       id: playerId,
       username,
@@ -4440,6 +4800,11 @@ var GameRoom = class _GameRoom {
       storedGrace: 0,
       clericSanctity: 0,
       eclipseChargeRatio: 0,
+      attackComboStep: 0,
+      bastionCounterMs: 0,
+      bastionCounterMaxMs: 0,
+      crimsonFrenzyMs: 0,
+      crimsonFrenzyMaxMs: 0,
       downed: false,
       downedTimerMs: 0,
       reviveProgress: 0,
@@ -4521,7 +4886,10 @@ var GameRoom = class _GameRoom {
       eclipseHoldActive: false,
       eclipseHoldStartMs: 0,
       pendingEclipseReleaseMs: null,
-      dummyGaleburstStacks: /* @__PURE__ */ new Map()
+      dummyGaleburstStacks: /* @__PURE__ */ new Map(),
+      bastionBlockedHits: 0,
+      bastionAimAngle: 0,
+      lastPrimaryAttackAtMs: -99999
     });
     if (!this.hostId && this.roomId !== "TAVERN-HUB") {
       this.hostId = playerId;
@@ -4677,6 +5045,24 @@ var GameRoom = class _GameRoom {
   getMaxShieldCap(p) {
     return computePlayerMaxShieldCap(p);
   }
+  /**
+   * Centralized server-authoritative Shield grant gate.
+   * Enforces Permanent Shield Lock (e.g. Crimson War Axe) across ALL Shield-gain sources
+   * without automatically wiping pre-existing Shield.
+   */
+  grantShield(p, amount, mode = "add") {
+    if (amount <= 0 || isShieldGainLocked(p) || p.downed) return 0;
+    const cap = this.getMaxShieldCap(p);
+    const before = Math.max(0, p.shield || 0);
+    if (before >= cap) return 0;
+    const target = mode === "floor_to" ? Math.max(before, amount) : before + amount;
+    const next = Math.min(cap, target);
+    const gained = Math.max(0, next - before);
+    if (gained > 0) {
+      p.shield = next;
+    }
+    return gained;
+  }
   changeClass(playerId, heroClass) {
     const pr = this.players.get(playerId);
     if (!pr || pr.state.downed) return;
@@ -4705,7 +5091,6 @@ var GameRoom = class _GameRoom {
     );
     pr.state.hp = Math.max(1, Math.min(pr.state.maxHp, Math.round(pr.state.maxHp * hpRatio)));
     pr.state.shield = Math.min(this.getMaxShieldCap(pr.state), pr.state.shield);
-    pr.state.maxSkillCooldownMs = heroClass === "cleric" && pr.state.equippedWeapon === "cleric_seraphim_crozier" ? ARMAMENT_TUNING.weapons.seraphim.tacticalCooldownMs : def.tacticalCooldownMs;
     pr.state.maxUltCooldownMs = def.ultCooldownMs;
     pr.state.disintegrationState = null;
     pr.state.spellCastState = null;
@@ -4715,6 +5100,7 @@ var GameRoom = class _GameRoom {
     pr.state.starRiftCooldownMs = heroClass === "arcanist" ? 0 : void 0;
     pr.pendingBarrage = null;
     this.resetPassiveState(pr);
+    this.syncPlayerTacticalCooldownOnEquipmentChange(pr.state);
     this.emitEvent("status", pr.state.x, pr.state.y - 22, def.name, def.accentColor);
   }
   equipArmament(playerId, slot, itemId) {
@@ -4737,14 +5123,12 @@ var GameRoom = class _GameRoom {
     }
     if (slot === "weapon") {
       p.equippedWeapon = itemId;
+      p.attackComboStep = 0;
+      pr.lastPrimaryAttackAtMs = -99999;
       this.clearEclipseCharge(pr);
       this.clearGaleburstForPlayer(p.id);
-      if (p.heroClass === "cleric") {
-        const cdrMult = this.getPlayerCdrMult(p);
-        const baseCd = itemId === "cleric_seraphim_crozier" ? ARMAMENT_TUNING.weapons.seraphim.tacticalCooldownMs : HERO_CLASSES.cleric.tacticalCooldownMs;
-        p.maxSkillCooldownMs = Math.round(baseCd * cdrMult);
-        p.skillCooldownMs = Math.min(p.skillCooldownMs, p.maxSkillCooldownMs);
-      }
+      this.clearPlayerTacticalState(pr, { removeOwnedZones: true });
+      this.syncPlayerTacticalCooldownOnEquipmentChange(p);
     } else {
       const oldMaxHp = p.maxHp;
       p.equippedVestment = itemId;
@@ -4775,13 +5159,12 @@ var GameRoom = class _GameRoom {
       if (!p.equippedWeapon) return { ok: true };
       const prev2 = getArmamentDef("weapon", p.equippedWeapon);
       p.equippedWeapon = null;
+      p.attackComboStep = 0;
+      pr.lastPrimaryAttackAtMs = -99999;
       this.clearEclipseCharge(pr);
       this.clearGaleburstForPlayer(p.id);
-      if (p.heroClass === "cleric") {
-        const cdrMult = this.getPlayerCdrMult(p);
-        p.maxSkillCooldownMs = Math.round(HERO_CLASSES.cleric.tacticalCooldownMs * cdrMult);
-        p.skillCooldownMs = Math.min(p.skillCooldownMs, p.maxSkillCooldownMs);
-      }
+      this.clearPlayerTacticalState(pr, { removeOwnedZones: true });
+      this.syncPlayerTacticalCooldownOnEquipmentChange(p);
       this.emitEvent("status", p.x, p.y - 26, "Weapon Unequipped", "#94A3B8");
       this.pushSystemChat(`${p.username} unequipped ${prev2 ? prev2.name : "Weapon"}.`);
       return { ok: true };
@@ -4829,6 +5212,29 @@ var GameRoom = class _GameRoom {
     this.emitEvent("status", p.x, p.y - 28, `Armory + ${def.name}`, def.accent);
     this.pushSystemChat(`${p.username} obtained permanent ${slot}: ${def.name}.`);
     return { ok: true, added };
+  }
+  syncPlayerProgression(playerId, level, xp, attributePoints) {
+    const pr = this.players.get(playerId);
+    if (!pr) return;
+    const p = pr.state;
+    const clampedLevel = Math.max(1, Math.min(MAX_LEVEL, Math.floor(level) || 1));
+    p.level = clampedLevel;
+    p.xp = clampedLevel >= MAX_LEVEL ? 0 : Math.max(0, Math.floor(xp) || 0);
+    p.nextXp = _GameRoom.computeNextXp(clampedLevel);
+    p.attributePoints = Math.max(0, Math.floor(attributePoints) || 0);
+    const oldMax = p.maxHp;
+    p.maxHp = _GameRoom.computePlayerMaxHp(
+      p.heroClass,
+      p.level,
+      p.vitality,
+      p.relics,
+      p.equippedVestment
+    );
+    if (p.maxHp > oldMax) {
+      p.hp = Math.min(p.maxHp, p.hp + (p.maxHp - oldMax));
+    } else {
+      p.hp = Math.min(p.maxHp, p.hp);
+    }
   }
   addPing(playerId, label, x, y) {
     const pr = this.players.get(playerId);
@@ -5958,6 +6364,24 @@ var GameRoom = class _GameRoom {
     const isSilenced = p.statuses && p.statuses.some((s) => s.type === "silenced");
     if (action === "dash") {
       if (p.dashCooldownMs > 0 && !p.noCooldownMode) return {};
+      const trappedSingularity = this.getActiveSingularityAt(p.x, p.y, 10);
+      if (trappedSingularity) {
+        p.dashCooldownMs = p.noCooldownMode ? 0 : Math.round(1100 * cdrMult);
+        p.maxDashCooldownMs = p.dashCooldownMs;
+        const dx = trappedSingularity.x - p.x;
+        const dy = trappedSingularity.y - p.y;
+        const dist = Math.hypot(dx, dy);
+        if (dist > 8) {
+          this.moveWithCollision(
+            p,
+            dx / dist * Math.min(dist - 4, 24),
+            dy / dist * Math.min(dist - 4, 24),
+            14
+          );
+        }
+        this.emitEvent("status", p.x, p.y - 22, "GRAVITY LOCKED!", "#E879F9");
+        return {};
+      }
       p.dashCooldownMs = p.noCooldownMode ? 0 : Math.round(2600 * cdrMult);
       p.maxDashCooldownMs = p.dashCooldownMs;
       let dashAngle = p.aimAngle;
@@ -6108,7 +6532,7 @@ var GameRoom = class _GameRoom {
               } else {
                 ally.state.hp = Math.min(ally.state.maxHp, ally.state.hp + prop.value);
               }
-              ally.state.shield = Math.max(ally.state.shield, 25);
+              this.grantShield(ally.state, 25, "floor_to");
               this.emitEvent(
                 "heal",
                 ally.state.x,
@@ -6143,6 +6567,14 @@ var GameRoom = class _GameRoom {
             if (this.floor >= MAX_FLOORS_FOR_VICTORY) {
               this.status = "victory";
               this.endedAt = Date.now();
+              if (!this.runEndRecorded && this.roomId !== "TAVERN-HUB") {
+                this.runEndRecorded = true;
+                this.onRunEndedCallback?.(
+                  Array.from(this.players.keys()),
+                  "victory",
+                  this.floor
+                );
+              }
               if (this.roomId !== "TAVERN-HUB" && !this.isPlayerConnected(this.hostId)) {
                 this.transferHostToConnectedMember();
               }
@@ -6220,9 +6652,12 @@ var GameRoom = class _GameRoom {
         }
         return {};
       }
-      const isSeraphimTactical = p.heroClass === "cleric" && Boolean(resolveEquippedWeaponForClass(p.heroClass, p.equippedWeapon)?.modifiers.seraphimTacticalBurst);
-      const rawTacCooldownMs = isSeraphimTactical ? ARMAMENT_TUNING.weapons.seraphim.tacticalCooldownMs : def.tacticalCooldownMs;
-      p.skillCooldownMs = p.noCooldownMode ? 0 : Math.round(rawTacCooldownMs * cdrMult);
+      const activeTactical = resolveActiveTacticalDef(
+        p.heroClass,
+        p.equippedWeapon,
+        p.equippedScrollId
+      );
+      p.skillCooldownMs = p.noCooldownMode ? 0 : Math.round(activeTactical.cooldownMs * cdrMult);
       p.maxSkillCooldownMs = p.skillCooldownMs;
       p.attackAnimMs = 240;
       if (p.relics.includes("oathbound_censer")) {
@@ -6234,19 +6669,144 @@ var GameRoom = class _GameRoom {
           }
         }
       }
-      if (p.heroClass === "vanguard") {
+      if (activeTactical.id === "bastion_counter") {
+        const sfCfg = ARMAMENT_TUNING.weapons.sunforged;
+        const bPr = this.players.get(p.id);
+        p.bastionCounterMs = sfCfg.bastionBraceMs;
+        p.bastionCounterMaxMs = sfCfg.bastionBraceMs;
+        if (bPr) {
+          bPr.bastionBlockedHits = 0;
+          bPr.bastionAimAngle = p.aimAngle;
+        }
+        this.emitEvent("status", p.x, p.y - 26, "BASTION BRACE!", "#FBBF24");
+      } else if (activeTactical.id === "crimson_frenzy") {
+        const crCfg = ARMAMENT_TUNING.weapons.crimson;
+        p.crimsonFrenzyMs = crCfg.frenzyDurationMs;
+        p.crimsonFrenzyMaxMs = crCfg.frenzyDurationMs;
+        this.emitEvent("status", p.x, p.y - 26, "CRIMSON FRENZY!", "#EF4444");
+      } else if (activeTactical.id === "cyclone_break") {
+        const gwCfg = ARMAMENT_TUNING.weapons.galewind;
         const dmgMult = this.computeDamageMult(p, "physical");
-        const dashDist = 92;
-        this.moveWithCollision(
-          p,
-          Math.cos(p.aimAngle) * dashDist,
-          Math.sin(p.aimAngle) * dashDist,
-          12
+        const arrowDmg = Math.max(1, Math.round(gwCfg.cycloneArrowBaseDamage * dmgMult));
+        const speed = gwCfg.cycloneArrowSpeedPx;
+        const ttlMs = Math.round(gwCfg.cycloneArrowRangePx / speed * 1e3);
+        const spawned = this.spawnProjectile({
+          ownerType: "player",
+          ownerId: p.id,
+          style: "cyclone_arrow",
+          damageCategory: "physical",
+          x: p.x + Math.cos(p.aimAngle) * 16,
+          y: p.y + Math.sin(p.aimAngle) * 16,
+          vx: Math.cos(p.aimAngle) * speed,
+          vy: Math.sin(p.aimAngle) * speed,
+          angle: p.aimAngle,
+          radius: gwCfg.cycloneArrowRadiusPx,
+          damage: arrowDmg,
+          pierce: 99,
+          ttlMs,
+          weaponId: p.equippedWeapon ?? void 0
+        });
+        this.tacticalProjIds.add(spawned.id);
+        this.cycloneArrowStates.set(spawned.id, {
+          carryMsRemaining: null,
+          draggedEnemyIds: /* @__PURE__ */ new Set()
+        });
+        this.emitEvent("status", p.x, p.y - 24, "CYCLONE ARROW!", "#38BDF8");
+      } else if (activeTactical.id === "black_sun") {
+        const ecCfg = ARMAMENT_TUNING.weapons.eclipse;
+        const targetPos = computeGroundTargetPosition(
+          p.x,
+          p.y,
+          p.aimAngle,
+          resolvedTacticalDist,
+          tacticalSpec
         );
+        const zoneId = this.nextId("zone");
+        this.zones.push({
+          id: zoneId,
+          kind: "black_sun_zone",
+          x: targetPos.x,
+          y: targetPos.y,
+          radius: ecCfg.blackSunRadiusPx,
+          angle: Math.atan2(targetPos.y - p.y, targetPos.x - p.x),
+          ttlMs: ecCfg.blackSunZoneDurationMs,
+          maxTtlMs: ecCfg.blackSunZoneDurationMs,
+          ownerId: p.id
+        });
+        this.weaponZoneTickAccum.set(zoneId, ecCfg.blackSunTickIntervalMs);
+        this.emitEvent("status", targetPos.x, targetPos.y - 24, "BLACK SUN!", "#A855F7");
+      } else if (activeTactical.id === "seraphic_judgment") {
+        const serCfg = ARMAMENT_TUNING.weapons.seraphim;
+        const targetPos = computeGroundTargetPosition(
+          p.x,
+          p.y,
+          p.aimAngle,
+          resolvedTacticalDist,
+          tacticalSpec
+        );
+        const dmgMult = this.computeDamageMult(p, "divine");
+        const critChance = this.getPlayerCritChance(p);
+        const hasCrit = Math.random() < critChance;
+        const critMult = hasCrit ? CRIT_DAMAGE_MULTIPLIER : 1;
+        const burstDmg = Math.max(1, Math.round(serCfg.tacticalBaseDamage * dmgMult * critMult));
+        const burstRadius = serCfg.tacticalRadiusPx;
+        this.zones.push({
+          id: this.nextId("zone"),
+          kind: "seraphim_holy_burst",
+          x: targetPos.x,
+          y: targetPos.y,
+          radius: burstRadius,
+          ttlMs: serCfg.holyBurstZoneTtlMs,
+          maxTtlMs: serCfg.holyBurstZoneTtlMs,
+          ownerId: p.id
+        });
+        const burstTargets = [...this.enemies];
+        for (const enemy of burstTargets) {
+          if (!enemy || enemy.hp <= 0 || !this.enemies.includes(enemy)) continue;
+          if (Math.hypot(enemy.x - targetPos.x, enemy.y - targetPos.y) <= burstRadius + enemy.radius * 0.35) {
+            this.damageEnemy(enemy, burstDmg, p, hasCrit, "divine");
+          }
+        }
+        for (const dummy of this.trainingDummies) {
+          if (Math.hypot(dummy.x - targetPos.x, dummy.y - targetPos.y) <= burstRadius + 18) {
+            this.damageDummy(dummy, burstDmg, p, hasCrit, false, "divine");
+          }
+        }
+        this.emitEvent("status", targetPos.x, targetPos.y - 24, "SERAPHIC JUDGMENT!", "#FDE047");
+      } else if (p.heroClass === "vanguard") {
+        const dmgMult = this.computeDamageMult(p, "physical");
+        const trappedSingularity = this.getActiveSingularityAt(p.x, p.y, 10);
+        const dashDist = trappedSingularity ? 0 : 92;
+        if (dashDist > 0) {
+          this.moveWithCollision(
+            p,
+            Math.cos(p.aimAngle) * dashDist,
+            Math.sin(p.aimAngle) * dashDist,
+            12
+          );
+        } else {
+          this.emitEvent("status", p.x, p.y - 24, "GRAVITY LOCKED!", "#E879F9");
+        }
+        this.zones.push({
+          id: this.nextId("zone"),
+          kind: "bulwark_dash_shockwave",
+          x: p.x,
+          y: p.y,
+          radius: 84,
+          width: 170,
+          angle: p.aimAngle,
+          ttlMs: 320,
+          maxTtlMs: 320,
+          ownerId: p.id
+        });
         for (const ally of this.players.values()) {
           if (!ally.state.downed && Math.hypot(ally.state.x - p.x, ally.state.y - p.y) <= 170) {
-            ally.state.shield = Math.min(this.getMaxShieldCap(ally.state), ally.state.shield + 28);
-            this.emitEvent("status", ally.state.x, ally.state.y - 22, "+28 Shield", "#93C5FD");
+            const shieldGained = this.grantShield(ally.state, 28, "add");
+            if (shieldGained > 0) {
+              this.emitEvent("status", ally.state.x, ally.state.y - 22, "+28 Shield", "#93C5FD");
+            } else if (isShieldGainLocked(ally.state)) {
+              this.emitEvent("status", ally.state.x, ally.state.y - 22, "SHIELD LOCKED", "#EF4444");
+            }
           }
         }
         const bashTargets = [...this.enemies];
@@ -6264,6 +6824,18 @@ var GameRoom = class _GameRoom {
       } else if (p.heroClass === "ranger") {
         const dmgMult = this.computeDamageMult(p, "physical");
         const baseDmg = Math.round(18 * dmgMult);
+        this.zones.push({
+          id: this.nextId("zone"),
+          kind: "frost_volley_cone",
+          x: p.x,
+          y: p.y,
+          radius: 190,
+          angle: p.aimAngle,
+          coneHalfAngleRad: 0.34,
+          ttlMs: 240,
+          maxTtlMs: 240,
+          ownerId: p.id
+        });
         for (let i = -2; i <= 2; i++) {
           const ang = p.aimAngle + i * 0.14;
           this.spawnProjectile({
@@ -6307,63 +6879,34 @@ var GameRoom = class _GameRoom {
           this.tacticalProjIds.add(spawned.id);
         }
       } else if (p.heroClass === "cleric") {
-        if (isSeraphimTactical) {
-          const serCfg = ARMAMENT_TUNING.weapons.seraphim;
-          const targetPos = computeGroundTargetPosition(
-            p.x,
-            p.y,
-            p.aimAngle,
-            resolvedTacticalDist,
-            tacticalSpec
-          );
-          const dmgMult = this.computeDamageMult(p, "divine");
-          const critChance = this.getPlayerCritChance(p);
-          const hasCrit = Math.random() < critChance;
-          const critMult = hasCrit ? CRIT_DAMAGE_MULTIPLIER : 1;
-          const burstDmg = Math.max(1, Math.round(serCfg.tacticalBaseDamage * dmgMult * critMult));
-          const burstRadius = serCfg.tacticalRadiusPx;
-          this.zones.push({
-            id: this.nextId("zone"),
-            kind: "seraphim_holy_burst",
-            x: targetPos.x,
-            y: targetPos.y,
-            radius: burstRadius,
-            ttlMs: serCfg.holyBurstZoneTtlMs,
-            maxTtlMs: serCfg.holyBurstZoneTtlMs,
-            ownerId: p.id
-          });
-          const burstTargets = [...this.enemies];
-          for (const enemy of burstTargets) {
-            if (!enemy || enemy.hp <= 0 || !this.enemies.includes(enemy)) continue;
-            if (Math.hypot(enemy.x - targetPos.x, enemy.y - targetPos.y) <= burstRadius + enemy.radius * 0.35) {
-              this.damageEnemy(enemy, burstDmg, p, hasCrit, "divine");
-            }
+        const dmgMult = this.computeDamageMult(p, "divine");
+        const baseHeal = 24;
+        this.zones.push({
+          id: this.nextId("zone"),
+          kind: "sanctified_pulse_wave",
+          x: p.x,
+          y: p.y,
+          radius: 210,
+          width: 135,
+          ttlMs: 380,
+          maxTtlMs: 380,
+          ownerId: p.id
+        });
+        for (const ally of this.players.values()) {
+          if (!ally.state.downed && Math.hypot(ally.state.x - p.x, ally.state.y - p.y) <= 210) {
+            const heal = _GameRoom.computeHealingAmount(baseHeal, p, ally.state);
+            this.applyEffectiveHealing(p, ally.state, heal, "tactical");
           }
-          for (const dummy of this.trainingDummies) {
-            if (Math.hypot(dummy.x - targetPos.x, dummy.y - targetPos.y) <= burstRadius + 18) {
-              this.damageDummy(dummy, burstDmg, p, hasCrit, false, "divine");
-            }
+        }
+        const smiteTargets = [...this.enemies];
+        for (const enemy of smiteTargets) {
+          if (enemy && enemy.hp > 0 && this.enemies.includes(enemy) && Math.hypot(enemy.x - p.x, enemy.y - p.y) <= 135) {
+            this.damageEnemy(enemy, Math.round(28 * dmgMult), p, false, "divine");
           }
-          this.emitEvent("status", targetPos.x, targetPos.y - 24, "SERAPHIC JUDGMENT!", "#FDE047");
-        } else {
-          const dmgMult = this.computeDamageMult(p, "divine");
-          const baseHeal = 24;
-          for (const ally of this.players.values()) {
-            if (!ally.state.downed && Math.hypot(ally.state.x - p.x, ally.state.y - p.y) <= 210) {
-              const heal = _GameRoom.computeHealingAmount(baseHeal, p, ally.state);
-              this.applyEffectiveHealing(p, ally.state, heal, "tactical");
-            }
-          }
-          const smiteTargets = [...this.enemies];
-          for (const enemy of smiteTargets) {
-            if (enemy && enemy.hp > 0 && this.enemies.includes(enemy) && Math.hypot(enemy.x - p.x, enemy.y - p.y) <= 135) {
-              this.damageEnemy(enemy, Math.round(28 * dmgMult), p, false, "divine");
-            }
-          }
-          for (const dummy of this.trainingDummies) {
-            if (Math.hypot(dummy.x - p.x, dummy.y - p.y) <= 135) {
-              this.damageDummy(dummy, Math.round(28 * dmgMult), p, false, false, "divine");
-            }
+        }
+        for (const dummy of this.trainingDummies) {
+          if (Math.hypot(dummy.x - p.x, dummy.y - p.y) <= 135) {
+            this.damageDummy(dummy, Math.round(28 * dmgMult), p, false, false, "divine");
           }
         }
       }
@@ -6529,7 +7072,7 @@ var GameRoom = class _GameRoom {
         continue;
       }
       z.ttlMs -= dtMs;
-      if (z.kind === "chain_lightning_arc") {
+      if (z.kind === "chain_lightning_arc" || z.kind === "bulwark_dash_shockwave" || z.kind === "frost_volley_cone" || z.kind === "sanctified_pulse_wave") {
         if (z.ttlMs <= 0) {
           this.zones.splice(i, 1);
         }
@@ -6788,15 +7331,27 @@ var GameRoom = class _GameRoom {
         continue;
       }
       if (z.kind === "singularity") {
+        const maxCaptureR = z.radius + 85;
         for (const pr of this.players.values()) {
           if (!pr.state.downed) {
             const dx = z.x - pr.state.x;
             const dy = z.y - pr.state.y;
             const dist = Math.hypot(dx, dy);
-            if (dist > 6 && dist <= z.radius + 70) {
-              const pullSpd = 140 * (1 - dist / (z.radius + 70));
-              pr.state.x += dx / dist * pullSpd * dtSec;
-              pr.state.y += dy / dist * pullSpd * dtSec;
+            if (dist > 6 && dist <= maxCaptureR) {
+              let pullSpd;
+              if (dist <= z.radius) {
+                pullSpd = 380 + 180 * (1 - dist / Math.max(1, z.radius));
+              } else {
+                const outerT = 1 - (dist - z.radius) / 85;
+                pullSpd = 215 + 165 * outerT;
+              }
+              const stepDist = Math.min(Math.max(0, dist - 4), pullSpd * dtSec);
+              this.moveWithCollision(
+                pr.state,
+                dx / dist * stepDist,
+                dy / dist * stepDist,
+                9
+              );
             }
           }
         }
@@ -6891,7 +7446,185 @@ var GameRoom = class _GameRoom {
         this.zones.splice(i, 1);
         continue;
       }
+      if (z.kind === "cyclone_break") {
+        const gwCfg = ARMAMENT_TUNING.weapons.galewind;
+        const ownerPr = this.players.get(z.ownerId);
+        const ownerState = ownerPr?.state ?? null;
+        if (!ownerState || resolveActiveTacticalDef(
+          ownerState.heroClass,
+          ownerState.equippedWeapon,
+          ownerState.equippedScrollId
+        ).id !== "cyclone_break") {
+          this.weaponZoneTickAccum.delete(z.id);
+          this.zones.splice(i, 1);
+          continue;
+        }
+        const pullPerSec = gwCfg.cyclonePullSpeedPxPerSec;
+        const captureR = z.radius + 45;
+        for (const enemy of this.enemies) {
+          if (!enemy || enemy.hp <= 0 || enemy.kind === "boss") continue;
+          const dx = z.x - enemy.x;
+          const dy = z.y - enemy.y;
+          const dist = Math.hypot(dx, dy);
+          if (dist > 6 && dist <= captureR) {
+            this.applySoftCc(enemy, 300);
+            const radialFactor = 0.85 + 0.35 * (dist / captureR);
+            const stepDist = Math.min(dist - 4, pullPerSec * radialFactor * dtSec);
+            const nx = dx / dist;
+            const ny = dy / dist;
+            const swirlRatio = dist > 16 ? 0.24 : 0;
+            const moveX = (nx - ny * swirlRatio) * stepDist;
+            const moveY = (ny + nx * swirlRatio) * stepDist;
+            moveWithCollision(
+              this.map,
+              this.props,
+              enemy,
+              moveX,
+              moveY,
+              enemy.radius
+            );
+          }
+        }
+        const accum = (this.weaponZoneTickAccum.get(z.id) || 0) + dtMs;
+        if (accum >= gwCfg.cycloneTickIntervalMs) {
+          this.weaponZoneTickAccum.set(z.id, accum - gwCfg.cycloneTickIntervalMs);
+          const dmgMult = this.computeDamageMult(ownerState, "physical");
+          const tickDmg = Math.max(1, Math.round(gwCfg.cycloneTickBaseDamage * dmgMult));
+          const detDmg = Math.max(1, Math.round(gwCfg.cycloneDetonationBaseDamage * dmgMult));
+          const enemiesSnap = [...this.enemies];
+          for (const enemy of enemiesSnap) {
+            if (!enemy || enemy.hp <= 0 || !this.enemies.includes(enemy)) continue;
+            if (Math.hypot(enemy.x - z.x, enemy.y - z.y) <= z.radius + enemy.radius * 0.35) {
+              this.applySoftCc(enemy, 700);
+              this.damageEnemy(enemy, tickDmg, ownerState, false, "physical", false);
+              if (enemy.hp > 0 && this.enemies.includes(enemy)) {
+                const meta = this.enemyMeta.get(enemy.id);
+                const ownerMarks = meta?.galeburstByOwner?.get(z.ownerId) || 0;
+                const totalMarks = enemy.galeburstMarks || 0;
+                if (ownerMarks > 0 || totalMarks > 0) {
+                  if (meta?.galeburstByOwner) {
+                    if (ownerMarks > 0) {
+                      meta.galeburstByOwner.set(z.ownerId, 0);
+                    } else {
+                      meta.galeburstByOwner.clear();
+                    }
+                    this.syncEnemyGaleburstMarks(enemy, meta);
+                  }
+                  enemy.galeburstMarks = 0;
+                  this.emitEvent("status", enemy.x, enemy.y - enemy.radius - 18, "CYCLONE DETONATION!", "#6EE7B7");
+                  this.triggerGaleburstExplosion(
+                    ownerState,
+                    enemy.x,
+                    enemy.y,
+                    detDmg,
+                    gwCfg.aoeRadiusPx,
+                    1
+                  );
+                }
+              }
+            }
+          }
+          for (const dummy of this.trainingDummies) {
+            if (Math.hypot(dummy.x - z.x, dummy.y - z.y) <= z.radius + 18) {
+              this.damageDummy(dummy, tickDmg, ownerState, false, false, "physical");
+              const dStacks = ownerPr?.dummyGaleburstStacks.get(dummy.id) || 0;
+              if (dStacks > 0 && ownerPr) {
+                ownerPr.dummyGaleburstStacks.set(dummy.id, 0);
+                this.emitEvent("status", dummy.x, dummy.y - 36, "CYCLONE DETONATION!", "#6EE7B7");
+                this.triggerGaleburstExplosion(
+                  ownerState,
+                  dummy.x,
+                  dummy.y,
+                  detDmg,
+                  gwCfg.aoeRadiusPx,
+                  1
+                );
+              }
+            }
+          }
+        }
+        if (z.ttlMs <= 0) {
+          this.weaponZoneTickAccum.delete(z.id);
+          this.zones.splice(i, 1);
+          continue;
+        }
+      }
+      if (z.kind === "black_sun_zone") {
+        const ecCfg = ARMAMENT_TUNING.weapons.eclipse;
+        const ownerPr = this.players.get(z.ownerId);
+        const ownerState = ownerPr?.state ?? null;
+        if (!ownerState || resolveActiveTacticalDef(
+          ownerState.heroClass,
+          ownerState.equippedWeapon,
+          ownerState.equippedScrollId
+        ).id !== "black_sun") {
+          this.weaponZoneTickAccum.delete(z.id);
+          this.zones.splice(i, 1);
+          continue;
+        }
+        const accum = (this.weaponZoneTickAccum.get(z.id) || 0) + dtMs;
+        if (accum >= ecCfg.blackSunTickIntervalMs && z.ttlMs > 0) {
+          this.weaponZoneTickAccum.set(z.id, accum - ecCfg.blackSunTickIntervalMs);
+          const dmgMult = this.computeDamageMult(ownerState, "arcane");
+          const tickDmg = Math.max(1, Math.round(ecCfg.blackSunTickBaseDamage * dmgMult));
+          const enemiesSnap = [...this.enemies];
+          for (const enemy of enemiesSnap) {
+            if (!enemy || enemy.hp <= 0 || !this.enemies.includes(enemy)) continue;
+            if (Math.hypot(enemy.x - z.x, enemy.y - z.y) <= z.radius + enemy.radius * 0.35) {
+              this.applySoftCc(enemy, 700);
+              this.damageEnemy(enemy, tickDmg, ownerState, false, "arcane", false);
+            }
+          }
+          for (const dummy of this.trainingDummies) {
+            if (Math.hypot(dummy.x - z.x, dummy.y - z.y) <= z.radius + 18) {
+              this.damageDummy(dummy, tickDmg, ownerState, false, false, "arcane");
+            }
+          }
+        }
+        if (z.ttlMs <= 0) {
+          this.weaponZoneTickAccum.delete(z.id);
+          this.zones.splice(i, 1);
+          const dmgMult = this.computeDamageMult(ownerState, "arcane");
+          const weaponMods = resolveEquippedWeaponForClass(
+            ownerState.heroClass,
+            ownerState.equippedWeapon
+          )?.modifiers;
+          const critChance = this.getPlayerCritChance(ownerState, weaponMods);
+          const hasCrit = Math.random() < critChance;
+          const critMult = hasCrit ? computePlayerCritMultiplier(ownerState, weaponMods) : 1;
+          const strikeDmg = Math.max(
+            1,
+            Math.round(ecCfg.blackSunStrikeBaseDamage * dmgMult * critMult)
+          );
+          this.zones.push({
+            id: this.nextId("zone"),
+            kind: "black_sun_burst",
+            x: z.x,
+            y: z.y,
+            radius: z.radius,
+            angle: z.angle,
+            ttlMs: ecCfg.blackSunBurstZoneTtlMs,
+            maxTtlMs: ecCfg.blackSunBurstZoneTtlMs,
+            ownerId: z.ownerId
+          });
+          const enemiesSnap = [...this.enemies];
+          for (const enemy of enemiesSnap) {
+            if (!enemy || enemy.hp <= 0 || !this.enemies.includes(enemy)) continue;
+            if (Math.hypot(enemy.x - z.x, enemy.y - z.y) <= z.radius + enemy.radius * 0.35) {
+              this.damageEnemy(enemy, strikeDmg, ownerState, hasCrit, "arcane", false);
+            }
+          }
+          for (const dummy of this.trainingDummies) {
+            if (Math.hypot(dummy.x - z.x, dummy.y - z.y) <= z.radius + 18) {
+              this.damageDummy(dummy, strikeDmg, ownerState, hasCrit, false, "arcane");
+            }
+          }
+          this.emitEvent("status", z.x, z.y - 26, "CELESTIAL STRIKE!", "#FBBF24");
+          continue;
+        }
+      }
       if (z.ttlMs <= 0) {
+        this.weaponZoneTickAccum.delete(z.id);
         this.zones.splice(i, 1);
         continue;
       }
@@ -7014,6 +7747,7 @@ var GameRoom = class _GameRoom {
         p.spellCastState = null;
         pr.pendingBarrage = null;
         this.clearEclipseCharge(pr);
+        this.clearPlayerTacticalState(pr, { removeOwnedZones: false });
         p.vx = 0;
         p.vy = 0;
         p.downedTimerMs = Math.max(0, p.downedTimerMs - dtMs);
@@ -7036,6 +7770,18 @@ var GameRoom = class _GameRoom {
           p.reviveProgress = Math.max(0, p.reviveProgress - dtSec * 0.25);
         }
         continue;
+      }
+      if (p.bastionCounterMs && p.bastionCounterMs > 0) {
+        p.bastionCounterMs = Math.max(0, p.bastionCounterMs - dtMs);
+        if (p.bastionCounterMs === 0) {
+          this.triggerBastionCounterCleave(pr);
+        }
+      }
+      if (p.crimsonFrenzyMs && p.crimsonFrenzyMs > 0) {
+        p.crimsonFrenzyMs = Math.max(0, p.crimsonFrenzyMs - dtMs);
+        if (p.crimsonFrenzyMs === 0) {
+          p.crimsonFrenzyMaxMs = 0;
+        }
       }
       const activePassive = this.getActivePassive(p);
       if (activePassive === "heat" && (p.vanguardHeat || 0) > 0 && this.simTimeMs - pr.heatLastHitAtMs >= ARMAMENT_TUNING.passives.heat.resetGraceMs) {
@@ -7113,6 +7859,21 @@ var GameRoom = class _GameRoom {
           p.vx = charmVx;
           p.vy = charmVy;
         }
+        const activeSing = this.getActiveSingularityAt(p.x, p.y, 12);
+        if (activeSing) {
+          const toCenterX = activeSing.x - p.x;
+          const toCenterY = activeSing.y - p.y;
+          const sDist = Math.hypot(toCenterX, toCenterY);
+          if (sDist > 1) {
+            const outNx = -toCenterX / sDist;
+            const outNy = -toCenterY / sDist;
+            const outDot = p.vx * outNx + p.vy * outNy;
+            if (outDot > 0) {
+              p.vx -= outNx * outDot * 0.78;
+              p.vy -= outNy * outDot * 0.78;
+            }
+          }
+        }
         if (p.vx !== 0 || p.vy !== 0) {
           this.moveWithCollision(p, p.vx * dtSec, p.vy * dtSec, 9);
         }
@@ -7138,7 +7899,7 @@ var GameRoom = class _GameRoom {
         if (!pr.enteredRooms.has(room.id)) {
           pr.enteredRooms.add(room.id);
           if (!room.cleared && p.relics.includes("runic_carapace")) {
-            p.shield = Math.max(p.shield, 22);
+            this.grantShield(p, 22, "floor_to");
           }
         }
         if (room.cleared) {
@@ -7166,8 +7927,7 @@ var GameRoom = class _GameRoom {
               if (!st.floorBlessings) st.floorBlessings = [];
               st.floorBlessings.push(blessing);
               if (blessing === "bastion") {
-                const bastionCap = this.getMaxShieldCap(st);
-                st.shield = Math.min(bastionCap, st.shield + 25);
+                this.grantShield(st, 25, "add");
               }
               if (!st.downed) {
                 st.hp = Math.min(st.maxHp, st.hp + 20);
@@ -7243,6 +8003,14 @@ var GameRoom = class _GameRoom {
       if (!anyAlive) {
         this.status = "defeat";
         this.endedAt = Date.now();
+        if (!this.runEndRecorded && this.roomId !== "TAVERN-HUB") {
+          this.runEndRecorded = true;
+          this.onRunEndedCallback?.(
+            Array.from(this.players.keys()),
+            "defeat",
+            this.floor
+          );
+        }
         if (this.roomId !== "TAVERN-HUB" && !this.isPlayerConnected(this.hostId)) {
           this.transferHostToConnectedMember();
         }
@@ -7772,10 +8540,18 @@ var GameRoom = class _GameRoom {
         }
         continue;
       }
+      const cycState = proj.style === "cyclone_arrow" ? this.cycloneArrowStates.get(proj.id) : void 0;
+      const prevProjX = proj.x;
+      const prevProjY = proj.y;
       proj.ttlMs -= dtMs;
-      if (proj.ttlMs <= 0) {
+      if (cycState && cycState.carryMsRemaining !== null) {
+        cycState.carryMsRemaining -= dtMs;
+      }
+      if (proj.ttlMs <= 0 || cycState && cycState.carryMsRemaining !== null && cycState.carryMsRemaining <= 0) {
         if (proj.spellId === "fireball") {
           this.explodeFireball(proj);
+        } else if (proj.style === "cyclone_arrow") {
+          this.spawnCycloneBreakWhirlwind(proj.ownerId, proj.x, proj.y);
         }
         this.cleanupProjectileTracking(proj.id);
         this.projectiles.splice(i, 1);
@@ -7850,10 +8626,30 @@ var GameRoom = class _GameRoom {
       if (this.isWallAtWorld(proj.x, proj.y)) {
         if (proj.spellId === "fireball") {
           this.explodeFireball(proj);
+        } else if (proj.style === "cyclone_arrow") {
+          this.spawnCycloneBreakWhirlwind(proj.ownerId, prevProjX, prevProjY);
         }
         this.cleanupProjectileTracking(proj.id);
         this.projectiles.splice(i, 1);
         continue;
+      }
+      if (cycState && cycState.draggedEnemyIds.size > 0) {
+        const carryDx = proj.x - prevProjX;
+        const carryDy = proj.y - prevProjY;
+        for (const draggedId of cycState.draggedEnemyIds) {
+          const enemy = this.enemies.find((e) => e.id === draggedId && e.hp > 0);
+          if (!enemy || enemy.kind === "boss") continue;
+          const pullToTipX = (proj.x - enemy.x) * 0.28;
+          const pullToTipY = (proj.y - enemy.y) * 0.28;
+          moveWithCollision(
+            this.map,
+            this.props,
+            enemy,
+            carryDx + pullToTipX,
+            carryDy + pullToTipY,
+            enemy.radius
+          );
+        }
       }
       if (proj.ownerType === "enemy") {
         let blockedByDome = false;
@@ -7994,6 +8790,9 @@ var GameRoom = class _GameRoom {
             if (!isPrimaryProj && isTacticalProj && dealtDummy > 0) {
               this.onTacticalHitConfirmed(ownerPr?.state);
             }
+            if (proj.style === "cyclone_arrow" && cycState && cycState.carryMsRemaining === null) {
+              cycState.carryMsRemaining = ARMAMENT_TUNING.weapons.galewind.cycloneArrowCarryDurationMs;
+            }
             if (isPrimaryProj && ownerPr && dealtDummy > 0) {
               this.applyWeaponPrimaryHitSpecial(
                 proj,
@@ -8053,6 +8852,15 @@ var GameRoom = class _GameRoom {
             );
             if (!isPrimaryProj && isTacticalProj && dealtPrimary > 0) {
               this.onTacticalHitConfirmed(ownerPr?.state);
+            }
+            if (proj.style === "cyclone_arrow" && cycState) {
+              this.applySoftCc(enemy, 700);
+              if (enemy.kind !== "boss" && enemy.hp > 0) {
+                cycState.draggedEnemyIds.add(enemy.id);
+              }
+              if (cycState.carryMsRemaining === null) {
+                cycState.carryMsRemaining = ARMAMENT_TUNING.weapons.galewind.cycloneArrowCarryDurationMs;
+              }
             }
             if (isPrimaryProj && ownerPr && dealtPrimary > 0) {
               this.applyWeaponPrimaryHitSpecial(
@@ -8175,8 +8983,7 @@ var GameRoom = class _GameRoom {
       if (!st.floorBlessings) st.floorBlessings = [];
       st.floorBlessings.push(blessing);
       if (blessing === "bastion") {
-        const bastionCap = this.getMaxShieldCap(st);
-        st.shield = Math.min(bastionCap, st.shield + 20);
+        this.grantShield(st, 20, "add");
       }
       if (!st.downed) {
         const healAmt = isGuardian ? 18 : 10;
@@ -8224,13 +9031,20 @@ var GameRoom = class _GameRoom {
     for (const ally of this.players.values()) {
       const st = ally.state;
       st.gold += masteryGold;
+      let gainedMasteryShield = 0;
       if (!st.downed) {
         st.hp = Math.min(st.maxHp, st.hp + 25);
-        st.shield = Math.min(this.getMaxShieldCap(st), Math.max(st.shield, 0) + 25);
+        gainedMasteryShield = this.grantShield(st, 25, "add");
       }
       st.potions = Math.min(5, st.potions + 1);
       this.grantXp(st, masteryXp);
-      this.emitEvent("status", st.x, st.y - 42, "FLOOR CLEARED (+25 SHIELD)", "#FDE047");
+      this.emitEvent(
+        "status",
+        st.x,
+        st.y - 42,
+        gainedMasteryShield > 0 ? "FLOOR CLEARED (+25 SHIELD)" : "FLOOR CLEARED (SHIELD LOCKED)",
+        "#FDE047"
+      );
     }
     this.pushSystemChat(
       `Floor Mastery achieved! All chambers on Floor ${this.floor} cleared: +${masteryGold}g, +${masteryXp} XP, +25 Shield, and +1 Potion!`
@@ -8245,6 +9059,63 @@ var GameRoom = class _GameRoom {
       dmg = Math.round(dmg * (1 + weaponMods.impairedTargetBonusPct));
     }
     return Math.max(1, dmg);
+  }
+  triggerBastionCounterCleave(pr) {
+    const p = pr.state;
+    p.bastionCounterMs = 0;
+    p.bastionCounterMaxMs = 0;
+    const blockedHits = pr.bastionBlockedHits || 0;
+    pr.bastionBlockedHits = 0;
+    if (p.downed || resolveActiveTacticalDef(p.heroClass, p.equippedWeapon, p.equippedScrollId).id !== "bastion_counter") {
+      return;
+    }
+    const sfCfg = ARMAMENT_TUNING.weapons.sunforged;
+    const cleaveAngle = Number.isFinite(p.aimAngle) ? p.aimAngle : pr.bastionAimAngle;
+    const dmgMult = this.computeDamageMult(p, "physical");
+    const bonusMult = 1 + Math.min(sfCfg.bastionMaxBonusStacks, blockedHits) * sfCfg.bastionBlockedBonusPerHitRatio;
+    const cleaveDmg = Math.max(1, Math.round(sfCfg.bastionCleaveBaseDamage * dmgMult * bonusMult));
+    const cleaveRadius = sfCfg.bastionCleaveRadiusPx;
+    const halfAngle = sfCfg.bastionCleaveHalfAngleRad;
+    p.attackAnimMs = Math.max(p.attackAnimMs, 260);
+    this.zones.push({
+      id: this.nextId("zone"),
+      kind: "bastion_counter_cleave",
+      x: p.x,
+      y: p.y,
+      radius: cleaveRadius,
+      angle: cleaveAngle,
+      coneHalfAngleRad: halfAngle,
+      ttlMs: sfCfg.bastionCleaveZoneTtlMs,
+      maxTtlMs: sfCfg.bastionCleaveZoneTtlMs,
+      ownerId: p.id
+    });
+    const enemiesSnap = [...this.enemies];
+    for (const enemy of enemiesSnap) {
+      if (!enemy || enemy.hp <= 0 || !this.enemies.includes(enemy)) continue;
+      const dx = enemy.x - p.x;
+      const dy = enemy.y - p.y;
+      const dist = Math.hypot(dx, dy);
+      if (dist <= cleaveRadius + enemy.radius * 0.35) {
+        const diff = Math.abs(normalizeAngle(Math.atan2(dy, dx) - cleaveAngle));
+        if (diff <= halfAngle) {
+          this.applyHardCc(enemy, "stun", 700);
+          this.damageEnemy(enemy, cleaveDmg, p, blockedHits > 0, "physical", false);
+        }
+      }
+    }
+    for (const dummy of this.trainingDummies) {
+      const dx = dummy.x - p.x;
+      const dy = dummy.y - p.y;
+      const dist = Math.hypot(dx, dy);
+      if (dist <= cleaveRadius + 18) {
+        const diff = Math.abs(normalizeAngle(Math.atan2(dy, dx) - cleaveAngle));
+        if (diff <= halfAngle) {
+          this.damageDummy(dummy, cleaveDmg, p, blockedHits > 0, false, "physical");
+        }
+      }
+    }
+    const bonusLabel = blockedHits > 0 ? `COUNTER CLEAVE! (+${Math.round(blockedHits * sfCfg.bastionBlockedBonusPerHitRatio * 100)}%)` : "COUNTER CLEAVE!";
+    this.emitEvent("status", p.x, p.y - 28, bonusLabel, "#FBBF24");
   }
   triggerGaleburstExplosion(owner, cx, cy, baseHitDmg, radius, dmgRatio) {
     const gwCfg = ARMAMENT_TUNING.weapons.galewind;
@@ -8439,6 +9310,18 @@ var GameRoom = class _GameRoom {
       }
     }
   }
+  advancePlayerComboStep(p) {
+    const pr = this.players.get(p.id);
+    if (!pr) return;
+    const comboCount = getWeaponComboStepCount(p.heroClass, p.equippedWeapon);
+    const prevStep = p.attackComboStep ?? 0;
+    if (pr.lastPrimaryAttackAtMs >= 0 && this.simTimeMs - pr.lastPrimaryAttackAtMs <= PRIMARY_COMBO_RESET_WINDOW_MS) {
+      p.attackComboStep = (prevStep + 1) % comboCount;
+    } else {
+      p.attackComboStep = 0;
+    }
+    pr.lastPrimaryAttackAtMs = this.simTimeMs;
+  }
   fireEclipseChargedShot(p, holdDurationMs) {
     const def = HERO_CLASSES[p.heroClass];
     const weaponDef = resolveEquippedWeaponForClass(p.heroClass, p.equippedWeapon);
@@ -8446,6 +9329,7 @@ var GameRoom = class _GameRoom {
       this.firePrimaryAttack(p);
       return;
     }
+    this.advancePlayerComboStep(p);
     const weaponMods = weaponDef.modifiers;
     const combatProfile = resolveWeaponCombatProfile(p.heroClass, weaponDef, p);
     const category = combatProfile.damageCategory;
@@ -8516,6 +9400,7 @@ var GameRoom = class _GameRoom {
       this.fireEclipseChargedShot(p, 0);
       return;
     }
+    this.advancePlayerComboStep(p);
     const activePassive = this.getActivePassive(p);
     if (activePassive === "sacred_retribution" && (p.clericSanctity || 0) >= ARMAMENT_TUNING.passives.sacredRetribution.cap) {
       p.clericSanctity = 0;
@@ -8535,24 +9420,33 @@ var GameRoom = class _GameRoom {
     const totalPierce = computePlayerPierceCount(p, weaponMods);
     const projSpeedMult = weaponMods.projectileSpeedMult ?? 1;
     const rangeBonusPx = weaponMods.rangeBonusPx || 0;
-    if (weaponMods.tempestWheel) {
-      const twCfg = ARMAMENT_TUNING.weapons.stormbreaker;
-      const wheelRadius = twCfg.tempestRadiusPx + rangeBonusPx;
-      const wheelDmg = Math.max(1, Math.round(dmg * twCfg.tempestDamageRatio));
+    if (weaponMods.heavySlamAoe) {
+      const sbCfg = ARMAMENT_TUNING.weapons.stormbreaker;
+      const slamOffset = sbCfg.slamForwardOffsetPx + Math.min(18, rangeBonusPx);
+      const slamPos = { x: p.x, y: p.y };
+      this.moveWithCollision(
+        slamPos,
+        Math.cos(p.aimAngle) * slamOffset,
+        Math.sin(p.aimAngle) * slamOffset,
+        10
+      );
+      const slamRadius = sbCfg.slamRadiusPx;
+      const slamDmg = Math.max(1, Math.round(dmg * sbCfg.slamDamageRatio));
       this.zones.push({
         id: this.nextId("zone"),
-        kind: "tempest_wheel",
-        x: p.x,
-        y: p.y,
-        radius: wheelRadius,
-        ttlMs: twCfg.tempestZoneTtlMs,
-        maxTtlMs: twCfg.tempestZoneTtlMs,
+        kind: "stormbreaker_slam",
+        x: slamPos.x,
+        y: slamPos.y,
+        radius: slamRadius,
+        angle: p.aimAngle,
+        ttlMs: sbCfg.slamZoneTtlMs,
+        maxTtlMs: sbCfg.slamZoneTtlMs,
         ownerId: p.id
       });
       const hitIds = /* @__PURE__ */ new Set();
       for (const prop of this.props) {
         if (!prop.opened && prop.kind === "crate") {
-          if (Math.hypot(prop.x - p.x, prop.y - p.y) <= wheelRadius + 18) {
+          if (Math.hypot(prop.x - slamPos.x, prop.y - slamPos.y) <= slamRadius + 18) {
             prop.opened = true;
             for (const ally of this.players.values()) {
               ally.state.gold += prop.value;
@@ -8566,17 +9460,17 @@ var GameRoom = class _GameRoom {
         if (!enemy || enemy.hp <= 0 || hitIds.has(enemy.id) || !this.enemies.includes(enemy)) {
           continue;
         }
-        if (Math.hypot(enemy.x - p.x, enemy.y - p.y) <= wheelRadius + enemy.radius * 0.35) {
+        if (Math.hypot(enemy.x - slamPos.x, enemy.y - slamPos.y) <= slamRadius + enemy.radius * 0.35) {
           hitIds.add(enemy.id);
-          const dealt = this.damageEnemy(enemy, wheelDmg, p, hasCrit, category, true);
+          const dealt = this.damageEnemy(enemy, slamDmg, p, hasCrit, category, true);
           if (dealt > 0) this.onConfirmedPrimaryHit(p);
         }
       }
       for (const dummy of this.trainingDummies) {
         if (!dummy || hitIds.has(dummy.id)) continue;
-        if (Math.hypot(dummy.x - p.x, dummy.y - p.y) <= wheelRadius + 18) {
+        if (Math.hypot(dummy.x - slamPos.x, dummy.y - slamPos.y) <= slamRadius + 18) {
           hitIds.add(dummy.id);
-          const dealt = this.damageDummy(dummy, wheelDmg, p, hasCrit, true, category);
+          const dealt = this.damageDummy(dummy, slamDmg, p, hasCrit, true, category);
           if (dealt > 0) this.onConfirmedPrimaryHit(p);
         }
       }
@@ -10230,7 +11124,6 @@ var GameRoom = class _GameRoom {
     }
     if (attacker) {
       attacker.damageDealt += finalDmg;
-      const shieldCap = this.getMaxShieldCap(attacker);
       if (attackerActivePassive === "predators_instinct") {
         const predCfg = ARMAMENT_TUNING.passives.predatorsInstinct;
         const predPr = this.players.get(attacker.id);
@@ -10242,9 +11135,7 @@ var GameRoom = class _GameRoom {
       }
       if (attackerActivePassive === "iron_will") {
         if (enemy.stunnedMs > 0 || enemy.burnedMs > 0 || enemy.frozenMs > 0) {
-          if (attacker.shield < shieldCap) {
-            attacker.shield = Math.min(shieldCap, attacker.shield + 3);
-          }
+          this.grantShield(attacker, 3, "add");
         }
       }
       if (attackerActivePassive === "war_monger" && !attacker.downed && attacker.hp < attacker.maxHp) {
@@ -10259,9 +11150,18 @@ var GameRoom = class _GameRoom {
           this.emitEvent("heal", attacker.x, attacker.y - 20, `+${lsHeal}`, "#34D399");
         }
       }
+      if (isCrimsonFrenzyActive(attacker) && !attacker.downed && attacker.hp < attacker.maxHp) {
+        const lsPct = ARMAMENT_TUNING.weapons.crimson.frenzyLifestealPct;
+        const missing = Math.max(0, attacker.maxHp - attacker.hp);
+        const lsHeal = Math.min(missing, Math.max(1, Math.round(finalDmg * lsPct)));
+        if (lsHeal > 0) {
+          attacker.hp += lsHeal;
+          this.emitEvent("heal", attacker.x, attacker.y - 20, `+${lsHeal}`, "#34D399");
+        }
+      }
       if (isPrimaryAttack && attackerWeapon) {
-        if (attacker.heroClass === "vanguard" && attackerWeapon.shieldOnPrimaryHit && attacker.shield < shieldCap) {
-          attacker.shield = Math.min(shieldCap, attacker.shield + attackerWeapon.shieldOnPrimaryHit);
+        if (attacker.heroClass === "vanguard" && attackerWeapon.shieldOnPrimaryHit) {
+          this.grantShield(attacker, attackerWeapon.shieldOnPrimaryHit, "add");
         }
         const res2 = enemy.resistances;
         if (attackerWeapon.burnChance && Math.random() < attackerWeapon.burnChance) {
@@ -10377,7 +11277,12 @@ var GameRoom = class _GameRoom {
       enemy.y - enemy.radius - 6,
       `${finalDmg}${effectiveCrit ? "!" : ""}`,
       getDamageTypeColor(cat, isCritPop),
-      cat
+      cat,
+      attacker ? {
+        attackerId: attacker.id,
+        isPrimaryHit: isPrimaryAttack,
+        hitTargetId: enemy.id
+      } : void 0
     );
     if (enemy.hp <= 0) {
       this.processEnemyDeath(enemy, attacker);
@@ -10416,7 +11321,6 @@ var GameRoom = class _GameRoom {
     dummy.hp = Math.max(1, dummy.hp - finalDmg);
     if (attacker) {
       attacker.damageDealt += finalDmg;
-      const shieldCap = this.getMaxShieldCap(attacker);
       if (attackerActivePassive === "predators_instinct") {
         const predCfg = ARMAMENT_TUNING.passives.predatorsInstinct;
         const predPr = this.players.get(attacker.id);
@@ -10427,9 +11331,7 @@ var GameRoom = class _GameRoom {
         if (predPr) predPr.predatorLastHitAtMs = this.simTimeMs;
       }
       if (attackerActivePassive === "iron_will") {
-        if (attacker.shield < shieldCap) {
-          attacker.shield = Math.min(shieldCap, attacker.shield + 3);
-        }
+        this.grantShield(attacker, 3, "add");
       }
       if (attackerActivePassive === "war_monger" && !attacker.downed && attacker.hp < attacker.maxHp) {
         const wmCfg = ARMAMENT_TUNING.passives.warMonger;
@@ -10443,8 +11345,17 @@ var GameRoom = class _GameRoom {
           this.emitEvent("heal", attacker.x, attacker.y - 20, `+${lsHeal}`, "#34D399");
         }
       }
-      if (attacker.heroClass === "vanguard" && isPrimaryAttack && attackerWeapon?.shieldOnPrimaryHit && attacker.shield < shieldCap) {
-        attacker.shield = Math.min(shieldCap, attacker.shield + attackerWeapon.shieldOnPrimaryHit);
+      if (isCrimsonFrenzyActive(attacker) && !attacker.downed && attacker.hp < attacker.maxHp) {
+        const lsPct = ARMAMENT_TUNING.weapons.crimson.frenzyLifestealPct;
+        const missing = Math.max(0, attacker.maxHp - attacker.hp);
+        const lsHeal = Math.min(missing, Math.max(1, Math.round(finalDmg * lsPct)));
+        if (lsHeal > 0) {
+          attacker.hp += lsHeal;
+          this.emitEvent("heal", attacker.x, attacker.y - 20, `+${lsHeal}`, "#34D399");
+        }
+      }
+      if (attacker.heroClass === "vanguard" && isPrimaryAttack && attackerWeapon?.shieldOnPrimaryHit) {
+        this.grantShield(attacker, attackerWeapon.shieldOnPrimaryHit, "add");
       }
     }
     const text = isCrit ? `${finalDmg} CRIT` : `${finalDmg}`;
@@ -10455,7 +11366,12 @@ var GameRoom = class _GameRoom {
       dummy.y - 28,
       text,
       color,
-      cat
+      cat,
+      attacker ? {
+        attackerId: attacker.id,
+        isPrimaryHit: isPrimaryAttack,
+        hitTargetId: dummy.id
+      } : void 0
     );
     if (attacker) {
       if (attacker.relics.includes("cinder_heart") && (isCrit || rawAmount >= 24) || isPrimaryAttack && attackerWeapon?.burnChance && Math.random() < attackerWeapon.burnChance) {
@@ -10508,7 +11424,9 @@ var GameRoom = class _GameRoom {
     }
     if (attacker) {
       attacker.kills += 1;
-      if (this.onKillCallback) this.onKillCallback(attacker.id);
+      if (this.onKillCallback) {
+        this.onKillCallback(attacker.id, { isBoss: enemy.kind === "boss" });
+      }
       if (attacker.relics.includes("crimson_fang")) {
         attacker.hp = Math.min(attacker.maxHp, attacker.hp + 5);
       }
@@ -10634,6 +11552,18 @@ var GameRoom = class _GameRoom {
       (z) => z.kind === "aegis_dome" && Math.hypot(p.x - z.x, p.y - z.y) <= z.radius
     );
     if (inAegis) dmg = Math.max(1, Math.round(dmg * 0.65));
+    if ((p.bastionCounterMs || 0) > 0) {
+      const sfCfg = ARMAMENT_TUNING.weapons.sunforged;
+      dmg = Math.max(1, Math.round(dmg * (1 - sfCfg.bastionDamageReduction)));
+      const bPr = this.players.get(p.id);
+      if (bPr) {
+        bPr.bastionBlockedHits = Math.min(
+          sfCfg.bastionMaxBonusStacks,
+          (bPr.bastionBlockedHits || 0) + 1
+        );
+      }
+      this.emitThrottledEntityStatus(p.id, p.x, p.y - 22, "COUNTER BRACE!", "#FBBF24", 350);
+    }
     const finalMitigatedDamage = dmg;
     let absorbed = 0;
     if (p.shield > 0) {
@@ -10676,7 +11606,10 @@ var GameRoom = class _GameRoom {
       p.downedTimerMs = 18e3;
       p.reviveProgress = 0;
       const dPr = this.players.get(p.id);
-      if (dPr) this.clearEclipseCharge(dPr);
+      if (dPr) {
+        this.clearEclipseCharge(dPr);
+        this.clearPlayerTacticalState(dPr, { removeOwnedZones: false });
+      }
       if (this.players.size > 1) {
         this.pushSystemChat(
           `${p.username} is downed! Stand near your ally to revive them.`
@@ -10691,7 +11624,8 @@ var GameRoom = class _GameRoom {
     target.downed = false;
     target.reviveProgress = 0;
     target.hp = Math.round(target.maxHp * 0.45);
-    target.shield = 20;
+    target.shield = 0;
+    this.grantShield(target, 20, "add");
     target.statuses = [];
     const reviver = this.players.get(reviverId);
     if (reviver && reviver.state.id !== target.id) {
@@ -10715,7 +11649,7 @@ var GameRoom = class _GameRoom {
     }
     this.emitEvent("status", x, y, text, color);
   }
-  emitEvent(kind, x, y, text, color, damageCategory) {
+  emitEvent(kind, x, y, text, color, damageCategory, hitMeta) {
     const now = Date.now();
     if (kind === "status" || kind === "crit") {
       const bucketSize = kind === "status" ? 110 : 45;
@@ -10739,7 +11673,10 @@ var GameRoom = class _GameRoom {
       y: Math.round(y),
       text,
       color,
-      ...damageCategory ? { damageCategory } : {}
+      ...damageCategory ? { damageCategory } : {},
+      ...hitMeta?.attackerId ? { attackerId: hitMeta.attackerId } : {},
+      ...hitMeta?.isPrimaryHit !== void 0 ? { isPrimaryHit: hitMeta.isPrimaryHit } : {},
+      ...hitMeta?.hitTargetId ? { hitTargetId: hitMeta.hitTargetId } : {}
     });
   }
   findRoomContaining(wx, wy) {
@@ -11883,6 +12820,683 @@ var SlidingWindowRateLimiter = class {
   }
 };
 
+// src/shared/dailyQuests.ts
+var DAILY_MASTERY_FALLBACK_GOLD = 350;
+var DAILY_MASTERY_FALLBACK_XP = 300;
+var DAILY_QUEST_TEMPLATES = [
+  // Slot 0: Skirmish (kills)
+  {
+    id: "dq_slay_25",
+    slot: "skirmish",
+    title: "Sanctuary Patrol",
+    description: "Slay 25 dungeon monsters across expedition runs.",
+    metric: "kills",
+    target: 25,
+    rewardGold: 120,
+    rewardXp: 140,
+    rewardsArmament: false
+  },
+  {
+    id: "dq_slay_35",
+    slot: "skirmish",
+    title: "Crypt Vanguard",
+    description: "Slay 35 dungeon monsters across expedition runs.",
+    metric: "kills",
+    target: 35,
+    rewardGold: 155,
+    rewardXp: 185,
+    rewardsArmament: false
+  },
+  {
+    id: "dq_slay_45",
+    slot: "skirmish",
+    title: "Abyssal Purge",
+    description: "Slay 45 dungeon monsters across expedition runs.",
+    metric: "kills",
+    target: 45,
+    rewardGold: 190,
+    rewardXp: 230,
+    rewardsArmament: false
+  },
+  // Slot 1: Delve (floors_cleared)
+  {
+    id: "dq_floors_2",
+    slot: "delve",
+    title: "Subterranean Descent",
+    description: "Clear 2 dungeon floors across one or more expeditions.",
+    metric: "floors_cleared",
+    target: 2,
+    rewardGold: 150,
+    rewardXp: 180,
+    rewardsArmament: false
+  },
+  {
+    id: "dq_floors_3",
+    slot: "delve",
+    title: "Reliquary March",
+    description: "Clear 3 dungeon floors across one or more expeditions.",
+    metric: "floors_cleared",
+    target: 3,
+    rewardGold: 210,
+    rewardXp: 250,
+    rewardsArmament: false
+  },
+  // Slot 2: Trial (boss_kills or runs_played)
+  {
+    id: "dq_boss_1",
+    slot: "trial",
+    title: "Guardian Challenger",
+    description: "Defeat 1 Floor Guardian Boss during an expedition.",
+    metric: "boss_kills",
+    target: 1,
+    rewardGold: 165,
+    rewardXp: 200,
+    rewardsArmament: false
+  },
+  {
+    id: "dq_runs_1",
+    slot: "trial",
+    title: "Oathbound Venture",
+    description: "Complete 1 full expedition attempt (Victory or Fall in battle).",
+    metric: "runs_played",
+    target: 1,
+    rewardGold: 145,
+    rewardXp: 170,
+    rewardsArmament: false
+  },
+  // Slot 3: Daily Armory Bounty (Always awards a class-matched Armament or Mastery Bonus)
+  {
+    id: "dq_bounty_boss_2",
+    slot: "bounty",
+    title: "Armory Bounty: Boss Hunter",
+    description: "Defeat 2 Floor Bosses across runs to earn a sworn class Armament.",
+    metric: "boss_kills",
+    target: 2,
+    rewardGold: 200,
+    rewardXp: 260,
+    rewardsArmament: true
+  },
+  {
+    id: "dq_bounty_floors_4",
+    slot: "bounty",
+    title: "Armory Bounty: Deep Delver",
+    description: "Clear 4 dungeon floors across runs to earn a sworn class Armament.",
+    metric: "floors_cleared",
+    target: 4,
+    rewardGold: 220,
+    rewardXp: 280,
+    rewardsArmament: true
+  },
+  {
+    id: "dq_bounty_kills_60",
+    slot: "bounty",
+    title: "Armory Bounty: Endless Vigil",
+    description: "Slay 60 dungeon monsters across runs to earn a sworn class Armament.",
+    metric: "kills",
+    target: 60,
+    rewardGold: 210,
+    rewardXp: 270,
+    rewardsArmament: true
+  },
+  {
+    id: "dq_bounty_runs_2",
+    slot: "bounty",
+    title: "Armory Bounty: Seasoned Delver",
+    description: "Finish 2 expeditions (Victory or Defeat) to earn a sworn class Armament.",
+    metric: "runs_played",
+    target: 2,
+    rewardGold: 220,
+    rewardXp: 280,
+    rewardsArmament: true
+  }
+];
+var TEMPLATES_BY_ID = new Map(
+  DAILY_QUEST_TEMPLATES.map((t) => [t.id, t])
+);
+function getUtcDateKey(nowMs = Date.now()) {
+  const safeMs = Number.isFinite(nowMs) ? nowMs : Date.now();
+  return new Date(safeMs).toISOString().slice(0, 10);
+}
+function getNextUtcResetMs(nowMs = Date.now()) {
+  const d = new Date(Number.isFinite(nowMs) ? nowMs : Date.now());
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 1, 0, 0, 0, 0);
+}
+function hashSeed(input) {
+  let hash = 2166136261;
+  for (let i = 0; i < input.length; i++) {
+    hash ^= input.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+function computeNextXpForLevel(level) {
+  if (level >= MAX_LEVEL) return 999999;
+  const lvl = Math.max(1, level);
+  return Math.round(80 + (lvl - 1) * 60 + Math.pow(lvl - 1, 1.75) * 12);
+}
+function getDailyQuestTemplatesForDate(dateKey) {
+  const seed = hashSeed(`beyond:daily:${dateKey}`);
+  const bountyPool = DAILY_QUEST_TEMPLATES.filter((t) => t.slot === "bounty");
+  const bounty = bountyPool[seed % bountyPool.length];
+  const skirmishPool = DAILY_QUEST_TEMPLATES.filter(
+    (t) => t.slot === "skirmish" && t.metric !== bounty.metric
+  );
+  const delvePool = DAILY_QUEST_TEMPLATES.filter(
+    (t) => t.slot === "delve" && t.metric !== bounty.metric
+  );
+  const trialPool = DAILY_QUEST_TEMPLATES.filter(
+    (t) => t.slot === "trial" && t.metric !== bounty.metric
+  );
+  const selected = [];
+  if (skirmishPool.length > 0) {
+    selected.push(skirmishPool[(seed >>> 3) % skirmishPool.length]);
+  }
+  if (delvePool.length > 0) {
+    selected.push(delvePool[(seed >>> 7) % delvePool.length]);
+  }
+  if (trialPool.length > 0) {
+    selected.push(trialPool[(seed >>> 11) % trialPool.length]);
+  }
+  if (selected.length < 3) {
+    const usedMetrics = /* @__PURE__ */ new Set([
+      bounty.metric,
+      ...selected.map((s) => s.metric)
+    ]);
+    const extras = DAILY_QUEST_TEMPLATES.filter(
+      (t) => t.slot !== "bounty" && !usedMetrics.has(t.metric)
+    );
+    if (extras.length > 0) {
+      selected.push(extras[(seed >>> 15) % extras.length]);
+    }
+  }
+  selected.push(bounty);
+  return selected;
+}
+function createDailyQuestStateForDate(dateKey) {
+  const templates = getDailyQuestTemplatesForDate(dateKey);
+  const quests = {};
+  for (const t of templates) {
+    quests[t.id] = {
+      questId: t.id,
+      progress: 0,
+      claimed: false
+    };
+  }
+  return { dateKey, quests };
+}
+function normalizeDailyQuestState(raw, nowMs = Date.now()) {
+  const currentDateKey = getUtcDateKey(nowMs);
+  let parsed = null;
+  if (typeof raw === "string" && raw.trim()) {
+    try {
+      const obj = JSON.parse(raw);
+      if (obj && typeof obj === "object") parsed = obj;
+    } catch {
+      parsed = null;
+    }
+  } else if (raw && typeof raw === "object") {
+    parsed = raw;
+  }
+  const fresh = createDailyQuestStateForDate(currentDateKey);
+  if (!parsed || parsed.dateKey !== currentDateKey) {
+    return fresh;
+  }
+  const rawQuests = parsed.quests && typeof parsed.quests === "object" ? parsed.quests : {};
+  for (const [questId, entry] of Object.entries(fresh.quests)) {
+    const tpl = TEMPLATES_BY_ID.get(questId);
+    if (!tpl) continue;
+    const savedRaw = rawQuests[questId];
+    if (savedRaw && typeof savedRaw === "object") {
+      const saved = savedRaw;
+      const rawProgress = Number(saved.progress);
+      entry.progress = Number.isFinite(rawProgress) ? Math.max(0, Math.min(tpl.target, Math.floor(rawProgress))) : 0;
+      entry.claimed = Boolean(saved.claimed) && entry.progress >= tpl.target;
+      if (entry.claimed && typeof saved.claimedAt === "number" && Number.isFinite(saved.claimedAt)) {
+        entry.claimedAt = saved.claimedAt;
+      }
+    }
+  }
+  return fresh;
+}
+function applyDailyQuestEvent(state, metric, amount = 1, nowMs = Date.now()) {
+  const normalized = normalizeDailyQuestState(state, nowMs);
+  const delta = Math.max(0, Math.floor(Number(amount) || 0));
+  if (delta <= 0) {
+    return { state: normalized, changed: false, newlyCompletedIds: [] };
+  }
+  const templates = getDailyQuestTemplatesForDate(normalized.dateKey);
+  let changed = false;
+  const newlyCompletedIds = [];
+  for (const tpl of templates) {
+    if (tpl.metric !== metric) continue;
+    const entry = normalized.quests[tpl.id];
+    if (!entry || entry.claimed) continue;
+    const prev = entry.progress;
+    const next = Math.min(tpl.target, prev + delta);
+    if (next !== prev) {
+      entry.progress = next;
+      changed = true;
+      if (prev < tpl.target && next >= tpl.target) {
+        newlyCompletedIds.push(tpl.id);
+      }
+    }
+  }
+  return { state: normalized, changed, newlyCompletedIds };
+}
+function resolveDailyQuestArmament(heroClass, ownedWeapons = [], ownedVestments = [], dateKey = getUtcDateKey(), questId = "") {
+  const validClass = HERO_CLASSES[heroClass] ? heroClass : "vanguard";
+  const classItems = [
+    ...WEAPON_CATALOG.filter((w) => w.heroClass === validClass && !w.isDefault),
+    ...VESTMENT_CATALOG.filter((v) => v.heroClass === validClass && !v.isDefault)
+  ];
+  const unowned = classItems.filter(
+    (item) => item.slot === "weapon" ? !ownedWeapons.includes(item.id) : !ownedVestments.includes(item.id)
+  );
+  if (unowned.length === 0) return null;
+  const forgedUnowned = unowned.filter((i) => i.rarity === "Forged");
+  const pool = forgedUnowned.length > 0 ? forgedUnowned : unowned;
+  const pickIdx = hashSeed(`${dateKey}:${questId}:${validClass}`) % pool.length;
+  return pool[pickIdx] ?? pool[0];
+}
+function buildDailyQuestRewardPreview(tpl, heroClass, ownedWeapons = [], ownedVestments = [], dateKey = getUtcDateKey()) {
+  if (!tpl.rewardsArmament) {
+    return {
+      gold: tpl.rewardGold,
+      xp: tpl.rewardXp,
+      armament: null,
+      masteryFallback: null
+    };
+  }
+  const candidate = resolveDailyQuestArmament(
+    heroClass,
+    ownedWeapons,
+    ownedVestments,
+    dateKey,
+    tpl.id
+  );
+  if (candidate) {
+    return {
+      gold: tpl.rewardGold,
+      xp: tpl.rewardXp,
+      armament: {
+        slot: candidate.slot,
+        itemId: candidate.id,
+        name: candidate.name,
+        rarity: candidate.rarity,
+        accent: candidate.accent,
+        summary: candidate.summary,
+        passiveName: candidate.slot === "vestment" ? candidate.passiveName : void 0
+      },
+      masteryFallback: null
+    };
+  }
+  return {
+    gold: tpl.rewardGold,
+    xp: tpl.rewardXp,
+    armament: null,
+    masteryFallback: {
+      bonusGold: DAILY_MASTERY_FALLBACK_GOLD,
+      bonusXp: DAILY_MASTERY_FALLBACK_XP,
+      reason: "All sworn class Armaments unlocked \u2014 grants Mastery Bonus instead."
+    }
+  };
+}
+function hydrateDailyQuestsForAccount(acc, nowMs = Date.now()) {
+  const heroClass = HERO_CLASSES[acc.lockedClass] ? acc.lockedClass : HERO_CLASSES[acc.preferredClass] ? acc.preferredClass : "vanguard";
+  const state = normalizeDailyQuestState(acc.dailyQuests, nowMs);
+  const templates = getDailyQuestTemplatesForDate(state.dateKey);
+  const ownedWeapons = acc.ownedWeapons || [];
+  const ownedVestments = acc.ownedVestments || [];
+  const quests = templates.map((tpl) => {
+    const entry = state.quests[tpl.id] || {
+      questId: tpl.id,
+      progress: 0,
+      claimed: false
+    };
+    const progress = Math.max(0, Math.min(tpl.target, entry.progress));
+    const claimed = Boolean(entry.claimed) && progress >= tpl.target;
+    return {
+      questId: tpl.id,
+      title: tpl.title,
+      description: tpl.description,
+      metric: tpl.metric,
+      progress,
+      target: tpl.target,
+      completed: progress >= tpl.target,
+      claimed,
+      claimedAt: entry.claimedAt,
+      rewardsArmament: tpl.rewardsArmament,
+      rewardPreview: buildDailyQuestRewardPreview(
+        tpl,
+        heroClass,
+        ownedWeapons,
+        ownedVestments,
+        state.dateKey
+      )
+    };
+  });
+  return {
+    dateKey: state.dateKey,
+    resetAtMs: getNextUtcResetMs(nowMs),
+    state,
+    quests
+  };
+}
+function applyAccountXpAndLevelUp(acc, xpToAdd) {
+  const rawLevel = Number(acc.level) || 1;
+  acc.level = Math.max(1, Math.min(MAX_LEVEL, Math.floor(rawLevel)));
+  acc.xp = acc.level >= MAX_LEVEL ? 0 : Math.max(0, Number(acc.xp) || 0);
+  acc.attributePoints = Math.max(0, Number(acc.attributePoints) || 0);
+  const safeXp = Math.max(0, Math.floor(Number(xpToAdd) || 0));
+  if (safeXp <= 0 || acc.level >= MAX_LEVEL) {
+    if (acc.level >= MAX_LEVEL) {
+      acc.level = MAX_LEVEL;
+      acc.xp = 0;
+    }
+    return { levelsGained: 0 };
+  }
+  acc.xp += safeXp;
+  let levelsGained = 0;
+  while (acc.level < MAX_LEVEL) {
+    const nextXp = computeNextXpForLevel(acc.level);
+    if (acc.xp < nextXp) break;
+    acc.xp -= nextXp;
+    acc.level += 1;
+    acc.attributePoints += 3;
+    levelsGained += 1;
+  }
+  if (acc.level >= MAX_LEVEL) {
+    acc.level = MAX_LEVEL;
+    acc.xp = 0;
+  }
+  return { levelsGained };
+}
+function claimDailyQuestForAccount(acc, questId, nowMs = Date.now()) {
+  if (typeof questId !== "string" || !questId.trim()) {
+    return { ok: false, status: 400, error: "A valid questId is required." };
+  }
+  const cleanId = questId.trim();
+  applyAccountArmamentMigration(acc);
+  const state = normalizeDailyQuestState(acc.dailyQuests, nowMs);
+  acc.dailyQuests = state;
+  const tpl = TEMPLATES_BY_ID.get(cleanId);
+  const entry = state.quests[cleanId];
+  if (!tpl || !entry) {
+    return { ok: false, status: 404, error: "That quest is not active in today\u2019s daily rotation." };
+  }
+  if (entry.claimed) {
+    return { ok: false, status: 409, error: "Reward for this daily quest has already been claimed today." };
+  }
+  if (entry.progress < tpl.target) {
+    return { ok: false, status: 400, error: "Daily quest objective is not yet complete." };
+  }
+  const heroClass = HERO_CLASSES[acc.lockedClass] ? acc.lockedClass : HERO_CLASSES[acc.preferredClass] ? acc.preferredClass : "vanguard";
+  const preview = buildDailyQuestRewardPreview(
+    tpl,
+    heroClass,
+    acc.ownedWeapons || [],
+    acc.ownedVestments || [],
+    state.dateKey
+  );
+  let goldAdded = preview.gold;
+  let xpAdded = preview.xp;
+  let masteryBonusApplied = false;
+  let armamentGranted = null;
+  if (preview.armament) {
+    const def = getArmamentDef(preview.armament.slot, preview.armament.itemId);
+    if (def && def.heroClass === heroClass) {
+      if (def.slot === "weapon") {
+        if (!acc.ownedWeapons.includes(def.id)) {
+          acc.ownedWeapons.push(def.id);
+        }
+      } else {
+        if (!acc.ownedVestments.includes(def.id)) {
+          acc.ownedVestments.push(def.id);
+        }
+      }
+      armamentGranted = {
+        slot: def.slot,
+        itemId: def.id,
+        name: def.name,
+        rarity: def.rarity,
+        accent: def.accent
+      };
+    }
+  } else if (preview.masteryFallback) {
+    goldAdded += preview.masteryFallback.bonusGold;
+    xpAdded += preview.masteryFallback.bonusXp;
+    masteryBonusApplied = true;
+  }
+  acc.gold = Math.max(0, Number(acc.gold) || 0) + goldAdded;
+  const { levelsGained } = applyAccountXpAndLevelUp(acc, xpAdded);
+  entry.claimed = true;
+  entry.claimedAt = nowMs;
+  const hydrated = hydrateDailyQuestsForAccount(acc, nowMs);
+  return {
+    ok: true,
+    dateKey: hydrated.dateKey,
+    resetAtMs: hydrated.resetAtMs,
+    quests: hydrated.quests,
+    rewardGranted: {
+      questId: tpl.id,
+      questTitle: tpl.title,
+      goldAdded,
+      xpAdded,
+      levelsGained,
+      armamentGranted,
+      masteryBonusApplied
+    }
+  };
+}
+
+// src/shared/armamentShop.ts
+var SANCTUARY_GOLD_REWARDS = {
+  floorClearedGold: 45,
+  bossKillGold: 60
+};
+var ARMAMENT_SHOP_PRICES = {
+  weapon: {
+    Standard: 0,
+    Forged: 400,
+    Ascendant: 750
+  },
+  vestment: {
+    Standard: 0,
+    Forged: 320,
+    Ascendant: 600
+  }
+};
+function getArmamentShopPrice(def) {
+  if (def.isDefault) return 0;
+  return ARMAMENT_SHOP_PRICES[def.slot][def.rarity];
+}
+function resolveAccountHeroClass(acc) {
+  if (HERO_CLASSES[acc.lockedClass]) return acc.lockedClass;
+  if (HERO_CLASSES[acc.preferredClass]) return acc.preferredClass;
+  return "vanguard";
+}
+function toShopItem(def, heroClass, gold, ownedWeapons, ownedVestments, equippedWeapon, equippedVestment) {
+  const priceGold = getArmamentShopPrice(def);
+  const owned = def.slot === "weapon" ? ownedWeapons.includes(def.id) : ownedVestments.includes(def.id);
+  const equipped = def.slot === "weapon" ? equippedWeapon === def.id : equippedVestment === def.id;
+  const classMatch = def.heroClass === heroClass;
+  const tacticalDef = def.slot === "weapon" ? getWeaponTacticalDef(def) : null;
+  const vestment = def.slot === "vestment" ? def : null;
+  return {
+    slot: def.slot,
+    itemId: def.id,
+    heroClass: def.heroClass,
+    name: def.name,
+    rarity: def.rarity,
+    archetype: def.archetype,
+    summary: def.summary,
+    effectLines: def.effectLines,
+    accent: def.accent,
+    isDefault: Boolean(def.isDefault),
+    priceGold,
+    owned,
+    equipped,
+    classMatch,
+    canAfford: gold >= priceGold,
+    tacticalDef,
+    passiveName: vestment?.passiveName,
+    passiveSummary: vestment?.passiveSummary
+  };
+}
+function hydrateArmamentShopForAccount(acc) {
+  const heroClass = resolveAccountHeroClass(acc);
+  const gold = Math.max(0, Math.floor(Number(acc.gold) || 0));
+  const ownedWeapons = acc.ownedWeapons || [];
+  const ownedVestments = acc.ownedVestments || [];
+  const allDefs = [...WEAPON_CATALOG, ...VESTMENT_CATALOG];
+  const items = allDefs.map(
+    (def) => toShopItem(
+      def,
+      heroClass,
+      gold,
+      ownedWeapons,
+      ownedVestments,
+      acc.equippedWeapon,
+      acc.equippedVestment
+    )
+  ).sort((a, b) => {
+    if (a.classMatch !== b.classMatch) return a.classMatch ? -1 : 1;
+    if (a.heroClass !== b.heroClass) return a.heroClass.localeCompare(b.heroClass);
+    if (a.slot !== b.slot) return a.slot === "weapon" ? -1 : 1;
+    if (a.isDefault !== b.isDefault) return a.isDefault ? 1 : -1;
+    return a.priceGold - b.priceGold;
+  });
+  const classItems = items.filter((i) => i.classMatch);
+  return {
+    gold,
+    heroClass,
+    ownedClassCount: classItems.filter((i) => i.owned).length,
+    totalClassCount: classItems.length,
+    items
+  };
+}
+function purchaseArmamentForAccount(acc, slot, itemId, opts = {}) {
+  if (slot !== "weapon" && slot !== "vestment") {
+    return { ok: false, status: 400, error: "Invalid armament slot." };
+  }
+  const cleanId = typeof itemId === "string" ? itemId.trim() : "";
+  if (!cleanId) {
+    return { ok: false, status: 400, error: "Missing armament itemId." };
+  }
+  applyAccountArmamentMigration(acc);
+  const def = getArmamentDef(slot, cleanId);
+  if (!def) {
+    return { ok: false, status: 404, error: "Unknown armament." };
+  }
+  const activeClass = resolveAccountHeroClass(acc);
+  if (def.heroClass !== activeClass) {
+    return {
+      ok: false,
+      status: 403,
+      error: `${def.name} requires the ${HERO_CLASSES[def.heroClass].name} class.`
+    };
+  }
+  const ownedList = slot === "weapon" ? acc.ownedWeapons : acc.ownedVestments;
+  if (ownedList.includes(cleanId) || def.isDefault) {
+    return {
+      ok: false,
+      status: 409,
+      error: `You already own ${def.name}.`
+    };
+  }
+  const priceGold = getArmamentShopPrice(def);
+  const currentGold = Math.max(0, Math.floor(Number(acc.gold) || 0));
+  if (currentGold < priceGold) {
+    return {
+      ok: false,
+      status: 400,
+      error: `Not enough Gold for ${def.name}. Need ${priceGold} Gold (you have ${currentGold} Gold).`
+    };
+  }
+  acc.gold = currentGold - priceGold;
+  ownedList.push(cleanId);
+  let equipped = false;
+  if (opts.autoEquip) {
+    if (slot === "weapon") {
+      acc.equippedWeapon = cleanId;
+    } else {
+      acc.equippedVestment = cleanId;
+    }
+    equipped = true;
+  }
+  applyAccountArmamentMigration(acc);
+  return {
+    ok: true,
+    slot,
+    item: def,
+    priceGold,
+    equipped,
+    goldRemaining: acc.gold,
+    shop: hydrateArmamentShopForAccount(acc)
+  };
+}
+function equipArmamentForAccount(acc, slot, itemId) {
+  if (slot !== "weapon" && slot !== "vestment") {
+    return { ok: false, status: 400, error: "Invalid armament slot." };
+  }
+  applyAccountArmamentMigration(acc);
+  const activeClass = resolveAccountHeroClass(acc);
+  if (itemId === null) {
+    if (slot === "weapon") {
+      acc.equippedWeapon = null;
+      return {
+        ok: true,
+        slot,
+        equippedId: null,
+        item: null,
+        shop: hydrateArmamentShopForAccount(acc)
+      };
+    }
+    const defaultVestmentId = getDefaultVestmentIdForClass(activeClass);
+    acc.equippedVestment = defaultVestmentId;
+    return {
+      ok: true,
+      slot,
+      equippedId: defaultVestmentId,
+      item: getArmamentDef("vestment", defaultVestmentId),
+      shop: hydrateArmamentShopForAccount(acc)
+    };
+  }
+  const cleanId = typeof itemId === "string" ? itemId.trim() : "";
+  const def = cleanId ? getArmamentDef(slot, cleanId) : null;
+  if (!def) {
+    return { ok: false, status: 404, error: "Unknown armament." };
+  }
+  if (def.heroClass !== activeClass) {
+    return {
+      ok: false,
+      status: 403,
+      error: `${def.name} belongs to ${HERO_CLASSES[def.heroClass].name}.`
+    };
+  }
+  const ownedList = slot === "weapon" ? acc.ownedWeapons : acc.ownedVestments;
+  if (!ownedList.includes(cleanId)) {
+    return {
+      ok: false,
+      status: 403,
+      error: `You must unlock or purchase ${def.name} before equipping it.`
+    };
+  }
+  if (slot === "weapon") {
+    acc.equippedWeapon = cleanId;
+  } else {
+    acc.equippedVestment = cleanId;
+  }
+  applyAccountArmamentMigration(acc);
+  return {
+    ok: true,
+    slot,
+    equippedId: cleanId,
+    item: def,
+    shop: hydrateArmamentShopForAccount(acc)
+  };
+}
+
 // server.ts
 var __filename = fileURLToPath(import.meta.url);
 var __dirname = path.dirname(__filename);
@@ -11922,6 +13536,7 @@ function normalizeAccountLevel(acc) {
 function toPublicProfile(acc) {
   normalizeAccountLevel(acc);
   applyAccountArmamentMigration(acc);
+  acc.dailyQuests = normalizeDailyQuestState(acc.dailyQuests);
   return {
     id: acc.id,
     username: acc.username,
@@ -11943,7 +13558,9 @@ function toPublicProfile(acc) {
     ownedWeapons: [...acc.ownedWeapons || []],
     ownedVestments: [...acc.ownedVestments || []],
     equippedWeapon: acc.equippedWeapon ?? null,
-    equippedVestment: acc.equippedVestment ?? null
+    equippedVestment: acc.equippedVestment ?? null,
+    gold: Math.max(0, Number(acc.gold) || 0),
+    dailyQuests: acc.dailyQuests
   };
 }
 var fileSaveInFlight = false;
@@ -11991,8 +13608,8 @@ async function persistAccount(acc) {
             runs_completed, highest_floor, total_kills, total_revives, gold, is_admin,
             level, xp,
             strength, vitality, dexterity, intelligence, faith, attribute_points,
-            owned_weapons, owned_vestments, equipped_weapon, equipped_vestment, updated_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, NOW())
+            owned_weapons, owned_vestments, equipped_weapon, equipped_vestment, daily_quests, updated_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, NOW())
           ON CONFLICT (username_lower) DO UPDATE SET
             password_hash = EXCLUDED.password_hash,
             locked_class = EXCLUDED.locked_class,
@@ -12015,6 +13632,7 @@ async function persistAccount(acc) {
             owned_vestments = EXCLUDED.owned_vestments,
             equipped_weapon = EXCLUDED.equipped_weapon,
             equipped_vestment = EXCLUDED.equipped_vestment,
+            daily_quests = EXCLUDED.daily_quests,
             updated_at = NOW();`,
           [
             acc.id,
@@ -12040,7 +13658,8 @@ async function persistAccount(acc) {
             JSON.stringify(acc.ownedWeapons || []),
             JSON.stringify(acc.ownedVestments || []),
             acc.equippedWeapon ?? null,
-            acc.equippedVestment ?? null
+            acc.equippedVestment ?? null,
+            JSON.stringify(normalizeDailyQuestState(acc.dailyQuests))
           ]
         );
       } catch (err) {
@@ -12096,6 +13715,7 @@ async function initStorage() {
           owned_vestments TEXT NOT NULL DEFAULT '[]',
           equipped_weapon VARCHAR(64),
           equipped_vestment VARCHAR(64),
+          daily_quests TEXT NOT NULL DEFAULT '{}',
           created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
           updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
         );
@@ -12141,6 +13761,9 @@ async function initStorage() {
           END IF;
           IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='accounts' AND column_name='equipped_vestment') THEN
             ALTER TABLE accounts ADD COLUMN equipped_vestment VARCHAR(64);
+          END IF;
+          IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='accounts' AND column_name='daily_quests') THEN
+            ALTER TABLE accounts ADD COLUMN daily_quests TEXT NOT NULL DEFAULT '{}';
           END IF;
           -- Increase password_hash length for scrypt
           ALTER TABLE accounts ALTER COLUMN password_hash TYPE VARCHAR(255);
@@ -12208,7 +13831,8 @@ async function initStorage() {
           ownedWeapons: parsedWeapons,
           ownedVestments: parsedVestments,
           equippedWeapon: isLegacyRow ? void 0 : row.equipped_weapon ?? null,
-          equippedVestment: isLegacyRow ? void 0 : row.equipped_vestment ?? null
+          equippedVestment: isLegacyRow ? void 0 : row.equipped_vestment ?? null,
+          dailyQuests: normalizeDailyQuestState(row.daily_quests)
         };
         normalizeAccountLevel(rec);
         const changed = applyAccountArmamentMigration(rec, needsArmamentMigration);
@@ -12288,6 +13912,7 @@ async function initStorage() {
           rec.attributePoints = Number(rec.attributePoints) || 0;
         }
         normalizeAccountLevel(rec);
+        rec.dailyQuests = normalizeDailyQuestState(rec.dailyQuests);
         if (applyAccountArmamentMigration(rec, needsArmamentMigration)) {
           anyJsonChanged = true;
         }
@@ -12367,7 +13992,8 @@ function buildAccountRecord(username, password, chosenClass = "vanguard", isAdmi
     ownedWeapons: [defaultWeapon],
     ownedVestments: [defaultVestment],
     equippedWeapon: defaultWeapon,
-    equippedVestment: defaultVestment
+    equippedVestment: defaultVestment,
+    dailyQuests: normalizeDailyQuestState(void 0)
   };
 }
 function createAccount(username, password, chosenClass = "vanguard", isAdmin = false) {
@@ -12419,20 +14045,33 @@ function broadcastToRoom(roomId, msg, options = {}) {
   }
 }
 function attachRoomPersistenceCallbacks(room) {
+  const isExpeditionRoom = room.roomId !== "TAVERN-HUB";
   room.onFloorClearedCallback = async (playerIds, floor) => {
     for (const pid of playerIds) {
       const acc = accountsById.get(pid);
       if (acc) {
         acc.highestFloor = Math.max(acc.highestFloor, floor);
         if (floor >= 3) acc.runsCompleted += 1;
+        if (isExpeditionRoom) {
+          acc.dailyQuests = applyDailyQuestEvent(acc.dailyQuests, "floors_cleared", 1).state;
+          acc.gold = Math.max(0, Number(acc.gold) || 0) + SANCTUARY_GOLD_REWARDS.floorClearedGold;
+        }
         await persistAccount(acc).catch((err) => console.error("Failed to persist floor clear:", err));
       }
     }
   };
-  room.onKillCallback = async (pid) => {
+  room.onKillCallback = async (pid, meta) => {
     const acc = accountsById.get(pid);
     if (acc) {
       acc.totalKills += 1;
+      if (isExpeditionRoom) {
+        let next = applyDailyQuestEvent(acc.dailyQuests, "kills", 1).state;
+        if (meta?.isBoss) {
+          next = applyDailyQuestEvent(next, "boss_kills", 1).state;
+          acc.gold = Math.max(0, Number(acc.gold) || 0) + SANCTUARY_GOLD_REWARDS.bossKillGold;
+        }
+        acc.dailyQuests = next;
+      }
       await persistAccount(acc).catch((err) => console.error("Failed to persist kill:", err));
     }
   };
@@ -12440,7 +14079,20 @@ function attachRoomPersistenceCallbacks(room) {
     const acc = accountsById.get(pid);
     if (acc) {
       acc.totalRevives += 1;
+      if (isExpeditionRoom) {
+        acc.dailyQuests = applyDailyQuestEvent(acc.dailyQuests, "revives", 1).state;
+      }
       await persistAccount(acc).catch((err) => console.error("Failed to persist revive:", err));
+    }
+  };
+  room.onRunEndedCallback = async (playerIds) => {
+    if (!isExpeditionRoom) return;
+    for (const pid of playerIds) {
+      const acc = accountsById.get(pid);
+      if (acc) {
+        acc.dailyQuests = applyDailyQuestEvent(acc.dailyQuests, "runs_played", 1).state;
+        await persistAccount(acc).catch((err) => console.error("Failed to persist run completion:", err));
+      }
     }
   };
   room.onProgressionUpdateCallback = async (pid, state) => {
@@ -12717,6 +14369,231 @@ async function startServer() {
     const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
     if (token) sessionsByToken.delete(token);
     res.json({ ok: true });
+  });
+  function requireAuthenticatedAccount(req, res) {
+    const authHeader = req.headers.authorization || "";
+    const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
+    const session = sessionsByToken.get(token);
+    const userId = session && session.expiresAt > Date.now() ? session.userId : null;
+    if (!userId) {
+      res.status(401).json({ error: "Authentication required." });
+      return null;
+    }
+    const acc = accountsById.get(userId);
+    if (!acc) {
+      res.status(401).json({ error: "Account not found." });
+      return null;
+    }
+    return acc;
+  }
+  const claimingDailyQuestAccounts = /* @__PURE__ */ new Set();
+  app.get("/api/daily-quests", (req, res) => {
+    const acc = requireAuthenticatedAccount(req, res);
+    if (!acc) return;
+    applyAccountArmamentMigration(acc);
+    const hydrated = hydrateDailyQuestsForAccount(acc);
+    acc.dailyQuests = hydrated.state;
+    res.json({
+      dateKey: hydrated.dateKey,
+      resetAtMs: hydrated.resetAtMs,
+      quests: hydrated.quests,
+      user: toPublicProfile(acc)
+    });
+  });
+  app.post("/api/daily-quests/claim", async (req, res) => {
+    const acc = requireAuthenticatedAccount(req, res);
+    if (!acc) return;
+    const questId = typeof req.body?.questId === "string" ? req.body.questId.trim() : "";
+    if (!questId) {
+      res.status(400).json({ error: "Missing questId." });
+      return;
+    }
+    if (claimingDailyQuestAccounts.has(acc.id)) {
+      res.status(409).json({ error: "Quest reward claim already in progress." });
+      return;
+    }
+    claimingDailyQuestAccounts.add(acc.id);
+    const snapshot = {
+      gold: acc.gold,
+      level: acc.level,
+      xp: acc.xp,
+      attributePoints: acc.attributePoints,
+      ownedWeapons: acc.ownedWeapons ? [...acc.ownedWeapons] : void 0,
+      ownedVestments: acc.ownedVestments ? [...acc.ownedVestments] : void 0,
+      dailyQuests: acc.dailyQuests ? JSON.parse(JSON.stringify(acc.dailyQuests)) : void 0
+    };
+    try {
+      const claimRes = claimDailyQuestForAccount(acc, questId);
+      if (!claimRes.ok) {
+        res.status(claimRes.status).json({ error: claimRes.error });
+        return;
+      }
+      await persistAccount(acc);
+      for (const room of rooms.values()) {
+        if (!room.hasPlayer(acc.id)) continue;
+        if (claimRes.rewardGranted.armamentGranted) {
+          room.grantArmament(
+            acc.id,
+            claimRes.rewardGranted.armamentGranted.slot,
+            claimRes.rewardGranted.armamentGranted.itemId
+          );
+        }
+        room.syncPlayerProgression(
+          acc.id,
+          acc.level || 1,
+          acc.xp || 0,
+          acc.attributePoints || 0
+        );
+        partyCoordinator.markRoomDirty(room.roomId);
+      }
+      res.json({
+        ok: true,
+        dateKey: claimRes.dateKey,
+        resetAtMs: claimRes.resetAtMs,
+        quests: claimRes.quests,
+        rewardGranted: claimRes.rewardGranted,
+        user: toPublicProfile(acc)
+      });
+    } catch (err) {
+      acc.gold = snapshot.gold;
+      acc.level = snapshot.level;
+      acc.xp = snapshot.xp;
+      acc.attributePoints = snapshot.attributePoints;
+      acc.ownedWeapons = snapshot.ownedWeapons;
+      acc.ownedVestments = snapshot.ownedVestments;
+      acc.dailyQuests = snapshot.dailyQuests;
+      console.error("Failed to claim daily quest reward:", err);
+      res.status(500).json({ error: "Failed to persist daily quest reward. Please retry." });
+    } finally {
+      claimingDailyQuestAccounts.delete(acc.id);
+    }
+  });
+  const shopMutationAccounts = /* @__PURE__ */ new Set();
+  app.get("/api/shop/armaments", (req, res) => {
+    const acc = requireAuthenticatedAccount(req, res);
+    if (!acc) return;
+    applyAccountArmamentMigration(acc);
+    const shop = hydrateArmamentShopForAccount(acc);
+    res.json({
+      ok: true,
+      ...shop,
+      user: toPublicProfile(acc)
+    });
+  });
+  app.post("/api/shop/armaments/buy", async (req, res) => {
+    const acc = requireAuthenticatedAccount(req, res);
+    if (!acc) return;
+    const slot = req.body?.slot === "weapon" || req.body?.slot === "vestment" ? req.body.slot : null;
+    const itemId = typeof req.body?.itemId === "string" ? req.body.itemId.trim() : "";
+    const autoEquip = Boolean(req.body?.autoEquip);
+    if (!slot || !itemId) {
+      res.status(400).json({ error: "Invalid armament selection." });
+      return;
+    }
+    if (shopMutationAccounts.has(acc.id)) {
+      res.status(409).json({ error: "Armory transaction already in progress." });
+      return;
+    }
+    shopMutationAccounts.add(acc.id);
+    const snapshot = {
+      gold: acc.gold,
+      ownedWeapons: acc.ownedWeapons ? [...acc.ownedWeapons] : void 0,
+      ownedVestments: acc.ownedVestments ? [...acc.ownedVestments] : void 0,
+      equippedWeapon: acc.equippedWeapon,
+      equippedVestment: acc.equippedVestment
+    };
+    try {
+      const purchase = purchaseArmamentForAccount(acc, slot, itemId, { autoEquip });
+      if (!purchase.ok) {
+        res.status(purchase.status).json({ error: purchase.error });
+        return;
+      }
+      await persistAccount(acc);
+      for (const room of rooms.values()) {
+        if (!room.hasPlayer(acc.id)) continue;
+        room.grantArmament(acc.id, purchase.slot, purchase.item.id);
+        if (purchase.equipped) {
+          room.equipArmament(acc.id, purchase.slot, purchase.item.id);
+        }
+        partyCoordinator.markRoomDirty(room.roomId);
+      }
+      res.json({
+        ok: true,
+        purchased: {
+          slot: purchase.slot,
+          itemId: purchase.item.id,
+          name: purchase.item.name,
+          rarity: purchase.item.rarity,
+          accent: purchase.item.accent
+        },
+        priceGold: purchase.priceGold,
+        equipped: purchase.equipped,
+        goldRemaining: purchase.goldRemaining,
+        shop: purchase.shop,
+        user: toPublicProfile(acc)
+      });
+    } catch (err) {
+      acc.gold = snapshot.gold;
+      acc.ownedWeapons = snapshot.ownedWeapons;
+      acc.ownedVestments = snapshot.ownedVestments;
+      acc.equippedWeapon = snapshot.equippedWeapon;
+      acc.equippedVestment = snapshot.equippedVestment;
+      console.error("Failed to purchase armament:", err);
+      res.status(500).json({ error: "Failed to persist armament purchase. Please retry." });
+    } finally {
+      shopMutationAccounts.delete(acc.id);
+    }
+  });
+  app.post("/api/shop/armaments/equip", async (req, res) => {
+    const acc = requireAuthenticatedAccount(req, res);
+    if (!acc) return;
+    const slot = req.body?.slot === "weapon" || req.body?.slot === "vestment" ? req.body.slot : null;
+    const rawItemId = req.body?.itemId;
+    const itemId = rawItemId === null ? null : typeof rawItemId === "string" ? rawItemId.trim() : "";
+    if (!slot || itemId !== null && !itemId) {
+      res.status(400).json({ error: "Invalid armament equip request." });
+      return;
+    }
+    if (shopMutationAccounts.has(acc.id)) {
+      res.status(409).json({ error: "Armory update already in progress." });
+      return;
+    }
+    shopMutationAccounts.add(acc.id);
+    const snapshot = {
+      equippedWeapon: acc.equippedWeapon,
+      equippedVestment: acc.equippedVestment
+    };
+    try {
+      const equipRes = equipArmamentForAccount(acc, slot, itemId);
+      if (!equipRes.ok) {
+        res.status(equipRes.status).json({ error: equipRes.error });
+        return;
+      }
+      await persistAccount(acc);
+      for (const room of rooms.values()) {
+        if (!room.hasPlayer(acc.id)) continue;
+        if (equipRes.equippedId === null) {
+          room.unequipArmament(acc.id, equipRes.slot);
+        } else {
+          room.equipArmament(acc.id, equipRes.slot, equipRes.equippedId);
+        }
+        partyCoordinator.markRoomDirty(room.roomId);
+      }
+      res.json({
+        ok: true,
+        slot: equipRes.slot,
+        equippedId: equipRes.equippedId,
+        shop: equipRes.shop,
+        user: toPublicProfile(acc)
+      });
+    } catch (err) {
+      acc.equippedWeapon = snapshot.equippedWeapon;
+      acc.equippedVestment = snapshot.equippedVestment;
+      console.error("Failed to update equipped armament:", err);
+      res.status(500).json({ error: "Failed to save equipped armament. Please retry." });
+    } finally {
+      shopMutationAccounts.delete(acc.id);
+    }
   });
   const internalIdentityRateLimiter = new SlidingWindowRateLimiter(120, 6e4);
   const ssoAssertionRateLimiter = new SlidingWindowRateLimiter(30, 6e4);

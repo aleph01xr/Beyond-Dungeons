@@ -131,6 +131,13 @@ import {
   cloneSnapshotBaseline,
   computeSnapshotDelta,
 } from './src/shared/snapshotDelta.ts';
+import {
+  ARMAMENT_SHOP_PRICES,
+  equipArmamentForAccount,
+  getArmamentShopPrice,
+  hydrateArmamentShopForAccount,
+  purchaseArmamentForAccount,
+} from './src/shared/armamentShop.ts';
 
 async function runRegressionTests() {
   console.log('--- STARTING BEYOND REGRESSION TESTS ---');
@@ -10815,15 +10822,32 @@ async function runRegressionTests() {
     assert.strictEqual(getAbilityTargetSpec('vanguard', 'tactical', null, vp.equippedWeapon).label, 'Bulwark Dash');
     assert.strictEqual(vp.maxSkillCooldownMs, HERO_CLASSES.vanguard.tacticalCooldownMs);
 
-    // Ranger switching: Galewind Cyclone Break -> unequip/Ashwood clears cyclone zone and restores Frost Volley
+    // Ranger switching: Galewind Cyclone Break fires cyclone_arrow -> unequip/Ashwood clears both arrow & cyclone zone and restores Frost Volley
     room.equipArmament('r1', 'weapon', 'ranger_galewind_twinbow');
     assert.strictEqual(resolveActiveTacticalDef('ranger', rp.equippedWeapon, null).id, 'cyclone_break');
     room.performAction('r1', 'tactical', 0, { aimDistance: 120, explicitAim: true });
-    assert.ok(room.zones.some((z) => z.kind === 'cyclone_break' && z.ownerId === 'r1'));
+    assert.ok(room.projectiles.some((p) => p.style === 'cyclone_arrow' && p.ownerId === 'r1'), 'Cyclone Break should fire cyclone_arrow projectile');
+    assert.strictEqual(room.zones.some((z) => z.kind === 'cyclone_break' && z.ownerId === 'r1'), false, 'Cyclone Break must shoot arrow rather than instant summon');
     room.equipArmament('r1', 'weapon', 'ranger_ashwood_recurve');
-    assert.strictEqual(room.zones.some((z) => z.ownerId === 'r1' && z.kind === 'cyclone_break'), false, 'Stale cyclone_break zone must be cleared on weapon switch');
+    assert.strictEqual(room.projectiles.some((p) => p.ownerId === 'r1' && p.style === 'cyclone_arrow'), false, 'Stale cyclone_arrow projectile must clear on weapon switch');
     assert.strictEqual(resolveActiveTacticalDef('ranger', rp.equippedWeapon, null).id, 'frost_volley');
     assert.strictEqual(getAbilityTargetSpec('ranger', 'tactical', null, rp.equippedWeapon).kind, 'cone_volley');
+
+    // Also verify switching clears an already-bloomed cyclone_break whirlwind zone
+    room.equipArmament('r1', 'weapon', 'ranger_galewind_twinbow');
+    rp.skillCooldownMs = 0;
+    room.zones.push({
+      id: 'stale_cyc_zone',
+      kind: 'cyclone_break',
+      ownerId: 'r1',
+      x: rp.x + 120,
+      y: rp.y,
+      radius: 132,
+      ttlMs: 1800,
+      maxTtlMs: 2400,
+    });
+    room.equipArmament('r1', 'weapon', 'ranger_ashwood_recurve');
+    assert.strictEqual(room.zones.some((z) => z.ownerId === 'r1' && z.kind === 'cyclone_break'), false, 'Stale cyclone_break zone must be cleared on weapon switch');
   });
 
   // --- Test 130: Crimson War Axe Rename, Permanent Shield Lock Across ALL Sources & Crimson Frenzy Buff ---
@@ -10928,7 +10952,7 @@ async function runRegressionTests() {
     room.grantShield(p1, 15, 'add');
     assert.strictEqual(p1.shield, 40, 'Unequipping Crimson War Axe must restore Shield gain');
 
-    // Re-equip Crimson War Axe & test Crimson Frenzy Tactical Buff (+25% DMG, +14% Lifesteal, +25% Attack Speed)
+    const baseSpeed = computePlayerMoveSpeed(p1);
     room.equipArmament('v1', 'weapon', 'vanguard_crimson_halberd');
     const baseDmgMult = computePlayerDamageMultiplier(p1);
     const baseAtkCd = computePlayerAttackCooldownMs(p1);
@@ -10940,10 +10964,21 @@ async function runRegressionTests() {
 
     const frenzyDmgMult = computePlayerDamageMultiplier(p1);
     const frenzyAtkCd = computePlayerAttackCooldownMs(p1);
+    const fullFrenzySpeed = computePlayerMoveSpeed(p1);
     assert.ok(frenzyDmgMult > baseDmgMult, `Expected frenzy Damage mult (${frenzyDmgMult}) > base (${baseDmgMult})`);
     assert.ok(frenzyAtkCd < baseAtkCd, `Expected frenzy Attack cooldown (${frenzyAtkCd}) < base (${baseAtkCd})`);
+    assert.ok(fullFrenzySpeed > baseSpeed, `Crimson Frenzy active must increase move speed (base=${baseSpeed}, frenzy=${fullFrenzySpeed})`);
+
+    p1.crimsonFrenzyMs = 2500; // half duration fading test
+    const halfFrenzySpeed = computePlayerMoveSpeed(p1);
+    assert.ok(halfFrenzySpeed < fullFrenzySpeed && halfFrenzySpeed > baseSpeed, 'Crimson Frenzy move speed buff must fade proportionally as duration ticks down');
+
+    p1.crimsonFrenzyMs = 0;
+    const expiredSpeed = computePlayerMoveSpeed(p1);
+    assert.strictEqual(expiredSpeed, baseSpeed, 'Expired Crimson Frenzy must restore base move speed');
 
     // Lifesteal heals HP while Shield remains locked during Frenzy
+    p1.crimsonFrenzyMs = ARMAMENT_TUNING.weapons.crimson.frenzyDurationMs;
     p1.hp = Math.floor(p1.maxHp * 0.5);
     const hpBeforeHit = p1.hp;
     const targetDummy: EnemyState = {
@@ -11047,26 +11082,44 @@ async function runRegressionTests() {
     assert.ok(bastionFoe.hp < 1000, 'Bastion Counter cleave must damage targets in front cone');
     assert.ok(bastionFoe.stunnedMs > 0, 'Bastion Counter retaliation should stun targets');
 
-    // 2. Galewind Twinbow Cyclone Break: pulls enemies inward & detonates Galeburst marks
+    // 2. Galewind Twinbow Cyclone Break: shoots a straight cyclone_arrow, drags struck foe forward, blooms into whirlwind that pulls strongly inward & detonates Galeburst marks
     room.equipArmament('r1', 'weapon', 'ranger_galewind_twinbow');
+    const openRoom = room.map.rooms.find((r) => r.type === 'combat') || room.map.rooms[0];
+    const centerX = (openRoom.x + openRoom.w / 2) * 32;
+    const centerY = (openRoom.y + openRoom.h / 2) * 32;
+    rp.x = centerX - 110;
+    rp.y = centerY;
     rp.skillCooldownMs = 0;
     rp.aimAngle = 0;
-    const cycX = rp.x + 120;
-    const cycY = rp.y;
-    const pullGoblin = makeGoblin('cyc_pull', cycX + 90, cycY);
-    const markedGoblin = makeGoblin('cyc_mark', cycX + 20, cycY);
+    const dragStartX = rp.x + 65;
+    const dragGoblin = makeGoblin('cyc_drag', dragStartX, centerY);
+    const markedGoblin = makeGoblin('cyc_mark', rp.x + 160, centerY);
     markedGoblin.galeburstMarks = 2;
-    room.enemies = [pullGoblin, markedGoblin];
+    const pullGoblin = makeGoblin('cyc_pull', rp.x + 175, centerY + 64);
+    room.enemies = [dragGoblin, markedGoblin, pullGoblin];
     room.zones = [];
     room.performAction('r1', 'tactical', 0, { aimDistance: 120, explicitAim: true });
-    assert.ok(room.zones.some((z) => z.kind === 'cyclone_break'), 'Cyclone Break zone must spawn');
-    const distBefore = Math.hypot(pullGoblin.x - cycX, pullGoblin.y - cycY);
-    room.tick(50);
-    assert.strictEqual(markedGoblin.galeburstMarks, 0, 'Cyclone Break must detonate Galeburst marks');
+    assert.ok(room.projectiles.some((p) => p.style === 'cyclone_arrow' && p.ownerId === 'r1'), 'Cyclone Break must launch cyclone_arrow projectile');
+    assert.strictEqual(room.zones.some((z) => z.kind === 'cyclone_break'), false, 'Cyclone Break must NOT immediately summon ground zone at cursor');
+
+    // Tick through arrow collision + carry drag until whirlwind erupts
+    let bloomedZone: typeof room.zones[number] | undefined;
+    for (let t = 0; t < 450; t += 25) {
+      room.tick(25);
+      bloomedZone = room.zones.find((z) => z.kind === 'cyclone_break' && z.ownerId === 'r1');
+      if (bloomedZone) break;
+    }
+    assert.ok(bloomedZone, 'Cyclone Break arrow must bloom into cyclone_break whirlwind after carry phase');
+    assert.ok(dragGoblin.hp < 1000, 'Cyclone arrow impact must deal initial damage');
+    assert.ok(dragGoblin.x > dragStartX + 20, `Cyclone arrow must drag struck enemy forward (start=${dragStartX}, now=${dragGoblin.x.toFixed(1)})`);
+
+    const distBefore = Math.hypot(pullGoblin.x - bloomedZone.x, pullGoblin.y - bloomedZone.y);
+    room.tick(25);
+    assert.strictEqual(markedGoblin.galeburstMarks, 0, 'Cyclone Break whirlwind must detonate Galeburst marks');
     assert.ok(room.zones.some((z) => z.kind === 'galeburst_nova'), 'Marked target detonation spawns galeburst_nova');
-    room.tick(300);
-    const distAfter = Math.hypot(pullGoblin.x - cycX, pullGoblin.y - cycY);
-    assert.ok(distAfter < distBefore, `Cyclone Break must pull enemies inward (before=${distBefore.toFixed(1)}, after=${distAfter.toFixed(1)})`);
+    for (let t = 0; t < 325; t += 25) room.tick(25);
+    const distAfter = Math.hypot(pullGoblin.x - bloomedZone.x, pullGoblin.y - bloomedZone.y);
+    assert.ok(distAfter < distBefore - 25 && distAfter < 30, `Cyclone Break whirlwind must strongly pull enemies inward (before=${distBefore.toFixed(1)}, after=${distAfter.toFixed(1)})`);
 
     // 3. Eclipse Longbow Black Sun: creates eclipse zone pulsing Arcane damage, then strikes & detonates
     room.equipArmament('r1', 'weapon', 'ranger_eclipse_longbow');
@@ -11108,6 +11161,1005 @@ async function runRegressionTests() {
     assert.strictEqual(syncedVp.bastionCounterMs, 950);
     assert.strictEqual(syncedVp.crimsonFrenzyMs, 3200);
     assert.ok(guestSynced.zones.some((z) => z.id === 'sync_bs_zone' && z.kind === 'black_sun_zone'));
+  });
+
+  // --- Test 132: Sanctuary Armory Shop Pricing, Authoritative Purchasing, Equip & GameRoom Sync ---
+  await test('132. Sanctuary Armory Shop prices all 24 Armaments deterministically, enforces Gold/class/ownership checks, equips loadout, and syncs active GameRooms', () => {
+    // Verify canonical pricing across every Weapon and Vestment
+    for (const w of WEAPON_CATALOG) {
+      const price = getArmamentShopPrice(w);
+      if (w.isDefault) {
+        assert.strictEqual(price, 0, `Default weapon ${w.id} must be 0g starter`);
+      } else {
+        assert.strictEqual(price, ARMAMENT_SHOP_PRICES.weapon[w.rarity]);
+        assert.ok(price > 0);
+      }
+    }
+    for (const v of VESTMENT_CATALOG) {
+      const price = getArmamentShopPrice(v);
+      if (v.isDefault) {
+        assert.strictEqual(price, 0, `Default vestment ${v.id} must be 0g starter`);
+      } else {
+        assert.strictEqual(price, ARMAMENT_SHOP_PRICES.vestment[v.rarity]);
+        assert.ok(price > 0);
+      }
+    }
+
+    const buyer: AccountRecord = {
+      id: 'shop_buyer_1',
+      username: 'ShopHero',
+      usernameLower: 'shophero',
+      passwordHash: 'hash',
+      lockedClass: 'ranger',
+      preferredClass: 'ranger',
+      runsCompleted: 0,
+      highestFloor: 0,
+      totalKills: 0,
+      totalRevives: 0,
+      gold: 700,
+      ownedWeapons: ['ranger_ashwood_recurve'],
+      ownedVestments: ['ranger_thornwood_brigandine'],
+      equippedWeapon: 'ranger_ashwood_recurve',
+      equippedVestment: 'ranger_thornwood_brigandine',
+    };
+
+    const hydrated = hydrateArmamentShopForAccount(buyer);
+    assert.strictEqual(hydrated.gold, 700);
+    assert.strictEqual(hydrated.heroClass, 'ranger');
+    assert.strictEqual(hydrated.ownedClassCount, 2);
+    assert.strictEqual(hydrated.totalClassCount, 6);
+
+    // Reject insufficient gold (Ascendant Eclipse Longbow costs 750g, buyer has 700g)
+    const tooPoor = purchaseArmamentForAccount(buyer, 'weapon', 'ranger_eclipse_longbow', { autoEquip: true });
+    assert.strictEqual(tooPoor.ok, false);
+    if (!tooPoor.ok) assert.strictEqual(tooPoor.status, 400);
+    assert.strictEqual(buyer.gold, 700, 'Failed purchase must never deduct Gold');
+
+    // Reject cross-class purchase (Vanguard Crimson War Axe by Ranger)
+    const wrongClass = purchaseArmamentForAccount(buyer, 'weapon', 'vanguard_crimson_halberd');
+    assert.strictEqual(wrongClass.ok, false);
+    if (!wrongClass.ok) assert.strictEqual(wrongClass.status, 403);
+
+    // Reject unknown armament
+    const unknownItem = purchaseArmamentForAccount(buyer, 'weapon', 'nonexistent_blade');
+    assert.strictEqual(unknownItem.ok, false);
+    if (!unknownItem.ok) assert.strictEqual(unknownItem.status, 404);
+
+    // Reject purchasing already-owned starter
+    const ownedStarter = purchaseArmamentForAccount(buyer, 'weapon', 'ranger_ashwood_recurve');
+    assert.strictEqual(ownedStarter.ok, false);
+    if (!ownedStarter.ok) assert.strictEqual(ownedStarter.status, 409);
+
+    // Purchase Forged Windrunner Mantle (320g) with autoEquip = true -> 380g remaining
+    const boughtVestment = purchaseArmamentForAccount(buyer, 'vestment', 'ranger_windrunner_mantle', { autoEquip: true });
+    assert.strictEqual(boughtVestment.ok, true);
+    if (boughtVestment.ok) {
+      assert.strictEqual(boughtVestment.priceGold, 320);
+      assert.strictEqual(boughtVestment.goldRemaining, 380);
+      assert.strictEqual(boughtVestment.equipped, true);
+      assert.ok(buyer.ownedVestments?.includes('ranger_windrunner_mantle'));
+      assert.strictEqual(buyer.equippedVestment, 'ranger_windrunner_mantle');
+    }
+
+    // Duplicate purchase of newly bought Windrunner Mantle rejected (409)
+    const dupBuy = purchaseArmamentForAccount(buyer, 'vestment', 'ranger_windrunner_mantle');
+    assert.strictEqual(dupBuy.ok, false);
+    if (!dupBuy.ok) assert.strictEqual(dupBuy.status, 409);
+    assert.strictEqual(buyer.gold, 380);
+
+    // Grant extra Gold and purchase Ascendant Galewind Twinbow (750g) without autoEquip, then equip via helper & sync to GameRoom
+    buyer.gold = 900;
+    const boughtWeapon = purchaseArmamentForAccount(buyer, 'weapon', 'ranger_galewind_twinbow', { autoEquip: false });
+    assert.strictEqual(boughtWeapon.ok, true);
+    assert.strictEqual(buyer.gold, 150);
+    assert.strictEqual(buyer.equippedWeapon, 'ranger_ashwood_recurve');
+
+    // Reject equipping unowned item
+    const equipUnowned = equipArmamentForAccount(buyer, 'weapon', 'ranger_eclipse_longbow');
+    assert.strictEqual(equipUnowned.ok, false);
+    if (!equipUnowned.ok) assert.strictEqual(equipUnowned.status, 403);
+
+    // Equip newly purchased Galewind Twinbow and verify active GameRoom sync
+    const equipOk = equipArmamentForAccount(buyer, 'weapon', 'ranger_galewind_twinbow');
+    assert.strictEqual(equipOk.ok, true);
+    const syncedWeapon = equipOk.ok ? equipOk.equippedId : null;
+    assert.strictEqual(syncedWeapon, 'ranger_galewind_twinbow');
+
+    const room = new GameRoom({
+      roomId: 'SHOP_SYNC_132',
+      name: 'Shop Sync Room',
+      hostName: buyer.username,
+      difficulty: 'Normal',
+      seed: 132,
+    });
+    room.addOrReconnectPlayer(buyer.id, buyer.username, 'ranger', false, {
+      level: 1,
+      xp: 0,
+      strength: 0,
+      vitality: 0,
+      dexterity: 0,
+      intelligence: 0,
+      faith: 0,
+      attributePoints: 0,
+      ownedWeapons: [...(buyer.ownedWeapons || [])],
+      ownedVestments: [...(buyer.ownedVestments || [])],
+      equippedWeapon: syncedWeapon,
+      equippedVestment: buyer.equippedVestment ?? null,
+    });
+    const p = room.getPlayerState(buyer.id)!;
+    assert.strictEqual(p.equippedWeapon, 'ranger_galewind_twinbow');
+    assert.strictEqual(p.equippedVestment, 'ranger_windrunner_mantle');
+    assert.strictEqual(resolveActiveTacticalDef('ranger', p.equippedWeapon, null).id, 'cyclone_break');
+  });
+
+  // --- Test 133: Void Malice Blackhole Inescapable Pull & Default Tactical VFX Zones ---
+  await test('133. Void-Eater Malice singularity blackhole prevents walking/dashing out and default Tacticals spawn & clean up VFX zones', () => {
+    const room = new GameRoom({
+      roomId: 'VOID_VFX_133',
+      name: 'Blackhole & Default Tactical VFX',
+      hostName: 'Tester',
+      difficulty: 'Normal',
+      seed: 133,
+    });
+    room.addOrReconnectPlayer('v1', 'Bulwark', 'vanguard');
+    room.addOrReconnectPlayer('r1', 'Scout', 'ranger');
+    room.addOrReconnectPlayer('c1', 'Mender', 'cleric');
+    room.startExpedition();
+
+    const vp = room.getPlayerState('v1')!;
+    const rp = room.getPlayerState('r1')!;
+    const cp = room.getPlayerState('c1')!;
+
+    // Switch Vanguard & Ranger to Forged weapons so they use class default Tacticals
+    room.grantArmament('v1', 'weapon', 'vanguard_stormbreaker_flail');
+    room.equipArmament('v1', 'weapon', 'vanguard_stormbreaker_flail');
+    room.equipArmament('r1', 'weapon', 'ranger_ashwood_recurve');
+    room.equipArmament('c1', 'weapon', 'cleric_dawnspire_mace');
+
+    // Verify default Tactical VFX zones spawn and expire cleanly
+    room.zones = [];
+    vp.skillCooldownMs = 0;
+    rp.skillCooldownMs = 0;
+    cp.skillCooldownMs = 0;
+    room.performAction('v1', 'tactical', 0);
+    room.performAction('r1', 'tactical', 0);
+    room.performAction('c1', 'tactical', 0);
+
+    assert.ok(room.zones.some((z) => z.kind === 'bulwark_dash_shockwave' && z.ownerId === 'v1'), 'Bulwark Dash should spawn shockwave VFX zone');
+    assert.ok(room.zones.some((z) => z.kind === 'frost_volley_cone' && z.ownerId === 'r1'), 'Frost Volley should spawn cone VFX zone');
+    assert.ok(room.zones.some((z) => z.kind === 'sanctified_pulse_wave' && z.ownerId === 'c1'), 'Sanctified Pulse should spawn wave VFX zone');
+
+    for (let t = 0; t < 450; t += 50) room.tick(50);
+    assert.strictEqual(
+      room.zones.some((z) => z.kind === 'bulwark_dash_shockwave' || z.kind === 'frost_volley_cone' || z.kind === 'sanctified_pulse_wave'),
+      false,
+      'Short-lived tactical VFX zones must expire cleanly'
+    );
+
+    // Verify Void-Eater Malice singularity blackhole is inescapable once caught inside
+    const openBhRoom = room.map.rooms.find((r) => r.type === 'combat') || room.map.rooms[0];
+    const bhX = (openBhRoom.x + openBhRoom.w / 2) * 32;
+    const bhY = (openBhRoom.y + openBhRoom.h / 2) * 32;
+    rp.x = bhX + 80;
+    rp.y = bhY;
+    rp.dashCooldownMs = 0;
+    rp.hasteMs = 0;
+    room.zones.push({
+      id: 'malice_bh_test',
+      kind: 'singularity',
+      ownerId: 'boss_malice',
+      x: bhX,
+      y: bhY,
+      radius: 112,
+      ttlMs: 1200,
+      maxTtlMs: 1200,
+    });
+
+    // Attempt dash straight outward -> must be Gravity Locked (pulls inward & applies brief lockout instead of dashing)
+    const distPreDash = Math.hypot(rp.x - bhX, rp.y - bhY);
+    room.performAction('r1', 'dash', 0);
+    const distPostDash = Math.hypot(rp.x - bhX, rp.y - bhY);
+    assert.strictEqual(rp.hasteMs, 0, 'Dash haste must not trigger inside Void Malice singularity');
+    assert.ok(distPostDash <= distPreDash && rp.dashCooldownMs > 0, 'Gravity-locked dash must fail to escape and apply lockout');
+
+    // Attempt to walk straight outward for 500ms -> blackhole must pull player inward instead of letting them escape
+    const initialDist = Math.hypot(rp.x - bhX, rp.y - bhY);
+    room.updateInput('r1', { up: false, down: false, left: false, right: true, attack: false, aimAngle: 0 });
+    for (let t = 0; t < 500; t += 25) {
+      room.tick(25);
+    }
+    const trappedDist = Math.hypot(rp.x - bhX, rp.y - bhY);
+    assert.ok(trappedDist < initialDist && trappedDist < 40, `Player inside Void Malice blackhole must be pulled inward and unable to walk out (start=${initialDist.toFixed(1)}, after=${trappedDist.toFixed(1)})`);
+  });
+
+  // --- Test 134: Weapon-Dependent Combo Sequencing, Multiplayer Delta Sync & Damage/Cooldown Preservation ---
+  await test('134. Server combo step sequences 0->1->2->0 within combo window, resets on timeout/swap, syncs over delta snapshots, and preserves damage/cooldowns', async () => {
+    const {
+      PRIMARY_COMBO_RESET_WINDOW_MS,
+      WEAPON_CATALOG,
+      getWeaponSwingDurationMs,
+      resolveEquippedWeaponForClass,
+    } = await import('./src/shared/armaments.ts');
+    const { computePlayerAttackCooldownMs } = await import('./src/shared/combatMechanics.ts');
+    const { computeSnapshotDelta, applySnapshotDelta, cloneSnapshotBaseline } = await import('./src/shared/snapshotDelta.ts');
+
+    const room = new GameRoom({
+      roomId: 'COMBO_SYNC_134',
+      name: 'Weapon Combo Sync',
+      hostName: 'Tester',
+      difficulty: 'Normal',
+      seed: 134,
+    });
+    room.addOrReconnectPlayer('v1', 'Vanguard', 'vanguard');
+    room.addOrReconnectPlayer('r1', 'Ranger', 'ranger');
+    room.startExpedition();
+
+    const vp = room.getPlayerState('v1')!;
+    const rp = room.getPlayerState('r1')!;
+    assert.strictEqual(vp.attackComboStep, 0, 'Spawned player must initialize attackComboStep at 0');
+
+    // Grant weapons so we can verify chaining, timeout reset, and weapon-swap reset
+    room.grantArmament('v1', 'weapon', 'vanguard_crimson_halberd');
+    room.grantArmament('r1', 'weapon', 'ranger_eclipse_longbow');
+
+    // Chained Vanguard attacks through live input/tick loop within PRIMARY_COMBO_RESET_WINDOW_MS: 0 -> 1 -> 2 -> 0
+    const enemy = room.spawnEnemyForTesting('goblin', vp.x + 36, vp.y);
+    enemy.hp = 5000;
+    enemy.maxHp = 5000;
+
+    vp.aimAngle = 0;
+    const expectedDmg = calculatePlayerStatProjections(vp, 1).scaledHitDamage;
+    const vWeaponDef = resolveEquippedWeaponForClass(vp.heroClass, vp.equippedWeapon);
+    const expectedCdMs = computePlayerAttackCooldownMs(vp, vWeaponDef);
+    const recordedSteps: number[] = [];
+
+    for (let beat = 0; beat < 4; beat++) {
+      const hpBefore = enemy.hp;
+      room.pendingEvents = [];
+      room.updateInput('v1', { up: false, down: false, left: false, right: false, attack: true, aimAngle: 0 });
+      room.tick(25);
+      room.updateInput('v1', { up: false, down: false, left: false, right: false, attack: false, aimAngle: 0 });
+
+      recordedSteps.push(vp.attackComboStep ?? -1);
+      assert.ok(vp.attackAnimMs > 0, `Beat ${beat} must trigger attackAnimMs`);
+      assert.ok(hpBefore - enemy.hp >= expectedDmg, `Beat ${beat} must deal normal weapon damage (dealt ${hpBefore - enemy.hp}, min ${expectedDmg})`);
+
+      // Verify cooldown prevents premature re-fire halfway through expectedCdMs
+      const stepBeforeBlocked: number | undefined = vp.attackComboStep;
+      const hpMid = enemy.hp;
+      room.updateInput('v1', { up: false, down: false, left: false, right: false, attack: true, aimAngle: 0 });
+      room.tick(Math.floor(expectedCdMs * 0.4));
+      room.updateInput('v1', { up: false, down: false, left: false, right: false, attack: false, aimAngle: 0 });
+      assert.strictEqual(vp.attackComboStep, stepBeforeBlocked, `Beat ${beat} must respect server attackCooldownMs (${expectedCdMs}ms)`);
+      assert.strictEqual(enemy.hp, hpMid, 'No premature attack damage may occur during active attack cooldown');
+
+      // Elapse remaining cooldown cleanly within combo window
+      const remainingWait = expectedCdMs - Math.floor(expectedCdMs * 0.4) + 30;
+      for (let t = 0; t < remainingWait; t += 25) {
+        room.tick(25);
+      }
+    }
+    assert.deepStrictEqual(recordedSteps, [0, 1, 2, 0], 'Chained primary attacks must cycle combo beats 0 -> 1 -> 2 -> 0');
+
+    // Advance past PRIMARY_COMBO_RESET_WINDOW_MS -> next attack resets cleanly to beat 0
+    for (let t = 0; t <= PRIMARY_COMBO_RESET_WINDOW_MS + 100; t += 200) {
+      room.tick(200);
+    }
+    room.updateInput('v1', { up: false, down: false, left: false, right: false, attack: true, aimAngle: 0 });
+    room.tick(25);
+    room.updateInput('v1', { up: false, down: false, left: false, right: false, attack: false, aimAngle: 0 });
+    assert.strictEqual(vp.attackComboStep, 0, 'Combo must reset to beat 0 after exceeding PRIMARY_COMBO_RESET_WINDOW_MS');
+
+    // Wait out cooldown, advance to beat 1, then verify snapshot delta sync replicates attackComboStep to multiplayer clients
+    for (let t = 0; t < expectedCdMs + 30; t += 25) room.tick(25);
+    const snapBefore = cloneSnapshotBaseline(room.buildNetworkSnapshot());
+    room.updateInput('v1', { up: false, down: false, left: false, right: false, attack: true, aimAngle: 0 });
+    room.tick(25);
+    room.updateInput('v1', { up: false, down: false, left: false, right: false, attack: false, aimAngle: 0 });
+    assert.strictEqual(vp.attackComboStep, 1);
+    const snapAfter = room.buildNetworkSnapshot();
+    const delta = computeSnapshotDelta(snapBefore, snapAfter, 10, 11);
+    const applied = applySnapshotDelta(snapBefore, delta);
+    const syncedVp = applied.players.find((pl) => pl.id === 'v1')!;
+    assert.strictEqual(syncedVp.attackComboStep, 1, 'Multiplayer snapshot delta must replicate attackComboStep');
+
+    // Swapping weapons immediately resets combo back to 0 so stale combo beats never bleed into a different weapon
+    room.equipArmament('v1', 'weapon', 'vanguard_crimson_halberd');
+    assert.strictEqual(vp.attackComboStep, 0, 'Equipping a different weapon must reset attackComboStep to 0');
+
+    // Eclipse Longbow charged shots advance combo steps 0 -> 1 -> 2
+    room.equipArmament('r1', 'weapon', 'ranger_eclipse_longbow');
+    const eclipseSteps: number[] = [];
+    for (let beat = 0; beat < 3; beat++) {
+      room.fireEclipseChargedShot(rp, 700);
+      eclipseSteps.push(rp.attackComboStep ?? -1);
+      room.tick(250);
+    }
+    assert.deepStrictEqual(eclipseSteps, [0, 1, 2], 'Eclipse charged shots must advance combo steps 0 -> 1 -> 2');
+
+    // Weapon swing duration helper stays distinct per weapon archetype and strictly positive
+    for (const w of WEAPON_CATALOG) {
+      assert.ok(getWeaponSwingDurationMs(w.heroClass, w.id, 0, 'primary') > 100);
+      assert.ok(
+        getWeaponSwingDurationMs(w.heroClass, w.id, 2, 'primary') >= getWeaponSwingDurationMs(w.heroClass, w.id, 0, 'primary'),
+        `${w.id} finisher beat should carry equal or stronger follow-through duration`
+      );
+    }
+  });
+
+  // --- Test 135: Full-Body Articulated Weapon-Dependent Combo Animations Across All 12 Weapons & Unarmed ---
+  await test('135. All 12 catalog weapons + unarmed produce distinct weapon styles, 3-beat combo choreography, full-body articulation, and clean headless sprite renders without root rotation', async () => {
+    const { WEAPON_CATALOG, getClassWeapons } = await import('./src/shared/armaments.ts');
+    const { computeHeroCombatPose, resolveWeaponAnimStyle } = await import('./src/client/heroCombatAnim.ts');
+    const { drawHeroSprite } = await import('./src/client/heroSprites.ts');
+    const { DIRECTION8_LIST, direction8ToPose } = await import('./src/client/directionalFacing.ts');
+
+    const basePose = direction8ToPose('E', false);
+    const samplePose = (
+      heroClass: HeroClassId,
+      weaponId: string | null,
+      comboStep: number,
+      atkProgress: number,
+      eclipseChargeRatio = 0
+    ) =>
+      computeHeroCombatPose({
+        heroClass,
+        weaponId,
+        isAttacking: true,
+        atkProgress,
+        comboStep,
+        swingKind: 'primary',
+        swingAmp: 1,
+        eclipseChargeRatio,
+        localAim: 0,
+        moving: false,
+        isDashing: false,
+        strideA: 0,
+        strideB: 0,
+        liftA: 0,
+        liftB: 0,
+        walkPhase: 0,
+        idleWave: 0,
+        bodyBob: 0,
+        headBob: 0,
+        now: 5000,
+        pose: basePose,
+      });
+
+    // 1. Every catalog weapon and unarmed state must resolve to a unique WeaponAnimStyle (16 total)
+    const resolvedStyles = new Set<string>();
+    for (const w of WEAPON_CATALOG) {
+      resolvedStyles.add(resolveWeaponAnimStyle(w.heroClass, w.id));
+    }
+    const classes: HeroClassId[] = ['vanguard', 'ranger', 'arcanist', 'cleric'];
+    for (const hc of classes) {
+      resolvedStyles.add(resolveWeaponAnimStyle(hc, null));
+    }
+    assert.strictEqual(resolvedStyles.size, 16, 'Expected 16 unique animation styles (12 catalog weapons + 4 class unarmed styles)');
+
+    // 2. For every weapon + unarmed: check full-body articulation (legs, torso, head, arms, weapon) and 3 distinct combo beats
+    for (const hc of classes) {
+      const weapons: (string | null)[] = [...getClassWeapons(hc).map((w) => w.id), null];
+      const weaponSignatures = new Set<string>();
+
+      for (const wId of weapons) {
+        const beatSnapshots = [0, 1, 2].map((step) => {
+          const antic = samplePose(hc, wId, step, 0.12);
+          const strike = samplePose(hc, wId, step, 0.45);
+          const follow = samplePose(hc, wId, step, 0.85);
+
+          // Full-body articulation check: anticipation -> strike must actually move legs, torso, head, arms, and weapon
+          const bodyDelta =
+            Math.abs(strike.torso.lean - antic.torso.lean) +
+            Math.abs(strike.torso.twistYaw - antic.torso.twistYaw) +
+            Math.abs(strike.torso.x - antic.torso.x) +
+            Math.abs(strike.footwork.leadX - antic.footwork.leadX) +
+            Math.abs(strike.footwork.trailX - antic.footwork.trailX) +
+            Math.abs(strike.mainArm.handX - antic.mainArm.handX) +
+            Math.abs(strike.mainArm.handY - antic.mainArm.handY) +
+            Math.abs(strike.weapon.angle - antic.weapon.angle) +
+            Math.abs(strike.weapon.drawPull - antic.weapon.drawPull);
+          assert.ok(bodyDelta > 0.35, `Expected clear full-body anticipation->strike articulation for ${hc}/${wId} beat ${step} (delta=${bodyDelta.toFixed(3)})`);
+
+          const followDelta =
+            Math.abs(follow.torso.lean - strike.torso.lean) +
+            Math.abs(follow.weapon.angle - strike.weapon.angle) +
+            Math.abs(follow.mainArm.handY - strike.mainArm.handY) +
+            Math.abs(follow.head.tilt - strike.head.tilt);
+          assert.ok(followDelta > 0.08, `Expected distinct follow-through relaxation for ${hc}/${wId} beat ${step}`);
+
+          return `${strike.slash.style}|rev=${strike.slash.reverse}|ang=${strike.weapon.angle.toFixed(2)}|arm=${strike.mainArm.handX.toFixed(2)},${strike.mainArm.handY.toFixed(2)}|foot=${strike.footwork.leadX.toFixed(2)}|fin=${strike.slash.isFinisher}`;
+        });
+
+        // All 3 combo steps on the same weapon must produce distinct choreography
+        const uniqueBeats = new Set(beatSnapshots);
+        assert.strictEqual(
+          uniqueBeats.size,
+          3,
+          `Expected 3 distinct combo beats for ${hc}/${wId}, got: ${beatSnapshots.join(' || ')}`
+        );
+
+        weaponSignatures.add(`${resolveWeaponAnimStyle(hc, wId)}::${beatSnapshots.join('&&')}`);
+      }
+
+      // Equipping different weapons on the SAME class must materially change the combat choreography
+      assert.strictEqual(
+        weaponSignatures.size,
+        4,
+        `Expected 3 equipped weapons + unarmed on ${hc} to produce 4 distinct full-body combo signatures`
+      );
+    }
+
+    // 3. Specific weapon-mechanics checks
+    const stormFlailBeat2 = samplePose('vanguard', 'vanguard_stormbreaker_flail', 2, 0.55);
+    assert.strictEqual(stormFlailBeat2.slash.style, 'overhead_slam', 'Stormbreaker Flail beat 2 must finish with overhead_slam');
+    assert.ok(Math.abs(stormFlailBeat2.weapon.chainSway) > 0.01 || stormFlailBeat2.weapon.chainExtend > 0, 'Flail must drive chain physics');
+
+    const crimsonBeat1 = samplePose('vanguard', 'vanguard_crimson_halberd', 1, 0.45);
+    assert.strictEqual(crimsonBeat1.slash.reverse, true, 'Crimson War Axe beat 1 must be a reverse cross-hack');
+
+    const crozierBeat2 = samplePose('cleric', 'cleric_seraphim_crozier', 2, 0.55);
+    assert.strictEqual(crozierBeat2.slash.style, 'crook_plant', 'Seraphim Crozier beat 2 must execute ceremonial crook_plant');
+
+    const eclipseChargingLow = computeHeroCombatPose({
+      heroClass: 'ranger',
+      weaponId: 'ranger_eclipse_longbow',
+      isAttacking: false,
+      atkProgress: 0,
+      comboStep: 0,
+      swingKind: 'primary',
+      swingAmp: 1,
+      eclipseChargeRatio: 0.2,
+      localAim: 0,
+      moving: false,
+      isDashing: false,
+      strideA: 0,
+      strideB: 0,
+      liftA: 0,
+      liftB: 0,
+      walkPhase: 0,
+      idleWave: 0,
+      bodyBob: 0,
+      headBob: 0,
+      now: 5000,
+      pose: basePose,
+    });
+    const eclipseChargingFull = computeHeroCombatPose({
+      heroClass: 'ranger',
+      weaponId: 'ranger_eclipse_longbow',
+      isAttacking: false,
+      atkProgress: 0,
+      comboStep: 0,
+      swingKind: 'primary',
+      swingAmp: 1,
+      eclipseChargeRatio: 1.0,
+      localAim: 0,
+      moving: false,
+      isDashing: false,
+      strideA: 0,
+      strideB: 0,
+      liftA: 0,
+      liftB: 0,
+      walkPhase: 0,
+      idleWave: 0,
+      bodyBob: 0,
+      headBob: 0,
+      now: 5000,
+      pose: basePose,
+    });
+    assert.strictEqual(eclipseChargingFull.isCharging, true);
+    assert.ok(eclipseChargingFull.weapon.drawPull > eclipseChargingLow.weapon.drawPull, 'Eclipse full charge must deepen bowstring draw');
+    assert.ok(eclipseChargingFull.weapon.bowFlex > eclipseChargingLow.weapon.bowFlex, 'Eclipse full charge must deepen bow limb flex');
+    assert.ok(eclipseChargingFull.footwork.leadX > eclipseChargingLow.footwork.leadX, 'Eclipse full charge must deepen archer stance lunge');
+
+    // 4. Headless canvas rendering across all 12 weapons + unarmed x all 3 combo beats x 8 directions without errors or whole-sprite root rotation
+    const createAnimTestCtx = () => {
+      let saveDepth = 0;
+      let rootRotateCalled = false;
+      const noop = () => {};
+      const ctx = {
+        fillStyle: '#000',
+        strokeStyle: '#000',
+        lineWidth: 1,
+        lineCap: 'butt',
+        lineJoin: 'miter',
+        globalAlpha: 1,
+        shadowColor: 'transparent',
+        shadowBlur: 0,
+        save: () => { saveDepth++; },
+        restore: () => { saveDepth = Math.max(0, saveDepth - 1); },
+        translate: noop,
+        rotate: () => {
+          // Immediately after initial ctx.save() at root level (depth === 1), root character block must NEVER rotate!
+          if (saveDepth <= 1) rootRotateCalled = true;
+        },
+        scale: noop,
+        setLineDash: noop,
+        beginPath: noop,
+        closePath: noop,
+        moveTo: noop,
+        lineTo: noop,
+        quadraticCurveTo: noop,
+        bezierCurveTo: noop,
+        arc: noop,
+        ellipse: noop,
+        fillRect: noop,
+        strokeRect: noop,
+        fill: noop,
+        stroke: noop,
+        fillText: noop,
+        createRadialGradient: () => ({ addColorStop: noop }),
+        createLinearGradient: () => ({ addColorStop: noop }),
+      } as unknown as CanvasRenderingContext2D;
+      return { ctx, hadRootRotate: () => rootRotateCalled };
+    };
+
+    for (const hc of classes) {
+      const weapons: (string | null)[] = [...getClassWeapons(hc).map((w) => w.id), null];
+      for (const wId of weapons) {
+        for (const step of [0, 1, 2]) {
+          for (const dir of DIRECTION8_LIST) {
+            const poseDir = direction8ToPose(dir, false);
+            const mock = createAnimTestCtx();
+            assert.doesNotThrow(() => {
+              drawHeroSprite(
+                mock.ctx,
+                {
+                  heroClass: hc,
+                  attackAnimMs: 120,
+                  vx: 0,
+                  vy: 0,
+                  hasteMs: 0,
+                  shield: 25,
+                  equippedWeapon: wId,
+                  attackComboStep: step,
+                },
+                180,
+                180,
+                {
+                  aimAngle: poseDir.angleRad,
+                  bob: 0,
+                  moving: false,
+                  now: 6000,
+                  swingProgress: 0.45,
+                  swingKind: 'primary',
+                  comboStep: step,
+                  eclipseChargeRatio: wId === 'ranger_eclipse_longbow' && step === 0 ? 0.75 : 0,
+                  facingLeft: poseDir.facingLeft,
+                  facingDirection: dir,
+                }
+              );
+            });
+            assert.strictEqual(mock.hadRootRotate(), false, `Root canvas must not rotate whole character for ${hc}/${wId} beat ${step} @ ${dir}`);
+          }
+        }
+      }
+    }
+  });
+
+  // --- Test 136: Combat Hit-Stop & Impact Frames Across Weapon Combos ---
+  await test('136. Combo hit-stop & impact frames emit hit metadata cleanly, freeze contact frames without stacking/desync, recoil targets, and render impact overlays', async () => {
+    const { WEAPON_CATALOG } = await import('./src/shared/armaments.ts');
+    const {
+      applySwingHitStop,
+      computeEffectiveSwingProgress,
+      computeHitStopCameraShake,
+      computeWeaponHitStopDurationMs,
+      createWeaponSwingState,
+      drawImpactFrameOverlay,
+      sampleEnemyImpactVisual,
+      triggerEnemyImpact,
+    } = await import('./src/client/hitStop.ts');
+    const { computeHeroCombatPose } = await import('./src/client/heroCombatAnim.ts');
+    const { drawHeroSprite } = await import('./src/client/heroSprites.ts');
+    const { direction8ToPose } = await import('./src/client/directionalFacing.ts');
+
+    // 1. Server emits attackerId / isPrimaryHit / hitTargetId on direct weapon hits (enemy & dummy), never on DoTs
+    const dungeonRoom = new GameRoom({
+      roomId: 'HITSTOP_136',
+      name: 'HitStop Room',
+      hostName: 'Tester',
+      difficulty: 'Normal',
+      seed: 136,
+    });
+    dungeonRoom.addOrReconnectPlayer('v1', 'Bulwark', 'vanguard');
+    dungeonRoom.startExpedition();
+    const vp = dungeonRoom.getPlayerState('v1')!;
+    const goblin = dungeonRoom.spawnEnemyForTesting('goblin', vp.x + 34, vp.y);
+    goblin.hp = 2000;
+    goblin.maxHp = 2000;
+    vp.aimAngle = 0;
+
+    dungeonRoom.pendingEvents = [];
+    dungeonRoom.updateInput('v1', { up: false, down: false, left: false, right: false, attack: true, aimAngle: 0 });
+    dungeonRoom.tick(25);
+    dungeonRoom.updateInput('v1', { up: false, down: false, left: false, right: false, attack: false, aimAngle: 0 });
+
+    const hitEv = dungeonRoom.pendingEvents.find(
+      (ev) => (ev.kind === 'damage' || ev.kind === 'crit') && ev.attackerId === 'v1' && ev.isPrimaryHit === true
+    );
+    assert.ok(hitEv, 'Primary weapon hit on enemy must emit hit event with attackerId and isPrimaryHit = true');
+    assert.strictEqual(hitEv!.isPrimaryHit, true, 'Primary weapon hit must tag isPrimaryHit = true');
+    assert.strictEqual(hitEv!.hitTargetId, goblin.id, 'Primary weapon hit must identify hitTargetId');
+
+    // Verify Tavern training dummy hits also emit hit-stop metadata
+    const tavernRoom = new GameRoom({
+      roomId: 'TAVERN_HITSTOP_136',
+      name: 'Tavern HitStop',
+      hostName: 'Tester',
+      difficulty: 'Normal',
+      seed: 136,
+      initialFloor: 0,
+    });
+    tavernRoom.status = 'playing';
+    tavernRoom.addOrReconnectPlayer('v_tav', 'Bulwark', 'vanguard');
+    const vTav = tavernRoom.getPlayerState('v_tav')!;
+    const dummy = tavernRoom.trainingDummies[0];
+    assert.ok(dummy, 'Expected Tavern training dummy');
+    vTav.x = dummy.x - 24;
+    vTav.y = dummy.y;
+    vTav.aimAngle = 0;
+    tavernRoom.pendingEvents = [];
+    tavernRoom.firePrimaryAttack(vTav);
+    for (let i = 0; i < 4; i++) tavernRoom.tick(25);
+    const dummyEv = tavernRoom.pendingEvents.find(
+      (ev) => (ev.kind === 'damage' || ev.kind === 'crit') && ev.attackerId === 'v_tav'
+    );
+    assert.ok(dummyEv, 'Tavern training dummy hit must emit attackerId');
+    assert.strictEqual(dummyEv!.hitTargetId, dummy.id, 'Tavern dummy hit must emit dummy.id');
+
+    // 2. Weapon- & beat-weighted durations across all 12 weapons + unarmed
+    for (const w of WEAPON_CATALOG) {
+      const b0 = computeWeaponHitStopDurationMs(w.heroClass, w.id, 0, false, true);
+      const b2 = computeWeaponHitStopDurationMs(w.heroClass, w.id, 2, false, true);
+      const b2Crit = computeWeaponHitStopDurationMs(w.heroClass, w.id, 2, true, true);
+      assert.ok(b0 >= 24 && b0 <= 92, `${w.id} beat 0 hit-stop out of bounds: ${b0}`);
+      assert.ok(b2 > b0, `${w.id} beat 2 finisher (${b2}ms) must have heavier hit-stop than opener (${b0}ms)`);
+      assert.ok(b2Crit >= b2 && b2Crit <= 92, `${w.id} crit hit-stop must amplify & cap cleanly at 92ms`);
+    }
+    const claymoreDur = computeWeaponHitStopDurationMs('vanguard', 'vanguard_sunforged_claymore', 2, false, true);
+    const twinbowDur = computeWeaponHitStopDurationMs('ranger', 'ranger_galewind_twinbow', 2, false, true);
+    assert.ok(claymoreDur > twinbowDur, 'Heavy Sunforged Claymore finisher must outweigh rapid Galewind Twinbow');
+
+    // 3. Swing contact freeze timeline & anti-stacking cleave guard
+    const swing = createWeaponSwingState(1000, 240, 'primary', 2);
+    // Hit arrives early at 1018ms (in windup) -> snaps smoothly onto contact frame & freezes for 74ms
+    const applied1 = applySwingHitStop(swing, 1018, 74, false, 2, '#FBBF24');
+    assert.strictEqual(applied1, true);
+    // Multi-target cleave second normal hit on same swing must NOT stack another freeze
+    const appliedDup = applySwingHitStop(swing, 1020, 74, false, 2, '#FBBF24');
+    assert.strictEqual(appliedDup, false, 'Multi-target cleave must not stack hit-stop freezes on the same beat');
+
+    const sampleMidFreeze1 = computeEffectiveSwingProgress(swing, 1035);
+    const sampleMidFreeze2 = computeEffectiveSwingProgress(swing, 1075);
+    assert.strictEqual(sampleMidFreeze1.isHitStopped, true);
+    assert.strictEqual(sampleMidFreeze2.isHitStopped, true);
+    assert.strictEqual(
+      sampleMidFreeze1.progress,
+      sampleMidFreeze2.progress,
+      'Swing animation progress must stay frozen during active hit-stop window'
+    );
+    assert.ok(Math.abs(sampleMidFreeze1.impactJitter) > 0 || Math.abs(sampleMidFreeze2.impactJitter) > 0, 'Expected kinetic jitter while frozen');
+
+    // After 1018 + 74 = 1092ms, swing resumes seamlessly without skipping follow-through
+    const sampleResume = computeEffectiveSwingProgress(swing, 1096);
+    assert.strictEqual(sampleResume.isHitStopped, false);
+    assert.strictEqual(sampleResume.isDone, false);
+    assert.ok(sampleResume.progress > sampleMidFreeze1.progress && sampleResume.progress < 0.75, 'Post-hit-stop follow-through must resume smoothly from frozen pose');
+
+    // Completing full follow-through + 74ms frozen offset marks isDone = true
+    const sampleAfterEnd = computeEffectiveSwingProgress(swing, swing.bornAt + swing.durationMs + 74 + 5);
+    assert.strictEqual(sampleAfterEnd.isDone, true);
+
+    // 4. Target freeze, directional recoil & pose tension + headless impact overlay draw
+    const impactMap = new Map();
+    const imp = triggerEnemyImpact(impactMap, goblin.id, 2000, {
+      freezeDurationMs: 70,
+      hitAngle: 0,
+      isCrit: true,
+      comboStep: 2,
+      accentColor: '#EF4444',
+    });
+    const visFrozen = sampleEnemyImpactVisual(imp, 2030);
+    assert.strictEqual(visFrozen.isHitStopped, true);
+    assert.strictEqual(visFrozen.isImpactFrame, true);
+    assert.strictEqual(visFrozen.renderNow, 2000, 'Struck enemy animation time must freeze at contact timestamp');
+    assert.ok(visFrozen.offsetX > 0, 'Strike from left (angle 0) must recoil enemy rightward (+X)');
+
+    const visPost = sampleEnemyImpactVisual(imp, 2100);
+    assert.strictEqual(visPost.isHitStopped, false);
+    assert.strictEqual(visPost.renderNow, 2100, 'Enemy animation time must resume cleanly after hit-stop');
+
+    const camFinisher = computeHitStopCameraShake('vanguard', 'vanguard_crimson_halberd', 2, true, true);
+    const camRemote = computeHitStopCameraShake('vanguard', 'vanguard_crimson_halberd', 2, true, false);
+    assert.ok(camFinisher.shakeBoost > 2 && camFinisher.screenFlashAlpha > 0);
+    assert.strictEqual(camRemote.shakeBoost, 0, 'Remote allies must not shake local player camera');
+
+    const basePose = direction8ToPose('E', false);
+    const hitStoppedPose = computeHeroCombatPose({
+      heroClass: 'vanguard',
+      weaponId: 'vanguard_crimson_halberd',
+      isAttacking: true,
+      atkProgress: 0.42,
+      comboStep: 2,
+      swingKind: 'primary',
+      swingAmp: 1,
+      eclipseChargeRatio: 0,
+      localAim: 0,
+      moving: false,
+      isDashing: false,
+      strideA: 0,
+      strideB: 0,
+      liftA: 0,
+      liftB: 0,
+      walkPhase: 0,
+      idleWave: 0,
+      bodyBob: 0,
+      headBob: 0,
+      now: 2030,
+      pose: basePose,
+      hitStopActive: true,
+      impactJitter: 0.9,
+    });
+    assert.strictEqual(hitStoppedPose.hitStopActive, true);
+    assert.strictEqual(hitStoppedPose.weapon.flareIntensity, 1.0);
+
+    // Headless canvas sanity check for drawHeroSprite with hitStopActive + drawImpactFrameOverlay
+    const noop = () => {};
+    let drawOps = 0;
+    const mockCtx = {
+      fillStyle: '#000',
+      strokeStyle: '#000',
+      lineWidth: 1,
+      lineCap: 'butt',
+      lineJoin: 'miter',
+      globalAlpha: 1,
+      shadowColor: 'transparent',
+      shadowBlur: 0,
+      save: noop,
+      restore: noop,
+      translate: noop,
+      rotate: noop,
+      scale: noop,
+      setLineDash: noop,
+      beginPath: noop,
+      closePath: noop,
+      moveTo: noop,
+      lineTo: noop,
+      quadraticCurveTo: noop,
+      bezierCurveTo: noop,
+      arc: noop,
+      ellipse: noop,
+      fillRect: () => { drawOps++; },
+      strokeRect: () => { drawOps++; },
+      fill: () => { drawOps++; },
+      stroke: () => { drawOps++; },
+      fillText: noop,
+      createRadialGradient: () => ({ addColorStop: noop }),
+      createLinearGradient: () => ({ addColorStop: noop }),
+    } as unknown as CanvasRenderingContext2D;
+
+    assert.doesNotThrow(() => {
+      for (const hc of ['vanguard', 'ranger', 'arcanist', 'cleric'] as HeroClassId[]) {
+        drawHeroSprite(
+          mockCtx,
+          {
+            heroClass: hc,
+            attackAnimMs: 140,
+            vx: 0,
+            vy: 0,
+            hasteMs: 0,
+            shield: 20,
+            attackComboStep: 2,
+          },
+          180,
+          180,
+          {
+            aimAngle: 0,
+            bob: 0,
+            moving: false,
+            now: 2030,
+            swingProgress: 0.42,
+            swingKind: 'primary',
+            comboStep: 2,
+            hitStopActive: true,
+            impactJitter: 0.85,
+            facingLeft: false,
+            facingDirection: 'E',
+          }
+        );
+      }
+      drawImpactFrameOverlay(mockCtx, 220, 180, 18, imp, visFrozen);
+    });
+    assert.ok(drawOps > 20, 'Expected drawHeroSprite & drawImpactFrameOverlay to render impact visuals cleanly');
+  });
+
+  // --- Test 137: Back-Facing (N/NE/NW) Arm/Hand Layering, Shoulder Tracking & Non-Crossing Geometry ---
+  await test('137. Back-facing poses (N/NE/NW) layer arms behind torso/cape/head, keep shoulders attached during torso lunge, and eliminate X-crossing & glued Ranger hands', async () => {
+    const { getClassWeapons } = await import('./src/shared/armaments.ts');
+    const { computeHeroCombatPose } = await import('./src/client/heroCombatAnim.ts');
+    const { drawHeroSprite } = await import('./src/client/heroSprites.ts');
+    const { direction8ToPose } = await import('./src/client/directionalFacing.ts');
+
+    const classes: HeroClassId[] = ['vanguard', 'ranger', 'arcanist', 'cleric'];
+    const backDirs = ['N', 'NE', 'NW'] as const;
+
+    for (const hc of classes) {
+      const weapons: (string | null)[] = [...getClassWeapons(hc).map((w) => w.id), null];
+      for (const wId of weapons) {
+        // 1. In pure North ('N'), jittering localAim slightly left (-0.06) vs right (+0.06) must NOT flip shoulders or X-cross arms
+        const poseN = direction8ToPose('N', false);
+        for (const jitterAim of [-Math.PI / 2 - 0.06, -Math.PI / 2 + 0.06]) {
+          const idlePose = computeHeroCombatPose({
+            heroClass: hc,
+            weaponId: wId,
+            isAttacking: false,
+            atkProgress: 0,
+            comboStep: 0,
+            swingKind: 'primary',
+            swingAmp: 1,
+            eclipseChargeRatio: 0,
+            localAim: jitterAim,
+            moving: true,
+            isDashing: false,
+            strideA: 0.4,
+            strideB: -0.4,
+            liftA: 1.0,
+            liftB: 0,
+            walkPhase: 1.0,
+            idleWave: 0,
+            bodyBob: 0,
+            headBob: 0,
+            now: 5000,
+            pose: poseN,
+          });
+          assert.ok(idlePose.mainArm.shoulderX > idlePose.torso.x + 2, `${hc}/${wId} N mainShoulder must stay on +X side`);
+          assert.ok(idlePose.offArm.shoulderX < idlePose.torso.x - 2, `${hc}/${wId} N offShoulder must stay on -X side`);
+          assert.ok(idlePose.mainArm.handX > idlePose.torso.x + 3, `${hc}/${wId} N idle mainHand must stay on +X side`);
+          assert.ok(idlePose.offArm.handX < idlePose.torso.x - 3, `${hc}/${wId} N idle offHand must stay on -X side`);
+        }
+
+        // 2. Across back-facing directions (N, NE, NW) and all 3 combo beats, shoulders stay glued to torso and hand reach stays realistic
+        for (const dir of backDirs) {
+          const dirPose = direction8ToPose(dir, dir === 'NW');
+          const localAim = Math.atan2(
+            Math.sin(dirPose.angleRad),
+            dirPose.facingLeft ? -Math.cos(dirPose.angleRad) : Math.cos(dirPose.angleRad)
+          );
+          for (const step of [0, 1, 2]) {
+            const p = computeHeroCombatPose({
+              heroClass: hc,
+              weaponId: wId,
+              isAttacking: true,
+              atkProgress: 0.45,
+              comboStep: step,
+              swingKind: 'primary',
+              swingAmp: 1,
+              eclipseChargeRatio: 0,
+              localAim,
+              moving: true,
+              isDashing: false,
+              strideA: 0.3,
+              strideB: -0.3,
+              liftA: 0.6,
+              liftB: 0,
+              walkPhase: 0.8,
+              idleWave: 0,
+              bodyBob: 0,
+              headBob: 0,
+              now: 5000,
+              pose: dirPose,
+            });
+            const mainShDist = Math.hypot(p.mainArm.shoulderX - p.torso.x, p.mainArm.shoulderY - (p.torso.y - 3.5));
+            const offShDist = Math.hypot(p.offArm.shoulderX - p.torso.x, p.offArm.shoulderY - (p.torso.y - 3.5));
+            assert.ok(mainShDist <= 8.5, `${hc}/${wId} @ ${dir} beat ${step} mainShoulder detached (${mainShDist.toFixed(2)})`);
+            assert.ok(offShDist <= 8.5, `${hc}/${wId} @ ${dir} beat ${step} offShoulder detached (${offShDist.toFixed(2)})`);
+            const mainReach = Math.hypot(p.mainArm.handX - p.mainArm.shoulderX, p.mainArm.handY - p.mainArm.shoulderY);
+            const offReach = Math.hypot(p.offArm.handX - p.offArm.shoulderX, p.offArm.handY - p.offArm.shoulderY);
+            assert.ok(mainReach <= 15.0, `${hc}/${wId} @ ${dir} beat ${step} mainArm over-stretched (${mainReach.toFixed(2)})`);
+            assert.ok(offReach <= 15.0, `${hc}/${wId} @ ${dir} beat ${step} offArm over-stretched (${offReach.toFixed(2)})`);
+          }
+        }
+      }
+    }
+
+    // 3. Ranger idle vs charging/attacking off-hand separation
+    const poseE = direction8ToPose('E', false);
+    const rangerIdle = computeHeroCombatPose({
+      heroClass: 'ranger',
+      weaponId: 'ranger_ashwood_recurve',
+      isAttacking: false,
+      atkProgress: 0,
+      comboStep: 0,
+      swingKind: 'primary',
+      swingAmp: 1,
+      eclipseChargeRatio: 0,
+      localAim: 0,
+      moving: false,
+      isDashing: false,
+      strideA: 0,
+      strideB: 0,
+      liftA: 0,
+      liftB: 0,
+      walkPhase: 0,
+      idleWave: 0,
+      bodyBob: 0,
+      headBob: 0,
+      now: 5000,
+      pose: poseE,
+    });
+    assert.ok(
+      Math.hypot(rangerIdle.mainArm.handX - rangerIdle.offArm.handX, rangerIdle.mainArm.handY - rangerIdle.offArm.handY) > 12,
+      'Ranger idle bow hand and off-hand must remain separated instead of glued together'
+    );
+
+    // 4. Verify back-facing N/NE/NW renders draw back-arms BEFORE helmet/hood/hat head fills (never pasted on top of head/cape)
+    for (const hc of classes) {
+      for (const dir of backDirs) {
+        const pose = direction8ToPose(dir, dir === 'NW');
+        const ops: string[] = [];
+        let curLineWidth = 1;
+        let curStroke = '';
+        let curFill = '';
+        const noop = () => {};
+        const ctx = {
+          get fillStyle() { return curFill; },
+          set fillStyle(v: string) { curFill = String(v); },
+          get strokeStyle() { return curStroke; },
+          set strokeStyle(v: string) { curStroke = String(v); },
+          get lineWidth() { return curLineWidth; },
+          set lineWidth(v: number) { curLineWidth = v; },
+          lineCap: 'butt',
+          lineJoin: 'miter',
+          globalAlpha: 1,
+          shadowColor: 'transparent',
+          shadowBlur: 0,
+          save: noop,
+          restore: noop,
+          translate: noop,
+          rotate: noop,
+          scale: noop,
+          setLineDash: noop,
+          beginPath: noop,
+          closePath: noop,
+          moveTo: noop,
+          lineTo: noop,
+          quadraticCurveTo: noop,
+          arc: noop,
+          ellipse: noop,
+          fillRect: (_x: number, y: number) => {
+            if (y <= -14) ops.push('headRect');
+          },
+          strokeRect: noop,
+          fill: noop,
+          stroke: () => {
+            if (curLineWidth >= 2.1 && curLineWidth <= 3.7) ops.push('armStroke');
+          },
+          fillText: noop,
+          createRadialGradient: () => ({ addColorStop: noop }),
+          createLinearGradient: () => ({ addColorStop: noop }),
+        } as unknown as CanvasRenderingContext2D;
+
+        drawHeroSprite(
+          ctx,
+          { heroClass: hc, attackAnimMs: 0, vx: 0, vy: -10, hasteMs: 0, shield: 20 },
+          160,
+          160,
+          {
+            aimAngle: pose.angleRad,
+            bob: 0,
+            moving: true,
+            now: 5000,
+            facingLeft: pose.facingLeft,
+            facingDirection: dir,
+          }
+        );
+        const firstHeadIdx = ops.indexOf('headRect');
+        const lastArmIdx = ops.lastIndexOf('armStroke');
+        assert.ok(lastArmIdx !== -1 && firstHeadIdx !== -1 && lastArmIdx < firstHeadIdx,
+          `${hc} @ ${dir}: expected back-facing arm strokes (${lastArmIdx}) to finish before head/cape (${firstHeadIdx})`);
+      }
+    }
   });
 
   console.log(`\nAll regression tests completed: ${passed}/${total} passed.`);

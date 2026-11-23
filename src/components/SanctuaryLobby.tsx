@@ -30,7 +30,9 @@ import {
 import { TouchSettingsModal } from './TouchSettingsModal.tsx';
 import { useFullscreenState } from '../client/fullscreen.ts';
 import { hydrateDailyQuestsForAccount } from '../shared/dailyQuests.ts';
+import { hydrateArmamentShopForAccount } from '../shared/armamentShop.ts';
 import { DailyQuestsPanel } from './DailyQuestsPanel.tsx';
+import { ArmamentShopPanel } from './ArmamentShopPanel.tsx';
 
 interface SanctuaryLobbyProps {
   user: UserProfile;
@@ -51,7 +53,7 @@ interface SanctuaryLobbyProps {
   errorBanner: string | null;
 }
 
-type LobbyTab = 'expeditions' | 'quests' | 'classes' | 'codex' | 'controls';
+type LobbyTab = 'expeditions' | 'quests' | 'shop' | 'classes' | 'codex' | 'controls';
 
 export const SanctuaryLobby: React.FC<SanctuaryLobbyProps> = ({
   user,
@@ -153,6 +155,10 @@ export const SanctuaryLobby: React.FC<SanctuaryLobbyProps> = ({
   const dailySummary = hydrateDailyQuestsForAccount(user);
   const readyDailyCount = dailySummary.quests.filter((q) => q.completed && !q.claimed).length;
   const completedDailyCount = dailySummary.quests.filter((q) => q.completed).length;
+  const shopSummary = hydrateArmamentShopForAccount(user);
+  const affordableShopCount = shopSummary.items.filter(
+    (item) => item.classMatch && !item.owned && item.canAfford
+  ).length;
 
   return (
     <div className="min-h-screen bg-[#17171F] text-[#ECEAF2] flex flex-col">
@@ -175,6 +181,7 @@ export const SanctuaryLobby: React.FC<SanctuaryLobbyProps> = ({
             [
               ['expeditions', 'Expeditions'],
               ['quests', 'Daily Quests'],
+              ['shop', 'Armory Shop'],
               ['classes', 'Hero Classes'],
               ['codex', 'Relic Codex'],
               ['controls', 'Controls'],
@@ -197,6 +204,11 @@ export const SanctuaryLobby: React.FC<SanctuaryLobbyProps> = ({
               {id === 'quests' && readyDailyCount > 0 && (
                 <span className="px-1.5 py-0.5 bg-[#1B2C24] border border-[#34D399] text-[#6EE7B7] font-mono text-[10px] font-semibold tabular-nums leading-none">
                   {readyDailyCount}
+                </span>
+              )}
+              {id === 'shop' && affordableShopCount > 0 && (
+                <span className="px-1.5 py-0.5 bg-[#2C2415] border border-[#D9AA52] text-[#FCD34D] font-mono text-[10px] font-semibold tabular-nums leading-none">
+                  {affordableShopCount}
                 </span>
               )}
             </button>
@@ -243,7 +255,17 @@ export const SanctuaryLobby: React.FC<SanctuaryLobbyProps> = ({
               <span aria-hidden="true">·</span>
               <span>Lv {user.level || 1}</span>
               <span aria-hidden="true">·</span>
-              <span className="text-[#FBBF24]">{user.gold ?? 0} Gold</span>
+              <button
+                type="button"
+                onClick={() => {
+                  sfx.playUiClick();
+                  setActiveTab('shop');
+                }}
+                className="text-[#FBBF24] underline decoration-[#D9AA52]/50 hover:text-white cursor-pointer"
+                title="Open Sanctuary Armory Shop"
+              >
+                {user.gold ?? 0} Gold
+              </button>
               <span aria-hidden="true">·</span>
               <span>{onlineCount} Online</span>
               <span aria-hidden="true">·</span>
@@ -549,9 +571,21 @@ export const SanctuaryLobby: React.FC<SanctuaryLobbyProps> = ({
                       );
                     })()}
 
-                    <p className="text-[11px] text-[#8C8A9E] font-mono pt-1">
-                       This account is locked to this class. To play as another hero class, create a separate adventurer account.
-                    </p>
+                    <div className="pt-2 flex flex-wrap items-center justify-between gap-3 border-t border-[#2E2D3D]">
+                      <p className="text-[11px] text-[#8C8A9E] font-mono">
+                        {shopSummary.ownedClassCount}/{shopSummary.totalClassCount} Class Armaments Unlocked
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          sfx.playUiClick();
+                          setActiveTab('shop');
+                        }}
+                        className="stone-button stone-button-gold py-1.5 px-3.5 text-xs whitespace-nowrap"
+                      >
+                        Visit Armory Shop
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -667,6 +701,15 @@ export const SanctuaryLobby: React.FC<SanctuaryLobbyProps> = ({
         {/* TAB 1B: DEDICATED DAILY QUESTS VIEW */}
         {activeTab === 'quests' && (
           <DailyQuestsPanel
+            user={user}
+            authToken={authToken}
+            onUserUpdated={onUserUpdated}
+          />
+        )}
+
+        {/* TAB 1C: SANCTUARY ARMORY SHOP */}
+        {activeTab === 'shop' && (
+          <ArmamentShopPanel
             user={user}
             authToken={authToken}
             onUserUpdated={onUserUpdated}

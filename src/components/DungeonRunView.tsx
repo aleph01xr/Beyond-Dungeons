@@ -1308,7 +1308,8 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
                     <span>
                       FRENZY +{Math.round(ARMAMENT_TUNING.weapons.crimson.frenzyDamageBonusPct * 100)}% DMG ·{' '}
                       {Math.round(ARMAMENT_TUNING.weapons.crimson.frenzyLifestealPct * 100)}% LS · +
-                      {Math.round(ARMAMENT_TUNING.weapons.crimson.frenzyAttackSpeedBonusPct * 100)}% SPD
+                      {Math.round(ARMAMENT_TUNING.weapons.crimson.frenzyAttackSpeedBonusPct * 100)}% SPD · +
+                      {Math.round(ARMAMENT_TUNING.weapons.crimson.frenzyMoveSpeedBonusPct * 100)}% MS
                     </span>
                     <span>{((me.crimsonFrenzyMs || 0) / 1000).toFixed(1)}s</span>
                   </div>

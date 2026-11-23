@@ -658,6 +658,7 @@ export interface PlayerState {
   storedGrace?: number;
   clericSanctity?: number;
   eclipseChargeRatio?: number;
+  attackComboStep?: number;
   bastionCounterMs?: number;
   bastionCounterMaxMs?: number;
   crimsonFrenzyMs?: number;
@@ -757,7 +758,8 @@ export interface ProjectileState {
     | 'fireball'
     | 'frost_lance'
     | 'arcane_orb'
-    | 'arcane_barrage';
+    | 'arcane_barrage'
+    | 'cyclone_arrow';
   x: number;
   y: number;
   vx: number;
@@ -838,7 +840,10 @@ export interface FieldZoneState {
     | 'galeburst_nova'
     | 'cinderflare_blast'
     | 'seraphim_holy_burst'
-    | 'sacred_retribution';
+    | 'sacred_retribution'
+    | 'bulwark_dash_shockwave'
+    | 'frost_volley_cone'
+    | 'sanctified_pulse_wave';
   x: number;
   y: number;
   radius: number;
@@ -866,6 +871,9 @@ export interface FloatingEvent {
   text: string;
   color: string;
   damageCategory?: DamageCategory | 'elemental';
+  attackerId?: string;
+  isPrimaryHit?: boolean;
+  hitTargetId?: string;
 }
 
 export interface ChatMessage {

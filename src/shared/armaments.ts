@@ -72,6 +72,7 @@ export const ARMAMENT_TUNING = {
       frenzyDamageBonusPct: 0.25,
       frenzyLifestealPct: 0.14,
       frenzyAttackSpeedBonusPct: 0.25,
+      frenzyMoveSpeedBonusPct: 0.65,
     },
     stormbreaker: {
       slamForwardOffsetPx: 54,
@@ -87,11 +88,15 @@ export const ARMAMENT_TUNING = {
       dexScalingMult: 0.78,
       attackSpeedMult: 0.92,
       novaZoneTtlMs: 260,
-      cycloneRangePx: 230,
-      cycloneRadiusPx: 120,
+      cycloneArrowRangePx: 330,
+      cycloneArrowSpeedPx: 540,
+      cycloneArrowRadiusPx: 14,
+      cycloneArrowCarryDurationMs: 180,
+      cycloneArrowBaseDamage: 24,
+      cycloneRadiusPx: 132,
       cycloneDurationMs: 2400,
       cycloneTickIntervalMs: 300,
-      cyclonePullSpeedPxPerTick: 18,
+      cyclonePullSpeedPxPerSec: 245,
       cycloneTickBaseDamage: 11,
       cycloneDetonationBaseDamage: 36,
       cycloneCooldownMs: 8500,
@@ -386,7 +391,7 @@ export const WEAPON_CATALOG: readonly WeaponDef[] = [
     effectLines: [
       `+10% Offensive Damage, +${ARMAMENT_TUNING.weapons.crimson.rangeBonusPx}px Reach & +${ARMAMENT_TUNING.weapons.crimson.bonusPierce} Pierce (-6% cadence); 45% Bleed (4s)`,
       'Permanent Shield Lock: While equipped, you cannot gain Shield from any source (existing Shield stays; unequipping restores Shield gain)',
-      `Crimson Frenzy (Tactical): For ${(ARMAMENT_TUNING.weapons.crimson.frenzyDurationMs / 1000).toFixed(1)}s, gain +${Math.round(ARMAMENT_TUNING.weapons.crimson.frenzyDamageBonusPct * 100)}% Damage, +${Math.round(ARMAMENT_TUNING.weapons.crimson.frenzyLifestealPct * 100)}% Lifesteal & +${Math.round(ARMAMENT_TUNING.weapons.crimson.frenzyAttackSpeedBonusPct * 100)}% Attack Speed (${(ARMAMENT_TUNING.weapons.crimson.frenzyCooldownMs / 1000).toFixed(1)}s CD)`,
+      `Crimson Frenzy (Tactical): For ${(ARMAMENT_TUNING.weapons.crimson.frenzyDurationMs / 1000).toFixed(1)}s, gain +${Math.round(ARMAMENT_TUNING.weapons.crimson.frenzyDamageBonusPct * 100)}% Damage, +${Math.round(ARMAMENT_TUNING.weapons.crimson.frenzyLifestealPct * 100)}% Lifesteal, +${Math.round(ARMAMENT_TUNING.weapons.crimson.frenzyAttackSpeedBonusPct * 100)}% Attack Speed & a fading +${Math.round(ARMAMENT_TUNING.weapons.crimson.frenzyMoveSpeedBonusPct * 100)}% Movement Speed buff (${(ARMAMENT_TUNING.weapons.crimson.frenzyCooldownMs / 1000).toFixed(1)}s CD)`,
     ],
     unlockHint: 'Defeat Floor Bosses as Vanguard',
     accent: '#EF4444',
@@ -470,7 +475,7 @@ export const WEAPON_CATALOG: readonly WeaponDef[] = [
     summary: 'Twin-limbed composite bow triggering 3-hit Galeburst wind bursts and replacing Frost Volley with Cyclone Break.',
     effectLines: [
       `Galeburst: Every ${ARMAMENT_TUNING.weapons.galewind.hitsToTrigger}rd confirmed hit on a target triggers an ${ARMAMENT_TUNING.weapons.galewind.aoeRadiusPx}px wind AoE (${Math.round(ARMAMENT_TUNING.weapons.galewind.aoeDamageRatio * 100)}% dmg) & primes Cyclone Break`,
-      `Cyclone Break (Tactical): Summon a ${ARMAMENT_TUNING.weapons.galewind.cycloneRadiusPx}px vortex (${(ARMAMENT_TUNING.weapons.galewind.cycloneDurationMs / 1000).toFixed(1)}s) pulling foes inward; Galeburst-marked targets detonate (${(ARMAMENT_TUNING.weapons.galewind.cycloneCooldownMs / 1000).toFixed(1)}s CD)`,
+      `Cyclone Break (Tactical): Shoot a straight Cyclone Greatarrow that drags hit foes forward and erupts into a ${ARMAMENT_TUNING.weapons.galewind.cycloneRadiusPx}px whirlwind (${(ARMAMENT_TUNING.weapons.galewind.cycloneDurationMs / 1000).toFixed(1)}s), strongly pulling enemies inward & detonating Galeburst marks (${(ARMAMENT_TUNING.weapons.galewind.cycloneCooldownMs / 1000).toFixed(1)}s CD)`,
       `+12% Arrow Velocity & +4% Crit Chance (${Math.round(ARMAMENT_TUNING.weapons.galewind.attackSpeedMult * 100)}% cadence, ${Math.round(ARMAMENT_TUNING.weapons.galewind.dexScalingMult * 100)}% DEX scaling)`,
     ],
     unlockHint: 'Defeat Floor Bosses as Ranger',
@@ -714,7 +719,7 @@ export const WEAPON_TACTICALS: Record<WeaponTacticalId, Omit<ActiveTacticalDef, 
     weaponTacticalId: 'crimson_frenzy',
     name: 'Crimson Frenzy',
     shortTitle: 'Crimson Frenzy',
-    description: `Unleash bloodlust for ${(ARMAMENT_TUNING.weapons.crimson.frenzyDurationMs / 1000).toFixed(1)}s: +${Math.round(ARMAMENT_TUNING.weapons.crimson.frenzyDamageBonusPct * 100)}% Damage, +${Math.round(ARMAMENT_TUNING.weapons.crimson.frenzyLifestealPct * 100)}% Lifesteal, and +${Math.round(ARMAMENT_TUNING.weapons.crimson.frenzyAttackSpeedBonusPct * 100)}% Attack Speed. Shield gain remains permanently locked.`,
+    description: `Unleash bloodlust for ${(ARMAMENT_TUNING.weapons.crimson.frenzyDurationMs / 1000).toFixed(1)}s: +${Math.round(ARMAMENT_TUNING.weapons.crimson.frenzyDamageBonusPct * 100)}% Damage, +${Math.round(ARMAMENT_TUNING.weapons.crimson.frenzyLifestealPct * 100)}% Lifesteal, +${Math.round(ARMAMENT_TUNING.weapons.crimson.frenzyAttackSpeedBonusPct * 100)}% Attack Speed, and a fading +${Math.round(ARMAMENT_TUNING.weapons.crimson.frenzyMoveSpeedBonusPct * 100)}% Movement Speed buff. Shield gain remains permanently locked.`,
     cooldownMs: ARMAMENT_TUNING.weapons.crimson.frenzyCooldownMs,
     accentColor: '#EF4444',
     secondaryColor: '#FCA5A5',
@@ -725,7 +730,7 @@ export const WEAPON_TACTICALS: Record<WeaponTacticalId, Omit<ActiveTacticalDef, 
     weaponTacticalId: 'cyclone_break',
     name: 'Cyclone Break',
     shortTitle: 'Cyclone Break',
-    description: `Summon a ${ARMAMENT_TUNING.weapons.galewind.cycloneRadiusPx}px cyclone for ${(ARMAMENT_TUNING.weapons.galewind.cycloneDurationMs / 1000).toFixed(1)}s that pulls foes inward and detonates Galeburst-marked targets.`,
+    description: `Fire a large Cyclone Greatarrow straight ahead that drags struck foes forward before erupting into a ${ARMAMENT_TUNING.weapons.galewind.cycloneRadiusPx}px whirlwind (${(ARMAMENT_TUNING.weapons.galewind.cycloneDurationMs / 1000).toFixed(1)}s), violently pulling enemies inward and detonating Galeburst marks.`,
     cooldownMs: ARMAMENT_TUNING.weapons.galewind.cycloneCooldownMs,
     accentColor: '#38BDF8',
     secondaryColor: '#6EE7B7',
@@ -1566,3 +1571,58 @@ export function pickNextUnlockableArmamentForClass(
   const pool = floor < 3 && forgedPool.length > 0 ? forgedPool : unowned;
   return pool[Math.floor(Math.random() * pool.length)] ?? unowned[0];
 }
+
+export const PRIMARY_COMBO_RESET_WINDOW_MS = 1400;
+
+export function getWeaponComboStepCount(
+  _heroClass: HeroClassId,
+  _equippedWeapon: string | null | undefined
+): number {
+  return 3;
+}
+
+export function getWeaponSwingDurationMs(
+  heroClass: HeroClassId,
+  equippedWeapon: string | null | undefined,
+  comboStep: number,
+  swingKind: 'primary' | 'tactical' | 'ult'
+): number {
+  if (swingKind === 'ult') return 330;
+  if (swingKind === 'tactical') return 285;
+  const resolved =
+    equippedWeapon === null
+      ? null
+      : (equippedWeapon === undefined
+          ? DEFAULT_WEAPON_BY_CLASS[heroClass]
+          : resolveEquippedWeaponForClass(heroClass, equippedWeapon)?.id ?? null);
+  const step = ((comboStep % 3) + 3) % 3;
+  switch (resolved) {
+    case 'vanguard_sunforged_claymore':
+      return step === 2 ? 265 : 225;
+    case 'vanguard_crimson_halberd':
+      return step === 2 ? 255 : 215;
+    case 'vanguard_stormbreaker_flail':
+      return step === 2 ? 255 : 210;
+    case 'ranger_ashwood_recurve':
+      return step === 2 ? 220 : 195;
+    case 'ranger_galewind_twinbow':
+      return step === 2 ? 205 : 180;
+    case 'ranger_eclipse_longbow':
+      return step === 2 ? 245 : 215;
+    case 'arcanist_runebound_spire':
+      return step === 2 ? 235 : 205;
+    case 'arcanist_cinderflare_rod':
+      return step === 2 ? 235 : 200;
+    case 'arcanist_chronostar_scepter':
+      return step === 2 ? 230 : 195;
+    case 'cleric_dawnstar_mace':
+      return step === 2 ? 250 : 215;
+    case 'cleric_solaris_censer':
+      return step === 2 ? 240 : 210;
+    case 'cleric_seraphim_crozier':
+      return step === 2 ? 255 : 220;
+    default:
+      return step === 2 ? 225 : 195;
+  }
+}
+

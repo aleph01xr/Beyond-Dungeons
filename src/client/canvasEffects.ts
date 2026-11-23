@@ -1254,28 +1254,32 @@ export class ParticleManager {
   }
 
   public spawnSingularityInwardWisps(sx: number, sy: number, radius: number, now: number): void {
-    if (Math.random() < 0.5) {
+    const count = Math.random() < 0.7 ? 2 : 1;
+    for (let i = 0; i < count; i++) {
       const a = Math.random() * Math.PI * 2;
-      const dist = radius + 20 + Math.random() * 30;
+      const dist = radius * (0.65 + Math.random() * 0.72);
       this.acquireParticle({
         x: sx + Math.cos(a) * dist,
         y: sy + Math.sin(a) * dist,
-        vx: -Math.cos(a) * 40,
-        vy: -Math.sin(a) * 40,
-        color: Math.random() > 0.5 ? '#C084FC' : '#E879F9',
+        vx: -Math.cos(a) * 85,
+        vy: -Math.sin(a) * 85,
+        color: i % 2 === 0 ? '#E879F9' : '#F43F5E',
         secondaryColor: '#581C87',
-        size: 2.4 + Math.random() * 1.5,
+        colorEnd: '#0F0718',
+        size: 2.3 + Math.random() * 1.4,
         bornAt: now,
-        maxAgeMs: 500 + Math.random() * 200,
+        maxAgeMs: 420 + Math.random() * 180,
         attractX: sx,
         attractY: sy,
-        attractStrength: 190,
-        attractSpiralBias: 0.45,
-        spiralSpeed: 2.4,
-        friction: 0.95,
+        attractStrength: 340,
+        attractSpiralBias: 0.65,
+        spiralSpeed: 2.8,
+        friction: 0.94,
         rotation: a,
-        angularVelocity: 8,
-        shape: Math.random() > 0.4 ? 'crescent' : 'rune',
+        angularVelocity: 10,
+        stretchWithVelocity: true,
+        stretchFactor: 0.008,
+        shape: Math.random() > 0.35 ? 'streak' : 'crescent',
         glow: true,
         priority: 'high',
       });
@@ -1425,6 +1429,7 @@ export class ParticleManager {
     let attractStrength: number | undefined = undefined;
     let attractSpiralBias: number | undefined = undefined;
     let gravity: number | undefined = undefined;
+    let spiralSpeed: number | undefined = undefined;
     let maxAgeMs = 220 + Math.random() * 120;
 
     if (proj.style === 'arcane') {
@@ -1597,6 +1602,17 @@ export class ParticleManager {
       stretchWithVelocity = true;
       stretchFactor = 0.009;
       maxAgeMs = 180 + Math.random() * 100;
+    } else if (proj.style === 'cyclone_arrow') {
+      color = Math.random() > 0.45 ? '#38BDF8' : '#6EE7B7';
+      secondaryColor = '#FFFFFF';
+      colorEnd = '#0284C7';
+      shape = Math.random() > 0.4 ? 'crescent' : 'streak';
+      size = 2.8;
+      stretchWithVelocity = true;
+      stretchFactor = 0.011;
+      spiralSpeed = 3.2;
+      curveDrift = (Math.random() > 0.5 ? 1 : -1) * 58;
+      maxAgeMs = 260 + Math.random() * 110;
     }
 
     this.acquireParticle({
@@ -1622,6 +1638,7 @@ export class ParticleManager {
       attractY,
       attractStrength,
       attractSpiralBias,
+      spiralSpeed: proj.style === 'cyclone_arrow' ? 3.2 : undefined,
       glow: true,
       priority: 'normal',
     });
@@ -2493,8 +2510,8 @@ export class ParticleManager {
   }
 
   /**
-   * VANGUARD (Tactical: Bulwark Dash): Shield slam lunge leaving speed streaks,
-   * dust clouds, an 84px stun shockwave ring, and bursting shield hexagons.
+   * VANGUARD (Tactical: Bulwark Dash): Heavy shield bash dash with blazing golden-azure
+   * speed corridor, triple shockwave rings, steel bastion hexagons, and stun spark arcs.
    */
   public spawnVanguardBulwarkDash(
     fromX: number,
@@ -2504,49 +2521,52 @@ export class ParticleManager {
     angle: number,
     now: number = performance.now()
   ): void {
-    // 1. Takeoff dust clouds at origin
-    for (let i = 0; i < 3; i++) {
+    // 1. Heavy boot-plant takeoff dust clouds at origin
+    for (let i = 0; i < 5; i++) {
+      const spread = angle + Math.PI + (Math.random() - 0.5) * 0.9;
       this.acquireParticle({
         x: fromX + (Math.random() - 0.5) * 10,
         y: fromY + 6 + (Math.random() - 0.5) * 6,
-        vx: -Math.cos(angle) * (25 + Math.random() * 20),
-        vy: -Math.sin(angle) * (25 + Math.random() * 20) - 8,
-        color: '#94A3B8',
+        vx: Math.cos(spread) * (32 + Math.random() * 28),
+        vy: Math.sin(spread) * (32 + Math.random() * 28) - 8,
+        color: '#CBD5E1',
         colorEnd: '#334155',
-        size: 3.5 + Math.random() * 1.5,
-        startScale: 0.8,
-        endScale: 1.7,
+        size: 3.6 + Math.random() * 1.8,
+        startScale: 0.85,
+        endScale: 1.8,
         bornAt: now,
-        maxAgeMs: 320,
+        maxAgeMs: 340,
         shape: 'smoke',
-        alphaStart: 0.7,
+        alphaStart: 0.78,
         alphaEnd: 0,
         priority: 'normal',
       });
     }
 
-    // 2. Rush streaks between origin and impact
-    for (let i = 0; i < 6; i++) {
-      const t = i / 5;
+    // 2. Twin-edge dash rush streaks between origin and impact
+    for (let i = 0; i < 10; i++) {
+      const t = i / 9;
+      const lat = (i % 2 === 0 ? 1 : -1) * 7;
       this.acquireParticle({
-        x: fromX + (toX - fromX) * t,
-        y: fromY + (toY - fromY) * t,
-        vx: Math.cos(angle) * 40,
-        vy: Math.sin(angle) * 40,
-        color: i % 2 === 0 ? '#FBBF24' : '#93C5FD',
-        size: 2.5,
+        x: fromX + (toX - fromX) * t - Math.sin(angle) * lat,
+        y: fromY + (toY - fromY) * t + Math.cos(angle) * lat,
+        vx: Math.cos(angle) * (75 + Math.random() * 55),
+        vy: Math.sin(angle) * (75 + Math.random() * 55),
+        color: i % 2 === 0 ? '#FBBF24' : '#60A5FA',
+        secondaryColor: '#FFFFFF',
+        size: 2.8,
         bornAt: now,
-        maxAgeMs: 240,
+        maxAgeMs: 260,
         rotation: angle,
         stretchWithVelocity: true,
-        stretchFactor: 0.01,
+        stretchFactor: 0.012,
         shape: 'streak',
         glow: true,
         priority: 'high',
       });
     }
 
-    // 3. Stun slam shockwave rings at destination (84px stun radius)
+    // 3. Stun slam & shield-aura shockwave rings at destination
     this.acquireParticle({
       x: toX,
       y: toY,
@@ -2555,13 +2575,13 @@ export class ParticleManager {
       color: '#F59E0B',
       size: 4,
       ringRadius: 8,
-      ringMaxRadius: 82,
-      ringLineWidth: 2.5,
+      ringMaxRadius: 84,
+      ringLineWidth: 3.2,
       bornAt: now,
-      maxAgeMs: 300,
+      maxAgeMs: 320,
       shape: 'ring',
       glow: true,
-      alphaStart: 0.95,
+      alphaStart: 0.96,
       alphaEnd: 0,
       priority: 'critical',
     });
@@ -2572,38 +2592,239 @@ export class ParticleManager {
       vy: 0,
       color: '#93C5FD',
       size: 4,
-      ringRadius: 6,
-      ringMaxRadius: 56,
-      ringLineWidth: 1.8,
+      ringRadius: 12,
+      ringMaxRadius: 145,
+      ringLineWidth: 2.0,
       bornAt: now,
-      maxAgeMs: 260,
+      maxAgeMs: 380,
       shape: 'ring',
       glow: true,
-      alphaStart: 0.85,
+      alphaStart: 0.72,
       alphaEnd: 0,
       priority: 'high',
     });
 
-    // 4. Radial hexagon shield barrier & steel shards
-    for (let i = 0; i < 8; i++) {
-      const a = (i * Math.PI * 2) / 8 + angle * 0.25;
-      const sp = 110 + Math.random() * 70;
+    // 4. Radial armored hexagons, shield crests & stun starbursts
+    for (let i = 0; i < 12; i++) {
+      const a = (i * Math.PI * 2) / 12 + angle * 0.2;
+      const sp = 120 + Math.random() * 85;
       this.acquireParticle({
-        x: toX,
-        y: toY,
+        x: toX + Math.cos(a) * 8,
+        y: toY + Math.sin(a) * 8,
         vx: Math.cos(a) * sp,
         vy: Math.sin(a) * sp,
-        color: i % 2 === 0 ? '#F59E0B' : '#60A5FA',
+        color: i % 3 === 0 ? '#FDE047' : i % 3 === 1 ? '#60A5FA' : '#F59E0B',
+        secondaryColor: '#FFFFFF',
+        size: i % 3 === 0 ? 3.2 : 2.8,
+        bornAt: now,
+        maxAgeMs: 340 + Math.random() * 110,
+        friction: 0.89,
+        rotation: a,
+        angularVelocity: 7,
+        shape: i % 3 === 0 ? 'starburst' : i % 3 === 1 ? 'hexagon' : 'shard',
+        glow: true,
+        priority: 'high',
+      });
+    }
+  }
+
+  /**
+   * VANGUARD (Sunforged Claymore — Bastion Counter Brace): Golden hexagonal shield-wall
+   * activation with converging gilded ward sparks.
+   */
+  public spawnVanguardBastionBraceCast(
+    x: number,
+    y: number,
+    angle: number,
+    now: number = performance.now()
+  ): void {
+    this.acquireParticle({
+      x,
+      y,
+      vx: 0,
+      vy: 0,
+      color: '#FEF08A',
+      size: 4,
+      ringRadius: 34,
+      ringMaxRadius: 16,
+      ringLineWidth: 2.8,
+      bornAt: now,
+      maxAgeMs: 300,
+      shape: 'ring',
+      glow: true,
+      alphaStart: 0.95,
+      alphaEnd: 0.15,
+      priority: 'critical',
+    });
+
+    for (let i = 0; i < 10; i++) {
+      const a = angle + (i - 4.5) * 0.28;
+      const startR = 38 + Math.random() * 12;
+      this.acquireParticle({
+        x: x + Math.cos(a) * startR,
+        y: y + Math.sin(a) * startR,
+        vx: -Math.cos(a) * 55,
+        vy: -Math.sin(a) * 55,
+        color: i % 2 === 0 ? '#FBBF24' : '#FEF08A',
         secondaryColor: '#FFFFFF',
         size: 2.8,
         bornAt: now,
-        maxAgeMs: 320 + Math.random() * 100,
-        friction: 0.9,
+        maxAgeMs: 380,
+        attractX: x,
+        attractY: y,
+        attractStrength: 220,
+        attractSpiralBias: 0.35,
         rotation: a,
-        angularVelocity: 6,
-        shape: i % 2 === 0 ? 'hexagon' : 'shard',
+        shape: i % 2 === 0 ? 'hexagon' : 'starburst',
         glow: true,
         priority: 'high',
+      });
+    }
+  }
+
+  /**
+   * VANGUARD (Sunforged Claymore — Bastion Counter Cleave): Radiant forward cone
+   * retaliation shockwave with blazing golden crescent arcs & sunburst shrapnel.
+   */
+  public spawnVanguardBastionCleaveBurst(
+    x: number,
+    y: number,
+    angle: number,
+    radius: number = 116,
+    now: number = performance.now()
+  ): void {
+    this.acquireParticle({
+      x: x + Math.cos(angle) * 20,
+      y: y + Math.sin(angle) * 20,
+      vx: 0,
+      vy: 0,
+      color: '#FEF08A',
+      size: 4,
+      ringRadius: 10,
+      ringMaxRadius: radius,
+      ringLineWidth: 3.2,
+      bornAt: now,
+      maxAgeMs: 280,
+      shape: 'ring',
+      glow: true,
+      alphaStart: 0.95,
+      alphaEnd: 0,
+      priority: 'critical',
+    });
+
+    for (let i = 0; i < 14; i++) {
+      const spread = angle + (Math.random() - 0.5) * 1.9;
+      const sp = 180 + Math.random() * 140;
+      this.acquireParticle({
+        x: x + Math.cos(spread) * 14,
+        y: y + Math.sin(spread) * 14,
+        vx: Math.cos(spread) * sp,
+        vy: Math.sin(spread) * sp,
+        color: i % 3 === 0 ? '#FFFFFF' : i % 3 === 1 ? '#FDE047' : '#F59E0B',
+        secondaryColor: '#FEF08A',
+        size: 2.6 + Math.random() * 1.6,
+        bornAt: now,
+        maxAgeMs: 270 + Math.random() * 110,
+        friction: 0.88,
+        rotation: spread,
+        stretchWithVelocity: true,
+        stretchFactor: 0.01,
+        shape: i % 3 === 0 ? 'crescent' : i % 3 === 1 ? 'streak' : 'starburst',
+        glow: true,
+        priority: 'high',
+      });
+    }
+  }
+
+  /**
+   * VANGUARD (Crimson War Axe — Crimson Frenzy): Explosive crimson battle-frenzy
+   * aura eruption with jagged blood crescents, flames, and raging runes.
+   */
+  public spawnVanguardCrimsonFrenzyCast(
+    x: number,
+    y: number,
+    now: number = performance.now()
+  ): void {
+    this.acquireParticle({
+      x,
+      y,
+      vx: 0,
+      vy: 0,
+      color: '#EF4444',
+      size: 4,
+      ringRadius: 6,
+      ringMaxRadius: 68,
+      ringLineWidth: 3.2,
+      bornAt: now,
+      maxAgeMs: 320,
+      shape: 'ring',
+      glow: true,
+      alphaStart: 0.98,
+      alphaEnd: 0,
+      priority: 'critical',
+    });
+    this.acquireParticle({
+      x,
+      y,
+      vx: 0,
+      vy: 0,
+      color: '#FCA5A5',
+      size: 4,
+      ringRadius: 4,
+      ringMaxRadius: 42,
+      ringLineWidth: 2.0,
+      bornAt: now,
+      maxAgeMs: 240,
+      shape: 'ring',
+      glow: true,
+      alphaStart: 0.9,
+      alphaEnd: 0,
+      priority: 'high',
+    });
+
+    for (let i = 0; i < 14; i++) {
+      const a = (i * Math.PI * 2) / 14 + (Math.random() - 0.5) * 0.2;
+      const sp = 95 + Math.random() * 90;
+      this.acquireParticle({
+        x,
+        y,
+        vx: Math.cos(a) * sp,
+        vy: Math.sin(a) * sp - 12,
+        color: i % 3 === 0 ? '#FCA5A5' : i % 3 === 1 ? '#EF4444' : '#DC2626',
+        secondaryColor: '#FEF2F2',
+        colorEnd: '#7F1D1D',
+        size: 2.8 + Math.random() * 1.4,
+        bornAt: now,
+        maxAgeMs: 340 + Math.random() * 140,
+        friction: 0.9,
+        rotation: a,
+        angularVelocity: (i % 2 === 0 ? 1 : -1) * 8,
+        shape: i % 3 === 0 ? 'crescent' : i % 3 === 1 ? 'flame' : 'rune',
+        glow: true,
+        priority: 'high',
+      });
+    }
+  }
+
+  public spawnCrimsonFrenzyMote(x: number, y: number, now: number): void {
+    if (Math.random() < 0.35) {
+      const a = Math.random() * Math.PI * 2;
+      const r = 10 + Math.random() * 11;
+      this.acquireParticle({
+        x: x + Math.cos(a) * r,
+        y: y + Math.sin(a) * r * 0.65,
+        vx: (Math.random() - 0.5) * 18,
+        vy: -28 - Math.random() * 24,
+        color: Math.random() > 0.4 ? '#EF4444' : '#FCA5A5',
+        secondaryColor: '#FFFFFF',
+        colorEnd: '#7F1D1D',
+        size: 2.1,
+        bornAt: now,
+        maxAgeMs: 360,
+        gravity: -16,
+        shape: Math.random() > 0.5 ? 'flame' : 'spark',
+        glow: true,
+        priority: 'low',
       });
     }
   }
@@ -2871,8 +3092,8 @@ export class ParticleManager {
   }
 
   /**
-   * RANGER (Tactical: Frost Volley): Crystalline 5-arrow fan release with icy mist
-   * and chilled bowstring shockwave ring.
+   * RANGER (Tactical: Frost Volley): Crisp icy bowstring shockwave, 5 glacial vapor trails,
+   * and crystalline frost shards fanning out along the volley cone.
    */
   public spawnRangerFrostVolleyCast(
     x: number,
@@ -2880,28 +3101,28 @@ export class ParticleManager {
     aimAngle: number,
     now: number = performance.now()
   ): void {
-    // 1. Crisp frost bow release ring
+    // 1. Twin icy bowstring shockwave rings
     this.acquireParticle({
-      x: x + Math.cos(aimAngle) * 12,
-      y: y + Math.sin(aimAngle) * 12,
+      x: x + Math.cos(aimAngle) * 14,
+      y: y + Math.sin(aimAngle) * 14,
       vx: 0,
       vy: 0,
       color: '#BAE6FD',
       size: 3,
       ringRadius: 4,
-      ringMaxRadius: 24,
-      ringLineWidth: 1.8,
+      ringMaxRadius: 34,
+      ringLineWidth: 2.2,
       bornAt: now,
-      maxAgeMs: 220,
+      maxAgeMs: 240,
       shape: 'ring',
       glow: true,
       priority: 'high',
     });
 
-    // 2. 5-arrow fan crystalline shards + chilled mist
+    // 2. 5-arrow fan glacial mist trails & crystalline frost shards
     for (let i = -2; i <= 2; i++) {
       const ang = aimAngle + i * 0.14;
-      const sp = 140 + Math.random() * 50;
+      const sp = 175 + Math.random() * 65;
       this.acquireParticle({
         x: x + Math.cos(ang) * 16,
         y: y + Math.sin(ang) * 16,
@@ -2910,13 +3131,389 @@ export class ParticleManager {
         color: i === 0 ? '#FFFFFF' : '#38BDF8',
         secondaryColor: '#BAE6FD',
         colorEnd: '#0284C7',
-        size: 2.5,
+        size: 2.8,
         bornAt: now,
-        maxAgeMs: 260,
+        maxAgeMs: 290,
         friction: 0.89,
         rotation: ang,
-        angularVelocity: (Math.random() - 0.5) * 10,
-        shape: Math.abs(i) % 2 === 0 ? 'shard' : 'diamond',
+        stretchWithVelocity: true,
+        stretchFactor: 0.008,
+        shape: 'streak',
+        glow: true,
+        priority: 'high',
+      });
+      this.acquireParticle({
+        x: x + Math.cos(ang) * 18,
+        y: y + Math.sin(ang) * 18,
+        vx: Math.cos(ang) * (sp * 0.72),
+        vy: Math.sin(ang) * (sp * 0.72),
+        color: '#E0F2FE',
+        secondaryColor: '#38BDF8',
+        size: 2.4,
+        bornAt: now,
+        maxAgeMs: 320,
+        friction: 0.91,
+        rotation: ang,
+        angularVelocity: (i % 2 === 0 ? 1 : -1) * 9,
+        shape: Math.abs(i) % 2 === 0 ? 'shard' : 'starburst',
+        glow: true,
+        priority: 'high',
+      });
+    }
+  }
+
+  /**
+   * RANGER (Galewind Twinbow — Cyclone Greatarrow launch): Wind-snap bowstring flare
+   * and compressed emerald-cyan gale jet propelling the big straight arrow.
+   */
+  public spawnRangerCycloneArrowCast(
+    x: number,
+    y: number,
+    aimAngle: number,
+    now: number = performance.now()
+  ): void {
+    this.acquireParticle({
+      x: x + Math.cos(aimAngle) * 16,
+      y: y + Math.sin(aimAngle) * 16,
+      vx: 0,
+      vy: 0,
+      color: '#6EE7B7',
+      size: 4,
+      ringRadius: 4,
+      ringMaxRadius: 38,
+      ringLineWidth: 2.4,
+      bornAt: now,
+      maxAgeMs: 240,
+      shape: 'ring',
+      glow: true,
+      priority: 'critical',
+    });
+
+    for (let i = 0; i < 10; i++) {
+      const spread = aimAngle + (Math.random() - 0.5) * 0.55;
+      const sp = 140 + Math.random() * 140;
+      this.acquireParticle({
+        x: x + Math.cos(aimAngle) * 14,
+        y: y + Math.sin(aimAngle) * 14,
+        vx: Math.cos(spread) * sp,
+        vy: Math.sin(spread) * sp,
+        color: i % 2 === 0 ? '#38BDF8' : '#6EE7B7',
+        secondaryColor: '#FFFFFF',
+        colorEnd: '#0D9488',
+        size: 2.6,
+        bornAt: now,
+        maxAgeMs: 280,
+        friction: 0.9,
+        stretchWithVelocity: true,
+        stretchFactor: 0.01,
+        shape: i % 2 === 0 ? 'crescent' : 'streak',
+        glow: true,
+        priority: 'high',
+      });
+    }
+  }
+
+  /**
+   * RANGER (Galewind Twinbow — Cyclone Break whirlwind eruption burst).
+   */
+  public spawnCycloneWhirlwindBurst(
+    x: number,
+    y: number,
+    radius: number = 132,
+    now: number = performance.now()
+  ): void {
+    this.acquireParticle({
+      x,
+      y,
+      vx: 0,
+      vy: 0,
+      color: '#6EE7B7',
+      size: 4,
+      ringRadius: radius,
+      ringMaxRadius: 16,
+      ringLineWidth: 3.0,
+      bornAt: now,
+      maxAgeMs: 360,
+      shape: 'ring',
+      glow: true,
+      alphaStart: 0.92,
+      alphaEnd: 0.1,
+      priority: 'critical',
+    });
+
+    for (let i = 0; i < 14; i++) {
+      const a = (i * Math.PI * 2) / 14;
+      const dist = radius * (0.45 + Math.random() * 0.5);
+      this.acquireParticle({
+        x: x + Math.cos(a) * dist,
+        y: y + Math.sin(a) * dist,
+        vx: -Math.sin(a) * 135 - Math.cos(a) * 55,
+        vy: Math.cos(a) * 135 - Math.sin(a) * 55,
+        color: i % 2 === 0 ? '#38BDF8' : '#6EE7B7',
+        secondaryColor: '#FFFFFF',
+        colorEnd: '#0F766E',
+        size: 2.8,
+        bornAt: now,
+        maxAgeMs: 420,
+        attractX: x,
+        attractY: y,
+        attractStrength: 340,
+        attractSpiralBias: 0.85,
+        friction: 0.95,
+        stretchWithVelocity: true,
+        stretchFactor: 0.009,
+        shape: i % 2 === 0 ? 'crescent' : 'streak',
+        glow: true,
+        priority: 'high',
+      });
+    }
+  }
+
+  /**
+   * Continuous inward-spiraling wind blades & gale debris for active Cyclone Break whirlwind.
+   */
+  public spawnCycloneWhirlwindMotes(
+    x: number,
+    y: number,
+    radius: number = 132,
+    now: number = performance.now()
+  ): void {
+    const count = Math.random() < 0.75 ? 2 : 1;
+    for (let i = 0; i < count; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const dist = radius * (0.45 + Math.random() * 0.58);
+      // Initial tangential + inward velocity creates natural whirlwind funnel curvature
+      const tanSpeed = 125 + Math.random() * 55;
+      const inSpeed = 55 + Math.random() * 45;
+      this.acquireParticle({
+        x: x + Math.cos(a) * dist,
+        y: y + Math.sin(a) * dist,
+        vx: -Math.sin(a) * tanSpeed - Math.cos(a) * inSpeed,
+        vy: Math.cos(a) * tanSpeed - Math.sin(a) * inSpeed,
+        color: i % 2 === 0 ? '#6EE7B7' : '#38BDF8',
+        secondaryColor: '#ECFDF5',
+        colorEnd: '#0E7490',
+        size: 2.2 + Math.random() * 1.4,
+        bornAt: now,
+        maxAgeMs: 360 + Math.random() * 160,
+        attractX: x,
+        attractY: y,
+        attractStrength: 360,
+        attractSpiralBias: 0.82,
+        friction: 0.95,
+        stretchWithVelocity: true,
+        stretchFactor: 0.009,
+        shape: Math.random() > 0.35 ? 'streak' : 'crescent',
+        glow: true,
+        priority: 'high',
+      });
+    }
+  }
+
+  /**
+   * RANGER (Galewind Twinbow — Galeburst Nova detonation burst).
+   */
+  public spawnGaleburstNovaBurst(
+    x: number,
+    y: number,
+    radius: number = 88,
+    now: number = performance.now()
+  ): void {
+    this.acquireParticle({
+      x,
+      y,
+      vx: 0,
+      vy: 0,
+      color: '#6EE7B7',
+      size: 4,
+      ringRadius: 8,
+      ringMaxRadius: radius,
+      ringLineWidth: 2.8,
+      bornAt: now,
+      maxAgeMs: 260,
+      shape: 'ring',
+      glow: true,
+      priority: 'critical',
+    });
+    for (let i = 0; i < 10; i++) {
+      const a = (i * Math.PI * 2) / 10 + (Math.random() - 0.5) * 0.2;
+      const sp = 140 + Math.random() * 90;
+      this.acquireParticle({
+        x,
+        y,
+        vx: Math.cos(a) * sp,
+        vy: Math.sin(a) * sp,
+        color: i % 2 === 0 ? '#6EE7B7' : '#38BDF8',
+        secondaryColor: '#FFFFFF',
+        size: 2.5,
+        bornAt: now,
+        maxAgeMs: 280,
+        friction: 0.9,
+        stretchWithVelocity: true,
+        stretchFactor: 0.009,
+        shape: i % 2 === 0 ? 'crescent' : 'starburst',
+        glow: true,
+        priority: 'high',
+      });
+    }
+  }
+
+  /**
+   * RANGER (Eclipse Siege Longbow — Black Sun zone activation & continuous motes).
+   */
+  public spawnRangerBlackSunCast(
+    x: number,
+    y: number,
+    radius: number = 115,
+    now: number = performance.now()
+  ): void {
+    this.acquireParticle({
+      x,
+      y,
+      vx: 0,
+      vy: 0,
+      color: '#FBBF24',
+      size: 4,
+      ringRadius: radius,
+      ringMaxRadius: 16,
+      ringLineWidth: 2.5,
+      bornAt: now,
+      maxAgeMs: 360,
+      shape: 'ring',
+      glow: true,
+      priority: 'critical',
+    });
+    for (let i = 0; i < 10; i++) {
+      const a = (i * Math.PI * 2) / 10;
+      this.acquireParticle({
+        x: x + Math.cos(a) * (radius * 0.72),
+        y: y + Math.sin(a) * (radius * 0.72),
+        vx: -Math.cos(a) * 55,
+        vy: -Math.sin(a) * 55,
+        color: i % 2 === 0 ? '#A855F7' : '#FBBF24',
+        secondaryColor: '#FEF08A',
+        colorEnd: '#1E1B4B',
+        size: 2.8,
+        bornAt: now,
+        maxAgeMs: 420,
+        attractX: x,
+        attractY: y,
+        attractStrength: 240,
+        attractSpiralBias: 0.55,
+        shape: i % 2 === 0 ? 'rune' : 'diamond',
+        glow: true,
+        priority: 'high',
+      });
+    }
+  }
+
+  public spawnBlackSunZoneMotes(
+    x: number,
+    y: number,
+    radius: number = 115,
+    now: number = performance.now()
+  ): void {
+    if (Math.random() < 0.55) {
+      const a = Math.random() * Math.PI * 2;
+      const dist = radius * (0.4 + Math.random() * 0.55);
+      this.acquireParticle({
+        x: x + Math.cos(a) * dist,
+        y: y + Math.sin(a) * dist,
+        vx: -Math.cos(a) * 35,
+        vy: -Math.sin(a) * 35,
+        color: Math.random() > 0.4 ? '#C084FC' : '#FBBF24',
+        secondaryColor: '#FEF08A',
+        colorEnd: '#09090B',
+        size: 2.2,
+        bornAt: now,
+        maxAgeMs: 420,
+        attractX: x,
+        attractY: y,
+        attractStrength: 210,
+        attractSpiralBias: 0.5,
+        shape: Math.random() > 0.5 ? 'rune' : 'crescent',
+        glow: true,
+        priority: 'normal',
+      });
+    }
+  }
+
+  /**
+   * RANGER (Eclipse Siege Longbow — Black Sun celestial arrow strike detonation).
+   */
+  public spawnRangerBlackSunStrike(
+    x: number,
+    y: number,
+    radius: number = 115,
+    now: number = performance.now()
+  ): void {
+    this.acquireParticle({
+      x,
+      y,
+      vx: 0,
+      vy: 0,
+      color: '#FBBF24',
+      size: 5,
+      ringRadius: 8,
+      ringMaxRadius: radius,
+      ringLineWidth: 3.4,
+      bornAt: now,
+      maxAgeMs: 340,
+      shape: 'ring',
+      glow: true,
+      priority: 'critical',
+    });
+    this.acquireParticle({
+      x,
+      y,
+      vx: 0,
+      vy: 0,
+      color: '#C084FC',
+      size: 5,
+      ringRadius: 4,
+      ringMaxRadius: radius * 0.72,
+      ringLineWidth: 2.4,
+      bornAt: now,
+      maxAgeMs: 280,
+      shape: 'ring',
+      glow: true,
+      priority: 'critical',
+    });
+    // Descending skyward arrow trail motes
+    for (let i = 0; i < 6; i++) {
+      this.acquireParticle({
+        x: x + (Math.random() - 0.5) * 14,
+        y: y - 160 + i * 26,
+        vx: 0,
+        vy: 140,
+        color: i % 2 === 0 ? '#FEF08A' : '#E879F9',
+        size: 3.0,
+        bornAt: now,
+        maxAgeMs: 240,
+        stretchWithVelocity: true,
+        stretchFactor: 0.01,
+        shape: 'streak',
+        glow: true,
+        priority: 'high',
+      });
+    }
+    for (let i = 0; i < 14; i++) {
+      const a = (i * Math.PI * 2) / 14;
+      const sp = 140 + Math.random() * 120;
+      this.acquireParticle({
+        x,
+        y,
+        vx: Math.cos(a) * sp,
+        vy: Math.sin(a) * sp,
+        color: i % 2 === 0 ? '#FBBF24' : '#A855F7',
+        secondaryColor: '#FFFFFF',
+        colorEnd: '#3B0764',
+        size: 3.0,
+        bornAt: now,
+        maxAgeMs: 360,
+        friction: 0.89,
+        rotation: a,
+        shape: i % 3 === 0 ? 'starburst' : i % 3 === 1 ? 'shard' : 'diamond',
         glow: true,
         priority: 'high',
       });
@@ -4217,14 +4814,33 @@ export class ParticleManager {
   }
 
   /**
-   * CLERIC (Tactical: Sanctified Pulse): Blinding golden wave ring + radiant cross beams.
+   * CLERIC (Tactical: Sanctified Pulse): Twin consecration rings (210px emerald heal halo
+   * + 135px golden smite pulse), central solar starburst, and ascending holy crosses.
    */
   public spawnClericSanctifiedPulse(
     x: number,
     y: number,
     now: number = performance.now()
   ): void {
-    // 1. Expanding golden sacred wave rings (searing 135px radius)
+    // 1. Outer emerald healing halo wave (210px) + inner golden smite wave (135px)
+    this.acquireParticle({
+      x,
+      y,
+      vx: 0,
+      vy: 0,
+      color: '#34D399',
+      size: 4,
+      ringRadius: 12,
+      ringMaxRadius: 210,
+      ringLineWidth: 2.6,
+      bornAt: now,
+      maxAgeMs: 380,
+      shape: 'ring',
+      glow: true,
+      alphaStart: 0.85,
+      alphaEnd: 0,
+      priority: 'critical',
+    });
     this.acquireParticle({
       x,
       y,
@@ -4233,13 +4849,13 @@ export class ParticleManager {
       color: '#FDE047',
       size: 4,
       ringRadius: 8,
-      ringMaxRadius: 120,
-      ringLineWidth: 2.8,
+      ringMaxRadius: 135,
+      ringLineWidth: 3.0,
       bornAt: now,
       maxAgeMs: 340,
       shape: 'ring',
       glow: true,
-      alphaStart: 0.95,
+      alphaStart: 0.96,
       alphaEnd: 0,
       priority: 'critical',
     });
@@ -4254,7 +4870,7 @@ export class ParticleManager {
       ringMaxRadius: 72,
       ringLineWidth: 1.8,
       bornAt: now,
-      maxAgeMs: 260,
+      maxAgeMs: 240,
       shape: 'ring',
       glow: true,
       alphaStart: 0.9,
@@ -4270,31 +4886,119 @@ export class ParticleManager {
       vy: 0,
       color: '#FFFFFF',
       secondaryColor: '#FACC15',
-      size: 6,
+      size: 6.5,
       bornAt: now,
-      maxAgeMs: 260,
+      maxAgeMs: 280,
       shape: 'starburst',
       glow: true,
       priority: 'critical',
     });
 
-    // 3. Radial golden crosses & ascending glints
-    for (let i = 0; i < 10; i++) {
-      const a = (i * Math.PI * 2) / 10;
-      const sp = 110 + Math.random() * 55;
+    // 3. Radial golden crosses & emerald-gold healing glints
+    for (let i = 0; i < 14; i++) {
+      const a = (i * Math.PI * 2) / 14;
+      const sp = 115 + Math.random() * 85;
       this.acquireParticle({
         x,
         y,
         vx: Math.cos(a) * sp,
-        vy: Math.sin(a) * sp - 12,
-        color: i % 2 === 0 ? '#FACC15' : '#FEF08A',
+        vy: Math.sin(a) * sp - 14,
+        color: i % 3 === 0 ? '#34D399' : i % 3 === 1 ? '#FACC15' : '#FEF08A',
         secondaryColor: '#FFFFFF',
-        size: 2.8,
+        size: 2.9,
         bornAt: now,
-        maxAgeMs: 380 + Math.random() * 140,
-        gravity: -22,
+        maxAgeMs: 400 + Math.random() * 140,
+        gravity: -26,
         friction: 0.9,
         shape: i % 2 === 0 ? 'cross' : 'diamond',
+        glow: true,
+        priority: 'high',
+      });
+    }
+  }
+
+  /**
+   * CLERIC (Seraphim Crozier — Seraphic Judgment): Celestial judgment pillar descent
+   * with twin golden shockwave rings, angelic starbursts, and rising radiant sparks.
+   */
+  public spawnClericSeraphicJudgmentBurst(
+    x: number,
+    y: number,
+    radius: number = 110,
+    now: number = performance.now()
+  ): void {
+    this.acquireParticle({
+      x,
+      y,
+      vx: 0,
+      vy: 0,
+      color: '#FDE047',
+      size: 5,
+      ringRadius: 10,
+      ringMaxRadius: radius,
+      ringLineWidth: 3.4,
+      bornAt: now,
+      maxAgeMs: 340,
+      shape: 'ring',
+      glow: true,
+      alphaStart: 0.98,
+      alphaEnd: 0,
+      priority: 'critical',
+    });
+    this.acquireParticle({
+      x,
+      y,
+      vx: 0,
+      vy: 0,
+      color: '#FFFFFF',
+      size: 5,
+      ringRadius: 6,
+      ringMaxRadius: radius * 0.62,
+      ringLineWidth: 2.2,
+      bornAt: now,
+      maxAgeMs: 260,
+      shape: 'ring',
+      glow: true,
+      alphaStart: 0.95,
+      alphaEnd: 0,
+      priority: 'critical',
+    });
+
+    // Descending light pillar streaks
+    for (let i = 0; i < 6; i++) {
+      this.acquireParticle({
+        x: x + (Math.random() - 0.5) * 20,
+        y: y - 150 + i * 24,
+        vx: 0,
+        vy: 130,
+        color: i % 2 === 0 ? '#FEF9C3' : '#FACC15',
+        size: 3.2,
+        bornAt: now,
+        maxAgeMs: 240,
+        stretchWithVelocity: true,
+        stretchFactor: 0.01,
+        shape: 'streak',
+        glow: true,
+        priority: 'high',
+      });
+    }
+
+    for (let i = 0; i < 14; i++) {
+      const a = (i * Math.PI * 2) / 14;
+      const sp = 125 + Math.random() * 95;
+      this.acquireParticle({
+        x,
+        y,
+        vx: Math.cos(a) * sp,
+        vy: Math.sin(a) * sp - 18,
+        color: i % 2 === 0 ? '#FDE047' : '#F59E0B',
+        secondaryColor: '#FFFFFF',
+        size: 3.0,
+        bornAt: now,
+        maxAgeMs: 380 + Math.random() * 120,
+        gravity: -28,
+        friction: 0.89,
+        shape: i % 3 === 0 ? 'starburst' : i % 3 === 1 ? 'cross' : 'diamond',
         glow: true,
         priority: 'high',
       });
@@ -7751,6 +8455,73 @@ export function drawEnhancedProjectile(
       ctx.fillRect(-16, -0.5, 5, 1);
       ctx.fillRect(-19, -0.5, 2, 1);
     }
+
+  } else if (proj.style === 'cyclone_arrow') {
+    // Galewind Twinbow — Cyclone Greatarrow: Massive wind-wrapped piercing arrow with helical gale cone
+    const spin = now * 0.018;
+    const canDrawImg = typeof ctx.drawImage === 'function';
+    const galeHalo = canDrawImg
+      ? getCachedRadialSprite('proj_cyclone_arrow', 64, (grad) => {
+          grad.addColorStop(0, 'rgba(236, 253, 245, 0.8)');
+          grad.addColorStop(0.45, 'rgba(56, 189, 248, 0.45)');
+          grad.addColorStop(0.8, 'rgba(52, 211, 153, 0.2)');
+          grad.addColorStop(1, 'rgba(56, 189, 248, 0)');
+        })
+      : null;
+    if (galeHalo) {
+      ctx.drawImage(galeHalo, -28, -16, 56, 32);
+    }
+
+    // Outer aerodynamic wind-shear cone ahead of the arrowhead
+    ctx.strokeStyle = 'rgba(110, 231, 183, 0.85)';
+    ctx.lineWidth = 2.2;
+    ctx.beginPath();
+    ctx.moveTo(27, 0);
+    ctx.quadraticCurveTo(8, -13, -18, -12);
+    ctx.moveTo(27, 0);
+    ctx.quadraticCurveTo(8, 13, -18, 12);
+    ctx.stroke();
+
+    // Helical spinning wind ribbons wrapping the shaft
+    ctx.strokeStyle = 'rgba(186, 230, 253, 0.9)';
+    ctx.lineWidth = 1.7;
+    ctx.beginPath();
+    for (let s = 0; s <= 12; s++) {
+      const sx = -20 + s * 3.4;
+      const sy = Math.sin(spin + s * 0.75) * (6.5 * (1 - s / 16));
+      if (s === 0) ctx.moveTo(sx, sy);
+      else ctx.lineTo(sx, sy);
+    }
+    ctx.stroke();
+
+    // Heavy cyan-emerald shaft & broadhead spearpoint
+    ctx.fillStyle = '#0E7490';
+    ctx.fillRect(-19, -2.5, 30, 5);
+    ctx.fillStyle = '#6EE7B7';
+    ctx.fillRect(-17, -1.2, 26, 2.4);
+
+    ctx.fillStyle = '#38BDF8';
+    ctx.beginPath();
+    ctx.moveTo(25, 0);
+    ctx.lineTo(7, -8.5);
+    ctx.lineTo(11, 0);
+    ctx.lineTo(7, 8.5);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.fillStyle = '#FFFFFF';
+    ctx.beginPath();
+    ctx.moveTo(23, 0);
+    ctx.lineTo(11, -4);
+    ctx.lineTo(13, 0);
+    ctx.lineTo(11, 4);
+    ctx.closePath();
+    ctx.fill();
+
+    // Broad feathered tail fins
+    ctx.fillStyle = '#34D399';
+    ctx.fillRect(-22, -6.5, 7, 3);
+    ctx.fillRect(-22, 3.5, 7, 3);
 
   } else if (proj.style === 'arcane') {
     const spin = now * 0.009;

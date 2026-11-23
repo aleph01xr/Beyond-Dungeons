@@ -8,7 +8,7 @@ import {
   type PlayerStatusEffect,
   type PropState,
 } from './types.ts';
-import { resolveEquippedVestmentForClass } from './armaments.ts';
+import { ARMAMENT_TUNING, resolveEquippedVestmentForClass } from './armaments.ts';
 
 export interface MovablePlayerLike {
   heroClass: HeroClassId;
@@ -16,6 +16,8 @@ export interface MovablePlayerLike {
   relics: readonly string[];
   equippedVestment?: string | null;
   hasteMs?: number;
+  crimsonFrenzyMs?: number;
+  crimsonFrenzyMaxMs?: number;
   floorBlessings?: readonly FloorBlessingId[];
   speedBoost?: boolean;
   statuses?: readonly PlayerStatusEffect[];
@@ -212,6 +214,11 @@ export function computePlayerMoveSpeed(player: MovablePlayerLike): number {
   }
   if (player.relics.includes('zephyr_greaves')) moveSpeed *= 1.15;
   if ((player.hasteMs || 0) > 0) moveSpeed *= 1.22;
+  if ((player.crimsonFrenzyMs || 0) > 0) {
+    const maxMs = player.crimsonFrenzyMaxMs || ARMAMENT_TUNING.weapons.crimson.frenzyDurationMs;
+    const ratio = Math.max(0, Math.min(1, player.crimsonFrenzyMs! / maxMs));
+    moveSpeed *= 1 + ARMAMENT_TUNING.weapons.crimson.frenzyMoveSpeedBonusPct * ratio;
+  }
 
   if (player.floorBlessings && player.floorBlessings.length > 0) {
     let swiftStacks = 0;

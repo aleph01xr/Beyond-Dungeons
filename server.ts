@@ -60,6 +60,12 @@ import {
   hydrateDailyQuestsForAccount,
   normalizeDailyQuestState,
 } from './src/shared/dailyQuests.ts';
+import {
+  equipArmamentForAccount,
+  hydrateArmamentShopForAccount,
+  purchaseArmamentForAccount,
+  SANCTUARY_GOLD_REWARDS,
+} from './src/shared/armamentShop.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -707,6 +713,7 @@ function attachRoomPersistenceCallbacks(room: GameRoom): void {
         if (floor >= 3) acc.runsCompleted += 1;
         if (isExpeditionRoom) {
           acc.dailyQuests = applyDailyQuestEvent(acc.dailyQuests, 'floors_cleared', 1).state;
+          acc.gold = Math.max(0, Number(acc.gold) || 0) + SANCTUARY_GOLD_REWARDS.floorClearedGold;
         }
         await persistAccount(acc).catch(err => console.error('Failed to persist floor clear:', err));
       }
@@ -720,6 +727,7 @@ function attachRoomPersistenceCallbacks(room: GameRoom): void {
         let next = applyDailyQuestEvent(acc.dailyQuests, 'kills', 1).state;
         if (meta?.isBoss) {
           next = applyDailyQuestEvent(next, 'boss_kills', 1).state;
+          acc.gold = Math.max(0, Number(acc.gold) || 0) + SANCTUARY_GOLD_REWARDS.bossKillGold;
         }
         acc.dailyQuests = next;
       }
@@ -1188,6 +1196,153 @@ async function startServer() {
       res.status(500).json({ error: 'Failed to persist daily quest reward. Please retry.' });
     } finally {
       claimingDailyQuestAccounts.delete(acc.id);
+    }
+  });
+
+  const shopMutationAccounts = new Set<string>();
+
+  app.get('/api/shop/armaments', (req, res) => {
+    const acc = requireAuthenticatedAccount(req, res);
+    if (!acc) return;
+    applyAccountArmamentMigration(acc);
+    const shop = hydrateArmamentShopForAccount(acc);
+    res.json({
+      ok: true,
+      ...shop,
+      user: toPublicProfile(acc),
+    });
+  });
+
+  app.post('/api/shop/armaments/buy', async (req, res) => {
+    const acc = requireAuthenticatedAccount(req, res);
+    if (!acc) return;
+
+    const slot = req.body?.slot === 'weapon' || req.body?.slot === 'vestment' ? req.body.slot : null;
+    const itemId = typeof req.body?.itemId === 'string' ? req.body.itemId.trim() : '';
+    const autoEquip = Boolean(req.body?.autoEquip);
+
+    if (!slot || !itemId) {
+      res.status(400).json({ error: 'Invalid armament selection.' });
+      return;
+    }
+
+    if (shopMutationAccounts.has(acc.id)) {
+      res.status(409).json({ error: 'Armory transaction already in progress.' });
+      return;
+    }
+
+    shopMutationAccounts.add(acc.id);
+    const snapshot = {
+      gold: acc.gold,
+      ownedWeapons: acc.ownedWeapons ? [...acc.ownedWeapons] : undefined,
+      ownedVestments: acc.ownedVestments ? [...acc.ownedVestments] : undefined,
+      equippedWeapon: acc.equippedWeapon,
+      equippedVestment: acc.equippedVestment,
+    };
+
+    try {
+      const purchase = purchaseArmamentForAccount(acc, slot, itemId, { autoEquip });
+      if (!purchase.ok) {
+        res.status(purchase.status).json({ error: purchase.error });
+        return;
+      }
+
+      await persistAccount(acc);
+
+      for (const room of rooms.values()) {
+        if (!room.hasPlayer(acc.id)) continue;
+        room.grantArmament(acc.id, purchase.slot, purchase.item.id);
+        if (purchase.equipped) {
+          room.equipArmament(acc.id, purchase.slot, purchase.item.id);
+        }
+        partyCoordinator.markRoomDirty(room.roomId);
+      }
+
+      res.json({
+        ok: true,
+        purchased: {
+          slot: purchase.slot,
+          itemId: purchase.item.id,
+          name: purchase.item.name,
+          rarity: purchase.item.rarity,
+          accent: purchase.item.accent,
+        },
+        priceGold: purchase.priceGold,
+        equipped: purchase.equipped,
+        goldRemaining: purchase.goldRemaining,
+        shop: purchase.shop,
+        user: toPublicProfile(acc),
+      });
+    } catch (err) {
+      acc.gold = snapshot.gold;
+      acc.ownedWeapons = snapshot.ownedWeapons;
+      acc.ownedVestments = snapshot.ownedVestments;
+      acc.equippedWeapon = snapshot.equippedWeapon;
+      acc.equippedVestment = snapshot.equippedVestment;
+      console.error('Failed to purchase armament:', err);
+      res.status(500).json({ error: 'Failed to persist armament purchase. Please retry.' });
+    } finally {
+      shopMutationAccounts.delete(acc.id);
+    }
+  });
+
+  app.post('/api/shop/armaments/equip', async (req, res) => {
+    const acc = requireAuthenticatedAccount(req, res);
+    if (!acc) return;
+
+    const slot = req.body?.slot === 'weapon' || req.body?.slot === 'vestment' ? req.body.slot : null;
+    const rawItemId = req.body?.itemId;
+    const itemId = rawItemId === null ? null : typeof rawItemId === 'string' ? rawItemId.trim() : '';
+
+    if (!slot || (itemId !== null && !itemId)) {
+      res.status(400).json({ error: 'Invalid armament equip request.' });
+      return;
+    }
+
+    if (shopMutationAccounts.has(acc.id)) {
+      res.status(409).json({ error: 'Armory update already in progress.' });
+      return;
+    }
+
+    shopMutationAccounts.add(acc.id);
+    const snapshot = {
+      equippedWeapon: acc.equippedWeapon,
+      equippedVestment: acc.equippedVestment,
+    };
+
+    try {
+      const equipRes = equipArmamentForAccount(acc, slot, itemId);
+      if (!equipRes.ok) {
+        res.status(equipRes.status).json({ error: equipRes.error });
+        return;
+      }
+
+      await persistAccount(acc);
+
+      for (const room of rooms.values()) {
+        if (!room.hasPlayer(acc.id)) continue;
+        if (equipRes.equippedId === null) {
+          room.unequipArmament(acc.id, equipRes.slot);
+        } else {
+          room.equipArmament(acc.id, equipRes.slot, equipRes.equippedId);
+        }
+        partyCoordinator.markRoomDirty(room.roomId);
+      }
+
+      res.json({
+        ok: true,
+        slot: equipRes.slot,
+        equippedId: equipRes.equippedId,
+        shop: equipRes.shop,
+        user: toPublicProfile(acc),
+      });
+    } catch (err) {
+      acc.equippedWeapon = snapshot.equippedWeapon;
+      acc.equippedVestment = snapshot.equippedVestment;
+      console.error('Failed to update equipped armament:', err);
+      res.status(500).json({ error: 'Failed to save equipped armament. Please retry.' });
+    } finally {
+      shopMutationAccounts.delete(acc.id);
     }
   });
 

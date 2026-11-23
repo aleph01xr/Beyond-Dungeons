@@ -72,6 +72,25 @@ import {
   drawAbilityTargetingIndicator,
   drawPrimaryAttackRangeIndicator,
 } from '../client/abilityIndicator.ts';
+import {
+  getWeaponComboStepCount,
+  getWeaponSwingDurationMs,
+  PRIMARY_COMBO_RESET_WINDOW_MS,
+  resolveActiveTacticalDef,
+  resolveEquippedWeaponForClass,
+} from '../shared/armaments.ts';
+import {
+  applySwingHitStop,
+  computeEffectiveSwingProgress,
+  computeHitStopCameraShake,
+  computeWeaponHitStopDurationMs,
+  createWeaponSwingState,
+  drawImpactFrameOverlay,
+  sampleEnemyImpactVisual,
+  triggerEnemyImpact,
+  type EnemyImpactState,
+  type WeaponSwingAnimationState,
+} from '../client/hitStop.ts';
 import { sfx, soundManager } from '../client/sound.ts';
 import {
   angleDeltaRad,
@@ -186,7 +205,9 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
     bornAt: number;
     durationMs: number;
     kind: HeroSwingKind;
+    comboStep: number;
   } | null>(null);
+  const localComboStepRef = useRef<{ step: number; at: number }>({ step: -1, at: 0 });
   const startRoom = map.rooms.find((r) => r.type === 'start') ?? map.rooms[0];
   const initialCamX = startRoom ? startRoom.cx * TILE_SIZE + TILE_SIZE / 2 : 300;
   const initialCamY = startRoom ? startRoom.cy * TILE_SIZE + TILE_SIZE / 2 : 300;
@@ -438,12 +459,30 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
     const me = snap?.players.find((p) => p.id === playerId) || snap?.players[0];
     if (me) {
       if (me.downed) return;
+      if (
+        kind === 'primary' &&
+        resolveEquippedWeaponForClass(me.heroClass, me.equippedWeapon)?.modifiers.chargeToFire
+      ) {
+        return;
+      }
       if (kind === 'primary' && me.attackAnimMs > 120) return;
       if (kind === 'tactical' && me.skillCooldownMs > 45) return;
       if (kind === 'ult' && me.ultCooldownMs > 45) return;
     }
-    const durationMs = kind === 'ult' ? 320 : kind === 'tactical' ? 280 : 220;
-    localSwingTriggerRef.current = { bornAt: now, durationMs, kind };
+    const heroClass = me?.heroClass ?? 'vanguard';
+    const equippedWeapon = me?.equippedWeapon;
+    let comboStep = me?.attackComboStep ?? 0;
+    if (kind === 'primary') {
+      const count = getWeaponComboStepCount(heroClass, equippedWeapon);
+      const prevLocal = localComboStepRef.current;
+      comboStep =
+        prevLocal.step >= 0 && now - prevLocal.at <= PRIMARY_COMBO_RESET_WINDOW_MS
+          ? (prevLocal.step + 1) % count
+          : 0;
+      localComboStepRef.current = { step: comboStep, at: now };
+    }
+    const durationMs = getWeaponSwingDurationMs(heroClass, equippedWeapon, comboStep, kind);
+    localSwingTriggerRef.current = { bornAt: now, durationMs, kind, comboStep };
   };
 
   // Pre-render dungeon floor & walls
@@ -1143,10 +1182,10 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
       { until: number; lastEmit: number; heroClass: HeroClassId; angle: number }
     >();
     const prevAttackAnimMap = new Map<string, number>();
-    const playerWeaponSwings = new Map<
-      string,
-      { bornAt: number; durationMs: number; kind: HeroSwingKind }
-    >();
+    const prevComboStepMap = new Map<string, number>();
+    const playerWeaponSwings = new Map<string, WeaponSwingAnimationState>();
+    const enemyImpactMap = new Map<string, EnemyImpactState>();
+    let impactVignetteFlash = { until: 0, bornAt: 0, durationMs: 0, alpha: 0, color: '#FFFFFF' };
     let hasInitWorldEffects = false;
     cameraSnappedRef.current = false;
     const entryRoom = map.rooms.find((r) => r.type === 'start') ?? map.rooms[0];
@@ -1496,7 +1535,80 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
               }
             }
             screenShake = Math.min(8, screenShake + 2.6);
-          } else if (ev.text.includes('Relic')) {
+          }
+
+          // Weapon Connection Hit-Stop & Impact Frames (enemy/dummy strikes only, never DoTs/incoming damage)
+          if ((ev.kind === 'damage' || ev.kind === 'crit') && ev.attackerId) {
+            const attacker = snap.players.find((pl) => pl.id === ev.attackerId);
+            if (attacker) {
+              const isCritHit = ev.kind === 'crit';
+              const swing = playerWeaponSwings.get(attacker.id);
+              const hitComboStep = swing?.comboStep ?? attacker.attackComboStep ?? 0;
+              const isPrimaryHit = ev.isPrimaryHit ?? true;
+              const hitStopMs = computeWeaponHitStopDurationMs(
+                attacker.heroClass,
+                attacker.equippedWeapon,
+                hitComboStep,
+                isCritHit,
+                isPrimaryHit
+              );
+              const wpnAccent = attacker.equippedWeapon
+                ? resolveEquippedWeaponForClass(attacker.heroClass, attacker.equippedWeapon)?.accent
+                : undefined;
+              const accentColor = wpnAccent || ev.color || '#FFFFFF';
+
+              if (swing) {
+                applySwingHitStop(
+                  swing,
+                  now,
+                  hitStopMs,
+                  isCritHit,
+                  hitComboStep,
+                  accentColor,
+                  isPrimaryHit
+                );
+              }
+
+              if (ev.hitTargetId) {
+                const targetEnemy = snap.enemies.find((en) => en.id === ev.hitTargetId);
+                const targetDummy = !targetEnemy
+                  ? snap.trainingDummies?.find((d) => d.id === ev.hitTargetId)
+                  : undefined;
+                const tx = targetEnemy?.x ?? targetDummy?.x ?? ev.x;
+                const ty = targetEnemy?.y ?? targetDummy?.y ?? ev.y;
+                const hitAngle = Math.atan2(ty - attacker.y, tx - attacker.x);
+                triggerEnemyImpact(enemyImpactMap, ev.hitTargetId, now, {
+                  freezeDurationMs: hitStopMs,
+                  hitAngle,
+                  isCrit: isCritHit,
+                  comboStep: hitComboStep,
+                  accentColor,
+                });
+              }
+
+              const { shakeBoost, screenFlashAlpha } = computeHitStopCameraShake(
+                attacker.heroClass,
+                attacker.equippedWeapon,
+                hitComboStep,
+                isCritHit,
+                attacker.id === playerId
+              );
+              if (shakeBoost > 0) {
+                screenShake = Math.min(9.5, Math.max(screenShake, screenShake + shakeBoost * 0.55));
+              }
+              if (screenFlashAlpha > 0) {
+                impactVignetteFlash = {
+                  until: now + 52,
+                  bornAt: now,
+                  durationMs: 52,
+                  alpha: Math.max(impactVignetteFlash.until > now ? impactVignetteFlash.alpha : 0, screenFlashAlpha),
+                  color: isCritHit ? '#FEF08A' : accentColor,
+                };
+              }
+            }
+          }
+
+          if (ev.text.includes('Relic')) {
             sfx.playRelicChime();
           } else if (ev.kind === 'status') {
             if (activeBossRuntime) {
@@ -1741,12 +1853,29 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
           if (p.skillCooldownMs > prev.skillCooldownMs + 400) {
             detectedSwingKind = 'tactical';
             detectedSwingDur = 280;
-            if (p.heroClass === 'vanguard') {
+            const activeTac = resolveActiveTacticalDef(
+              p.heroClass,
+              p.equippedWeapon,
+              p.equippedScrollId
+            );
+            if (activeTac.id === 'bastion_counter') {
+              particleManager.spawnVanguardBastionBraceCast(p.x, p.y, p.aimAngle, now);
+            } else if (activeTac.id === 'crimson_frenzy') {
+              particleManager.spawnVanguardCrimsonFrenzyCast(p.x, p.y, now);
+              screenShake = Math.min(8, Math.max(screenShake, 3.2));
+            } else if (p.heroClass === 'vanguard') {
               particleManager.spawnVanguardBulwarkDash(prev.x, prev.y, p.x, p.y, p.aimAngle, now);
+              screenShake = Math.min(8, Math.max(screenShake, 3.2));
+            } else if (activeTac.id === 'cyclone_break') {
+              particleManager.spawnRangerCycloneArrowCast(p.x, p.y, p.aimAngle, now);
+            } else if (activeTac.id === 'black_sun') {
+              // black_sun_zone spawn handles the eclipse deployment VFX
             } else if (p.heroClass === 'ranger') {
               particleManager.spawnRangerFrostVolleyCast(p.x, p.y, p.aimAngle, now);
             } else if (p.heroClass === 'arcanist') {
               particleManager.spawnArcanistNovaCast(p.x, p.y, now);
+            } else if (activeTac.id === 'seraphic_judgment') {
+              // seraphim_holy_burst zone spawn handles target burst VFX
             } else if (p.heroClass === 'cleric') {
               particleManager.spawnClericSanctifiedPulse(p.x, p.y, now);
             }
@@ -1765,26 +1894,51 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
           }
         }
 
-        if (!detectedSwingKind && ((p.attackAnimMs > 0 && prevAtkAnim === 0) || p.attackAnimMs > prevAtkAnim + 35)) {
-          detectedSwingKind = p.attackAnimMs > 245 ? 'ult' : p.attackAnimMs > 195 ? 'tactical' : 'primary';
-          detectedSwingDur = p.attackAnimMs > 245 ? 320 : p.attackAnimMs > 195 ? 280 : 220;
+        const comboChanged =
+          p.attackComboStep !== undefined &&
+          prevComboStepMap.get(p.id) !== undefined &&
+          p.attackComboStep !== prevComboStepMap.get(p.id);
+        if (
+          !detectedSwingKind &&
+          (comboChanged ||
+            (p.attackAnimMs > 0 && prevAtkAnim === 0) ||
+            p.attackAnimMs > prevAtkAnim + 35)
+        ) {
+          detectedSwingKind =
+            !comboChanged && p.attackAnimMs > 245
+              ? 'ult'
+              : !comboChanged && p.attackAnimMs > 195
+                ? 'tactical'
+                : 'primary';
+          detectedSwingDur = getWeaponSwingDurationMs(
+            p.heroClass,
+            p.equippedWeapon,
+            p.attackComboStep ?? 0,
+            detectedSwingKind
+          );
         }
 
         if (detectedSwingKind) {
+          const serverStep = p.attackComboStep ?? 0;
           const existingSwing = playerWeaponSwings.get(p.id);
           const triggeredLocally =
             p.id === playerId && existingSwing && now - existingSwing.bornAt < 130;
           if (!triggeredLocally) {
-            playerWeaponSwings.set(p.id, {
-              bornAt: now,
-              durationMs: detectedSwingDur,
-              kind: detectedSwingKind,
-            });
+            playerWeaponSwings.set(
+              p.id,
+              createWeaponSwingState(now, detectedSwingDur, detectedSwingKind, serverStep)
+            );
+          } else if (existingSwing && detectedSwingKind === 'primary') {
+            existingSwing.comboStep = serverStep;
+          }
+          if (p.id === playerId && detectedSwingKind === 'primary') {
+            localComboStepRef.current = { step: serverStep, at: now };
           }
         }
       }
       prevPlayersMap.clear();
       prevAttackAnimMap.clear();
+      prevComboStepMap.clear();
       for (const p of snap.players) {
         prevPlayersMap.set(p.id, {
           x: p.x,
@@ -1796,6 +1950,7 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
           shield: p.shield,
         });
         prevAttackAnimMap.set(p.id, p.attackAnimMs);
+        prevComboStepMap.set(p.id, p.attackComboStep ?? 0);
       }
       for (const id of activeDashTrails.keys()) {
         if (!prevPlayersMap.has(id)) {
@@ -1835,6 +1990,28 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
                 now
               );
               screenShake = Math.min(8, Math.max(screenShake, 4.2));
+            } else if (z.kind === 'bastion_counter_cleave') {
+              particleManager.spawnVanguardBastionCleaveBurst(
+                z.x,
+                z.y,
+                z.angle ?? 0,
+                z.radius || 116,
+                now
+              );
+              screenShake = Math.min(8, Math.max(screenShake, 4.2));
+            } else if (z.kind === 'cyclone_break') {
+              particleManager.spawnCycloneWhirlwindBurst(z.x, z.y, z.radius || 132, now);
+              screenShake = Math.min(8, Math.max(screenShake, 3.5));
+            } else if (z.kind === 'galeburst_nova') {
+              particleManager.spawnGaleburstNovaBurst(z.x, z.y, z.radius || 88, now);
+            } else if (z.kind === 'black_sun_zone') {
+              particleManager.spawnRangerBlackSunCast(z.x, z.y, z.radius || 115, now);
+            } else if (z.kind === 'black_sun_burst') {
+              particleManager.spawnRangerBlackSunStrike(z.x, z.y, z.radius || 115, now);
+              screenShake = Math.min(9, Math.max(screenShake, 5.5));
+            } else if (z.kind === 'seraphim_holy_burst') {
+              particleManager.spawnClericSeraphicJudgmentBurst(z.x, z.y, z.radius || 110, now);
+              screenShake = Math.min(8, Math.max(screenShake, 4.5));
             }
           }
         }
@@ -2014,24 +2191,31 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
       hasInitWorldEffects = true;
       }
 
-      // Consume immediate local swing triggers and advance active swing/dash timers every render frame
+      // Consume immediate local swing triggers and advance active swing/dash/hit-stop timers every render frame
       if (localSwingTriggerRef.current) {
         const trig = localSwingTriggerRef.current;
         const curSwing = playerWeaponSwings.get(playerId);
         if (!curSwing || trig.bornAt > curSwing.bornAt) {
-          playerWeaponSwings.set(playerId, {
-            bornAt: trig.bornAt,
-            durationMs: trig.durationMs,
-            kind: trig.kind,
-          });
+          playerWeaponSwings.set(
+            playerId,
+            createWeaponSwingState(trig.bornAt, trig.durationMs, trig.kind, trig.comboStep)
+          );
         }
         localSwingTriggerRef.current = null;
       }
       if (playerWeaponSwings.size > 0) {
         for (const [pid, activeSwing] of playerWeaponSwings.entries()) {
           const pSnap = snap.players.find((x) => x.id === pid);
-          if (!pSnap || pSnap.downed || now - activeSwing.bornAt >= activeSwing.durationMs) {
+          const swSample = computeEffectiveSwingProgress(activeSwing, now);
+          if (!pSnap || pSnap.downed || swSample.isDone) {
             playerWeaponSwings.delete(pid);
+          }
+        }
+      }
+      if (enemyImpactMap.size > 0) {
+        for (const [tid, imp] of enemyImpactMap.entries()) {
+          if (now >= imp.flashUntil) {
+            enemyImpactMap.delete(tid);
           }
         }
       }
@@ -3951,120 +4135,189 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
           const progress = 1 - alpha;
           const coneAng = z.angle ?? 0;
           const halfArc = z.coneHalfAngleRad ?? 1.05;
-          const r = (z.radius || 116) * (0.4 + 0.6 * progress);
+          const maxR = z.radius || 116;
+          const r = maxR * (0.42 + 0.58 * progress);
           ctx.save();
           ctx.translate(z.x, z.y);
-          ctx.fillStyle = `rgba(245, 158, 11, ${(0.28 * alpha).toFixed(3)})`;
+          // Warm golden shockwave sector
+          ctx.fillStyle = `rgba(245, 158, 11, ${(0.3 * alpha).toFixed(3)})`;
           ctx.beginPath();
           ctx.moveTo(0, 0);
           ctx.arc(0, 0, r, coneAng - halfArc, coneAng + halfArc);
           ctx.closePath();
           ctx.fill();
-          ctx.strokeStyle = `rgba(254, 240, 138, ${(0.95 * alpha).toFixed(3)})`;
-          ctx.lineWidth = 4;
+          // Sunburst radial shock rays inside cleave arc
+          ctx.strokeStyle = `rgba(254, 249, 195, ${(0.55 * alpha).toFixed(3)})`;
+          ctx.lineWidth = 1.6;
+          for (let ray = -2; ray <= 2; ray++) {
+            const ra = coneAng + (ray / 2) * (halfArc * 0.85);
+            ctx.beginPath();
+            ctx.moveTo(Math.cos(ra) * 14, Math.sin(ra) * 14);
+            ctx.lineTo(Math.cos(ra) * (r * 0.96), Math.sin(ra) * (r * 0.96));
+            ctx.stroke();
+          }
+          // Triple-layered blazing blade arc
+          ctx.strokeStyle = `rgba(251, 191, 36, ${(0.88 * alpha).toFixed(3)})`;
+          ctx.lineWidth = 6;
+          ctx.beginPath();
+          ctx.arc(0, 0, r * 0.92, coneAng - halfArc, coneAng + halfArc);
+          ctx.stroke();
+          ctx.strokeStyle = `rgba(254, 240, 138, ${(0.98 * alpha).toFixed(3)})`;
+          ctx.lineWidth = 3.5;
           ctx.beginPath();
           ctx.arc(0, 0, r, coneAng - halfArc, coneAng + halfArc);
           ctx.stroke();
-          ctx.strokeStyle = `rgba(255, 255, 255, ${(0.88 * alpha).toFixed(3)})`;
+          ctx.strokeStyle = `rgba(255, 255, 255, ${(0.92 * alpha).toFixed(3)})`;
           ctx.lineWidth = 2;
           ctx.beginPath();
           ctx.arc(0, 0, r * 0.72, coneAng - halfArc * 0.85, coneAng + halfArc * 0.85);
           ctx.stroke();
           ctx.restore();
         } else if (z.kind === 'cyclone_break') {
-          const alpha = Math.max(0.18, Math.min(1, z.ttlMs / Math.max(1, z.maxTtlMs)));
-          const r = z.radius || 120;
-          const spin = now * 0.012;
+          const alpha = Math.max(0.22, Math.min(1, z.ttlMs / Math.max(1, z.maxTtlMs)));
+          const r = z.radius || 132;
+          const spin = now * 0.015;
           ctx.save();
           ctx.translate(z.x, z.y);
-          ctx.fillStyle = `rgba(16, 185, 129, ${(0.14 * alpha).toFixed(3)})`;
+
+          // Swirling low-pressure whirlwind body fill
+          ctx.fillStyle = `rgba(14, 116, 144, ${(0.18 * alpha).toFixed(3)})`;
           ctx.beginPath();
           ctx.arc(0, 0, r, 0, Math.PI * 2);
           ctx.fill();
-          ctx.strokeStyle = `rgba(52, 211, 153, ${(0.82 * alpha).toFixed(3)})`;
-          ctx.lineWidth = 2.4;
+          ctx.fillStyle = `rgba(52, 211, 153, ${(0.12 * alpha).toFixed(3)})`;
           ctx.beginPath();
-          ctx.arc(0, 0, r, 0, Math.PI * 2);
+          ctx.arc(0, 0, r * 0.62, 0, Math.PI * 2);
+          ctx.fill();
+
+          // Outer wind-shear boundary ring
+          ctx.strokeStyle = `rgba(56, 189, 248, ${(0.78 * alpha).toFixed(3)})`;
+          ctx.lineWidth = 2.4;
+          ctx.setLineDash([12, 8]);
+          ctx.beginPath();
+          ctx.arc(0, 0, r, spin * 0.4, spin * 0.4 + Math.PI * 2);
           ctx.stroke();
-          // Swirling inner cyclone spiral ribbons pulling inward
-          for (let arm = 0; arm < 4; arm++) {
-            const baseA = spin + (arm * Math.PI) / 2;
+          ctx.setLineDash([]);
+
+          // 6 logarithmic inward-spiraling gale blades visually conveying strong inward suction
+          for (let arm = 0; arm < 6; arm++) {
+            const baseA = spin + (arm * Math.PI) / 3;
             ctx.strokeStyle =
               arm % 2 === 0
-                ? `rgba(110, 231, 183, ${(0.9 * alpha).toFixed(3)})`
-                : `rgba(56, 189, 248, ${(0.85 * alpha).toFixed(3)})`;
-            ctx.lineWidth = 2.2;
+                ? `rgba(110, 231, 183, ${(0.92 * alpha).toFixed(3)})`
+                : `rgba(56, 189, 248, ${(0.88 * alpha).toFixed(3)})`;
+            ctx.lineWidth = arm % 2 === 0 ? 2.6 : 2.1;
             ctx.beginPath();
-            ctx.arc(0, 0, r * 0.72, baseA, baseA + 1.05);
-            ctx.stroke();
-            ctx.beginPath();
-            ctx.arc(0, 0, r * 0.42, baseA + 0.6, baseA + 1.85);
+            for (let step = 0; step <= 14; step++) {
+              const t = step / 14; // 0 = outer rim -> 1 = vortex eye
+              const rStep = r * (0.96 - t * 0.88);
+              const aStep = baseA + t * 2.35;
+              const sx = Math.cos(aStep) * rStep;
+              const sy = Math.sin(aStep) * rStep;
+              if (step === 0) ctx.moveTo(sx, sy);
+              else ctx.lineTo(sx, sy);
+            }
             ctx.stroke();
           }
-          // Eye of the storm core
-          ctx.fillStyle = `rgba(167, 243, 208, ${(0.55 * alpha).toFixed(3)})`;
+
+          // Fast inner vortex funnel rings & bright core eye
+          ctx.strokeStyle = `rgba(236, 253, 245, ${(0.9 * alpha).toFixed(3)})`;
+          ctx.lineWidth = 2.0;
+          ctx.beginPath();
+          ctx.arc(0, 0, r * 0.24, -spin * 1.4, -spin * 1.4 + Math.PI * 1.4);
+          ctx.stroke();
+          ctx.fillStyle = `rgba(167, 243, 208, ${(0.68 * alpha).toFixed(3)})`;
           ctx.beginPath();
           ctx.arc(0, 0, 12, 0, Math.PI * 2);
           ctx.fill();
+          ctx.fillStyle = `rgba(255, 255, 255, ${(0.85 * alpha).toFixed(3)})`;
+          ctx.beginPath();
+          ctx.arc(0, 0, 5, 0, Math.PI * 2);
+          ctx.fill();
           ctx.restore();
+          particleManager.spawnCycloneWhirlwindMotes(z.x, z.y, r, now);
         } else if (z.kind === 'black_sun_zone') {
           const alpha = Math.max(0.2, Math.min(1, z.ttlMs / Math.max(1, z.maxTtlMs)));
           const progress = 1 - alpha;
           const r = z.radius || 115;
+          const spin = now * 0.005;
           ctx.save();
           ctx.translate(z.x, z.y);
           // Dark eclipse void well
-          ctx.fillStyle = `rgba(30, 27, 75, ${(0.42 * alpha + 0.14).toFixed(3)})`;
+          ctx.fillStyle = `rgba(30, 27, 75, ${(0.44 * alpha + 0.16).toFixed(3)})`;
           ctx.beginPath();
           ctx.arc(0, 0, r, 0, Math.PI * 2);
           ctx.fill();
-          // Outer golden solar corona
-          ctx.strokeStyle = `rgba(251, 191, 36, ${(0.88 * alpha + 0.1).toFixed(3)})`;
-          ctx.lineWidth = 2.6;
+          // Outer golden solar corona + flaring arcs
+          ctx.strokeStyle = `rgba(251, 191, 36, ${(0.9 * alpha + 0.1).toFixed(3)})`;
+          ctx.lineWidth = 2.8;
           ctx.beginPath();
           ctx.arc(0, 0, r, 0, Math.PI * 2);
           ctx.stroke();
+          for (let f = 0; f < 4; f++) {
+            const fa = spin + (f * Math.PI) / 2;
+            ctx.strokeStyle = f % 2 === 0 ? 'rgba(253, 224, 71, 0.85)' : 'rgba(192, 132, 252, 0.85)';
+            ctx.lineWidth = 2.2;
+            ctx.beginPath();
+            ctx.arc(0, 0, r * 0.86, fa, fa + 0.72);
+            ctx.stroke();
+          }
           // Contracting convergence ring counting down celestial strike
-          const collapseR = Math.max(14, r * (1 - progress));
-          ctx.strokeStyle = `rgba(192, 132, 252, 0.92)`;
-          ctx.lineWidth = 2.2;
+          const collapseR = Math.max(16, r * (1 - progress));
+          ctx.strokeStyle = `rgba(192, 132, 252, 0.94)`;
+          ctx.lineWidth = 2.4;
           ctx.setLineDash([7, 5]);
           ctx.beginPath();
-          ctx.arc(0, 0, collapseR, now * 0.004, now * 0.004 + Math.PI * 2);
+          ctx.arc(0, 0, collapseR, spin, spin + Math.PI * 2);
           ctx.stroke();
           ctx.setLineDash([]);
-          // Obsidian Black Sun center core
+          // Obsidian Black Sun center core + solar rim
           ctx.fillStyle = '#09090B';
           ctx.beginPath();
-          ctx.arc(0, 0, 18, 0, Math.PI * 2);
+          ctx.arc(0, 0, 20, 0, Math.PI * 2);
           ctx.fill();
           ctx.strokeStyle = '#FACC15';
-          ctx.lineWidth = 2;
+          ctx.lineWidth = 2.4;
           ctx.beginPath();
-          ctx.arc(0, 0, 18, 0, Math.PI * 2);
+          ctx.arc(0, 0, 20, 0, Math.PI * 2);
           ctx.stroke();
           ctx.restore();
+          particleManager.spawnBlackSunZoneMotes(z.x, z.y, r, now);
         } else if (z.kind === 'black_sun_burst') {
           const alpha = Math.max(0.14, Math.min(1, z.ttlMs / Math.max(1, z.maxTtlMs)));
           const progress = 1 - alpha;
           const r = (z.radius || 115) * (0.42 + 0.58 * progress);
           ctx.save();
           ctx.translate(z.x, z.y);
-          ctx.fillStyle = `rgba(124, 58, 237, ${(0.34 * alpha).toFixed(3)})`;
+          ctx.fillStyle = `rgba(124, 58, 237, ${(0.36 * alpha).toFixed(3)})`;
           ctx.beginPath();
           ctx.arc(0, 0, r, 0, Math.PI * 2);
           ctx.fill();
-          ctx.strokeStyle = `rgba(251, 191, 36, ${(0.95 * alpha).toFixed(3)})`;
-          ctx.lineWidth = 3.5;
+          ctx.strokeStyle = `rgba(251, 191, 36, ${(0.96 * alpha).toFixed(3)})`;
+          ctx.lineWidth = 3.8;
           ctx.beginPath();
           ctx.arc(0, 0, r, 0, Math.PI * 2);
           ctx.stroke();
-          // Descending celestial eclipse lance beam
-          const beamHalfW = Math.max(6, (z.radius || 115) * 0.2 * alpha);
-          ctx.fillStyle = `rgba(233, 213, 255, ${(0.5 * alpha).toFixed(3)})`;
-          ctx.fillRect(-beamHalfW, -190, beamHalfW * 2, 190);
-          ctx.fillStyle = `rgba(253, 224, 71, ${(0.65 * alpha).toFixed(3)})`;
-          ctx.fillRect(-beamHalfW * 0.45, -190, beamHalfW * 0.9, 190);
+          ctx.strokeStyle = `rgba(233, 213, 255, ${(0.88 * alpha).toFixed(3)})`;
+          ctx.lineWidth = 2.2;
+          ctx.beginPath();
+          ctx.arc(0, 0, r * 0.65, 0, Math.PI * 2);
+          ctx.stroke();
+          // Descending celestial eclipse arrow & beam
+          const beamHalfW = Math.max(7, (z.radius || 115) * 0.22 * alpha);
+          ctx.fillStyle = `rgba(233, 213, 255, ${(0.52 * alpha).toFixed(3)})`;
+          ctx.fillRect(-beamHalfW, -200, beamHalfW * 2, 200);
+          ctx.fillStyle = `rgba(253, 224, 71, ${(0.78 * alpha).toFixed(3)})`;
+          ctx.fillRect(-beamHalfW * 0.45, -200, beamHalfW * 0.9, 200);
+          // Arrowhead embedded at impact
+          ctx.fillStyle = `rgba(255, 255, 255, ${(0.95 * alpha).toFixed(3)})`;
+          ctx.beginPath();
+          ctx.moveTo(0, 12);
+          ctx.lineTo(-14, -22);
+          ctx.lineTo(0, -14);
+          ctx.lineTo(14, -22);
+          ctx.closePath();
+          ctx.fill();
           ctx.restore();
         } else if (z.kind === 'galeburst_nova') {
           const alpha = Math.max(0.12, Math.min(1, z.ttlMs / Math.max(1, z.maxTtlMs)));
@@ -4072,21 +4325,21 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
           const r = (z.radius || 88) * (0.35 + 0.65 * progress);
           ctx.save();
           ctx.translate(z.x, z.y);
-          ctx.fillStyle = `rgba(52, 211, 153, ${(0.2 * alpha).toFixed(3)})`;
+          ctx.fillStyle = `rgba(52, 211, 153, ${(0.22 * alpha).toFixed(3)})`;
           ctx.beginPath();
           ctx.arc(0, 0, r, 0, Math.PI * 2);
           ctx.fill();
-          ctx.strokeStyle = `rgba(110, 231, 183, ${(0.92 * alpha).toFixed(3)})`;
-          ctx.lineWidth = 2.6;
+          ctx.strokeStyle = `rgba(110, 231, 183, ${(0.95 * alpha).toFixed(3)})`;
+          ctx.lineWidth = 2.8;
           ctx.beginPath();
           ctx.arc(0, 0, r, 0, Math.PI * 2);
           ctx.stroke();
-          ctx.strokeStyle = `rgba(186, 230, 253, ${(0.75 * alpha).toFixed(3)})`;
-          ctx.lineWidth = 1.6;
+          ctx.strokeStyle = `rgba(186, 230, 253, ${(0.82 * alpha).toFixed(3)})`;
+          ctx.lineWidth = 1.8;
           for (let i = 0; i < 4; i++) {
-            const a = progress * 2.2 + (i * Math.PI) / 2;
+            const a = progress * 2.5 + (i * Math.PI) / 2;
             ctx.beginPath();
-            ctx.arc(0, 0, r * 0.68, a, a + 0.85);
+            ctx.arc(0, 0, r * 0.68, a, a + 0.9);
             ctx.stroke();
           }
           ctx.restore();
@@ -4114,25 +4367,38 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
           const alpha = Math.max(0.12, Math.min(1, z.ttlMs / Math.max(1, z.maxTtlMs)));
           const progress = 1 - alpha;
           const r = z.radius || 110;
+          const spin = now * 0.005;
           ctx.save();
           ctx.translate(z.x, z.y);
-          ctx.fillStyle = `rgba(250, 204, 21, ${(0.22 * alpha).toFixed(3)})`;
+          ctx.fillStyle = `rgba(250, 204, 21, ${(0.24 * alpha).toFixed(3)})`;
           ctx.beginPath();
           ctx.arc(0, 0, r, 0, Math.PI * 2);
           ctx.fill();
-          ctx.strokeStyle = `rgba(254, 240, 138, ${(0.95 * alpha).toFixed(3)})`;
-          ctx.lineWidth = 3;
+          ctx.strokeStyle = `rgba(254, 240, 138, ${(0.96 * alpha).toFixed(3)})`;
+          ctx.lineWidth = 3.4;
           ctx.beginPath();
-          ctx.arc(0, 0, r * (0.55 + 0.45 * progress), 0, Math.PI * 2);
+          ctx.arc(0, 0, r * (0.52 + 0.48 * progress), 0, Math.PI * 2);
           ctx.stroke();
-          // Descending radiant judgment beam flash
-          const beamHalfW = Math.max(6, r * 0.24 * alpha);
-          ctx.fillStyle = `rgba(254, 249, 195, ${(0.42 * alpha).toFixed(3)})`;
-          ctx.fillRect(-beamHalfW, -180, beamHalfW * 2, 180);
-          ctx.strokeStyle = `rgba(245, 158, 11, ${(0.85 * alpha).toFixed(3)})`;
+          // Angelic rotating 8-ray sacred halo inside impact ring
+          ctx.strokeStyle = `rgba(255, 255, 255, ${(0.82 * alpha).toFixed(3)})`;
           ctx.lineWidth = 1.8;
+          for (let ray = 0; ray < 8; ray++) {
+            const ra = spin + (ray * Math.PI) / 4;
+            ctx.beginPath();
+            ctx.moveTo(Math.cos(ra) * 10, Math.sin(ra) * 10);
+            ctx.lineTo(Math.cos(ra) * (r * 0.72), Math.sin(ra) * (r * 0.72));
+            ctx.stroke();
+          }
+          // Descending radiant judgment pillar + golden seraph wings
+          const beamHalfW = Math.max(7, r * 0.25 * alpha);
+          ctx.fillStyle = `rgba(254, 249, 195, ${(0.48 * alpha).toFixed(3)})`;
+          ctx.fillRect(-beamHalfW, -195, beamHalfW * 2, 195);
+          ctx.fillStyle = `rgba(253, 224, 71, ${(0.72 * alpha).toFixed(3)})`;
+          ctx.fillRect(-beamHalfW * 0.42, -195, beamHalfW * 0.84, 195);
+          ctx.strokeStyle = `rgba(245, 158, 11, ${(0.9 * alpha).toFixed(3)})`;
+          ctx.lineWidth = 2.4;
           ctx.beginPath();
-          ctx.arc(0, 0, r * 0.55, 0, Math.PI * 2);
+          ctx.arc(0, 0, r * 0.56, 0, Math.PI * 2);
           ctx.stroke();
           ctx.restore();
         } else if (z.kind === 'sacred_retribution') {
@@ -4155,6 +4421,107 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
           ctx.beginPath();
           ctx.arc(0, 0, r * 0.65, 0, Math.PI * 2);
           ctx.stroke();
+          ctx.restore();
+        } else if (z.kind === 'bulwark_dash_shockwave') {
+          const alpha = Math.max(0.14, Math.min(1, z.ttlMs / Math.max(1, z.maxTtlMs)));
+          const progress = 1 - alpha;
+          const bashR = (z.radius || 84) * (0.38 + 0.62 * progress);
+          const shieldR = (z.width || 170) * (0.3 + 0.7 * progress);
+          const aim = z.angle ?? 0;
+          ctx.save();
+          ctx.translate(z.x, z.y);
+          // Outer azure ally-shield wave
+          ctx.strokeStyle = `rgba(147, 197, 253, ${(0.72 * alpha).toFixed(3)})`;
+          ctx.lineWidth = 2.2;
+          ctx.setLineDash([8, 6]);
+          ctx.beginPath();
+          ctx.arc(0, 0, shieldR, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.setLineDash([]);
+          // Inner golden stun-bash shockwave + directional shield slam arc
+          ctx.fillStyle = `rgba(245, 158, 11, ${(0.18 * alpha).toFixed(3)})`;
+          ctx.beginPath();
+          ctx.arc(0, 0, bashR, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = `rgba(251, 191, 36, ${(0.95 * alpha).toFixed(3)})`;
+          ctx.lineWidth = 3.2;
+          ctx.beginPath();
+          ctx.arc(0, 0, bashR, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.strokeStyle = `rgba(255, 255, 255, ${(0.92 * alpha).toFixed(3)})`;
+          ctx.lineWidth = 3.6;
+          ctx.beginPath();
+          ctx.arc(0, 0, bashR * 0.78, aim - 0.9, aim + 0.9);
+          ctx.stroke();
+          ctx.restore();
+        } else if (z.kind === 'frost_volley_cone') {
+          const alpha = Math.max(0.12, Math.min(1, z.ttlMs / Math.max(1, z.maxTtlMs)));
+          const progress = 1 - alpha;
+          const coneAng = z.angle ?? 0;
+          const halfArc = z.coneHalfAngleRad ?? 0.34;
+          const r = (z.radius || 190) * (0.45 + 0.55 * progress);
+          ctx.save();
+          ctx.translate(z.x, z.y);
+          ctx.fillStyle = `rgba(56, 189, 248, ${(0.18 * alpha).toFixed(3)})`;
+          ctx.beginPath();
+          ctx.moveTo(0, 0);
+          ctx.arc(0, 0, r, coneAng - halfArc, coneAng + halfArc);
+          ctx.closePath();
+          ctx.fill();
+          // 5 crystalline frost ray streaks matching arrow trajectories
+          ctx.strokeStyle = `rgba(224, 242, 254, ${(0.88 * alpha).toFixed(3)})`;
+          ctx.lineWidth = 2;
+          for (let k = -2; k <= 2; k++) {
+            const ka = coneAng + k * 0.14;
+            ctx.beginPath();
+            ctx.moveTo(Math.cos(ka) * 16, Math.sin(ka) * 16);
+            ctx.lineTo(Math.cos(ka) * r, Math.sin(ka) * r);
+            ctx.stroke();
+          }
+          ctx.strokeStyle = `rgba(186, 230, 253, ${(0.92 * alpha).toFixed(3)})`;
+          ctx.lineWidth = 2.6;
+          ctx.beginPath();
+          ctx.arc(0, 0, r, coneAng - halfArc, coneAng + halfArc);
+          ctx.stroke();
+          ctx.restore();
+        } else if (z.kind === 'sanctified_pulse_wave') {
+          const alpha = Math.max(0.14, Math.min(1, z.ttlMs / Math.max(1, z.maxTtlMs)));
+          const progress = 1 - alpha;
+          const healR = (z.radius || 210) * (0.32 + 0.68 * progress);
+          const smiteR = (z.width || 135) * (0.35 + 0.65 * progress);
+          const spin = now * 0.004;
+          ctx.save();
+          ctx.translate(z.x, z.y);
+          // Outer emerald healing consecration wave (210px)
+          ctx.fillStyle = `rgba(52, 211, 153, ${(0.12 * alpha).toFixed(3)})`;
+          ctx.beginPath();
+          ctx.arc(0, 0, healR, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = `rgba(52, 211, 153, ${(0.9 * alpha).toFixed(3)})`;
+          ctx.lineWidth = 2.6;
+          ctx.beginPath();
+          ctx.arc(0, 0, healR, 0, Math.PI * 2);
+          ctx.stroke();
+          // Inner golden smite wave (135px)
+          ctx.fillStyle = `rgba(250, 204, 21, ${(0.2 * alpha).toFixed(3)})`;
+          ctx.beginPath();
+          ctx.arc(0, 0, smiteR, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = `rgba(254, 240, 138, ${(0.96 * alpha).toFixed(3)})`;
+          ctx.lineWidth = 3.2;
+          ctx.beginPath();
+          ctx.arc(0, 0, smiteR, 0, Math.PI * 2);
+          ctx.stroke();
+          // 8 rotating radiant sunburst spokes
+          ctx.strokeStyle = `rgba(255, 255, 255, ${(0.78 * alpha).toFixed(3)})`;
+          ctx.lineWidth = 1.6;
+          for (let s = 0; s < 8; s++) {
+            const sa = spin + (s * Math.PI) / 4;
+            ctx.beginPath();
+            ctx.moveTo(Math.cos(sa) * 14, Math.sin(sa) * 14);
+            ctx.lineTo(Math.cos(sa) * (smiteR * 0.92), Math.sin(sa) * (smiteR * 0.92));
+            ctx.stroke();
+          }
           ctx.restore();
         }
       }
@@ -4284,7 +4651,21 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
           ) {
             continue;
           }
-          drawTrainingDummy(ctx, dummy, now, dummy.id === lockedEnemyId);
+          const dummyImpact = enemyImpactMap.get(dummy.id);
+          const dummyImpactVis = sampleEnemyImpactVisual(dummyImpact, now);
+          const dx = dummy.x + dummyImpactVis.offsetX;
+          const dy = dummy.y + dummyImpactVis.offsetY;
+          drawTrainingDummy(
+            ctx,
+            dummyImpactVis.offsetX !== 0 || dummyImpactVis.offsetY !== 0
+              ? { ...dummy, x: dx, y: dy }
+              : dummy,
+            dummyImpactVis.renderNow,
+            dummy.id === lockedEnemyId
+          );
+          if (dummyImpact && dummyImpactVis.impactFlashAlpha > 0.02) {
+            drawImpactFrameOverlay(ctx, dx, dy, 20, dummyImpact, dummyImpactVis);
+          }
         }
       }
 
@@ -4316,8 +4697,11 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
       // Enemies (viewport-culled)
       for (const en of snap.enemies) {
         const pos = smoothedEnemies.get(en.id) || { x: en.x, y: en.y };
-        const ex = snapToScreenPixel(pos.x, zoom);
-        const ey = snapToScreenPixel(pos.y, zoom);
+        const enemyImpact = enemyImpactMap.get(en.id);
+        const enemyImpactVis = sampleEnemyImpactVisual(enemyImpact, now);
+        const enemyRenderNow = enemyImpactVis.renderNow;
+        const ex = snapToScreenPixel(pos.x + enemyImpactVis.offsetX, zoom);
+        const ey = snapToScreenPixel(pos.y + enemyImpactVis.offsetY, zoom);
         const enMargin = en.radius + (en.kind === 'boss' ? 220 : 80);
         if (
           ex < worldView.left - enMargin ||
@@ -4336,29 +4720,29 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
         enemyFacingMap.set(en.id, { dir: enemyPose.dir, facingLeft: enemyPose.facingLeft });
 
         if (en.kind === 'slime') {
-          drawSlimeSprite(ctx, en, ex, ey, now, map.biome, enemyPose);
+          drawSlimeSprite(ctx, en, ex, ey, enemyRenderNow, map.biome, enemyPose);
         } else if (en.kind === 'goblin') {
-          drawGoblinSprite(ctx, en, ex, ey, now, enemyPose);
+          drawGoblinSprite(ctx, en, ex, ey, enemyRenderNow, enemyPose);
         } else if (en.kind === 'skeleton') {
-          drawSkeletonSprite(ctx, en, ex, ey, now, enemyPose);
+          drawSkeletonSprite(ctx, en, ex, ey, enemyRenderNow, enemyPose);
         } else if (en.kind === 'cultist') {
-          drawCultistSprite(ctx, en, ex, ey, now, enemyPose);
+          drawCultistSprite(ctx, en, ex, ey, enemyRenderNow, enemyPose);
         } else if (en.kind === 'knight') {
-          drawKnightSprite(ctx, en, ex, ey, now, enemyPose);
+          drawKnightSprite(ctx, en, ex, ey, enemyRenderNow, enemyPose);
         } else if (en.kind === 'shadow_stalker') {
-          drawShadowStalkerSprite(ctx, en, ex, ey, now, enemyPose);
+          drawShadowStalkerSprite(ctx, en, ex, ey, enemyRenderNow, enemyPose);
         } else if (en.kind === 'astral_sentinel') {
-          drawAstralSentinelSprite(ctx, en, ex, ey, now, enemyPose);
+          drawAstralSentinelSprite(ctx, en, ex, ey, enemyRenderNow, enemyPose);
         } else if (en.kind === 'hymn_phantom') {
-          drawHymnPhantomSprite(ctx, en, ex, ey, now, enemyPose);
+          drawHymnPhantomSprite(ctx, en, ex, ey, enemyRenderNow, enemyPose);
         } else if (en.kind === 'relic_golem') {
-          drawRelicGolemSprite(ctx, en, ex, ey, now, enemyPose);
+          drawRelicGolemSprite(ctx, en, ex, ey, enemyRenderNow, enemyPose);
         } else if (en.kind === 'veiled_heretic') {
-          drawVeiledHereticSprite(ctx, en, ex, ey, now, enemyPose);
+          drawVeiledHereticSprite(ctx, en, ex, ey, enemyRenderNow, enemyPose);
         } else if (en.kind === 'celestial_arbiter') {
-          drawCelestialArbiterSprite(ctx, en, ex, ey, now, enemyPose);
+          drawCelestialArbiterSprite(ctx, en, ex, ey, enemyRenderNow, enemyPose);
         } else if (en.kind === 'warden_enforcer') {
-          drawWardenEnforcerSprite(ctx, en, ex, ey, now, enemyPose);
+          drawWardenEnforcerSprite(ctx, en, ex, ey, enemyRenderNow, enemyPose);
         } else if (en.kind === 'boss') {
           // Boss ground shadow
           ctx.fillStyle = 'rgba(0,0,0,0.48)';
@@ -4547,7 +4931,7 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
             ex,
             ey,
             en.name,
-            now,
+            enemyRenderNow,
             en,
             enemyPose,
             bossAnimState,
@@ -4556,7 +4940,11 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
           );
         } else {
           // Safe visible fallback for any undefined or custom enemy kinds
-          drawGenericEnemySprite(ctx, en, ex, ey, now, enemyPose);
+          drawGenericEnemySprite(ctx, en, ex, ey, enemyRenderNow, enemyPose);
+        }
+
+        if (enemyImpact && enemyImpactVis.impactFlashAlpha > 0.02) {
+          drawImpactFrameOverlay(ctx, ex, ey, en.radius, enemyImpact, enemyImpactVis);
         }
 
         if (en.markedMs > 0) {
@@ -5008,43 +5396,127 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
         // Class & Armament-Aware Aura / Motion Effects
         if (p.heroClass === 'vanguard') {
           if ((p.bastionCounterMs || 0) > 0) {
-            // Bastion Counter golden defensive brace dome + forward guard barrier
+            // Bastion Counter golden defensive brace dome + rotating shield pips & forward guard arc
             const bracePulse = 0.72 + 0.28 * Math.sin(now * 0.014);
+            const rot = now * 0.004;
             ctx.save();
-            ctx.fillStyle = `rgba(245, 158, 11, ${(0.14 * bracePulse).toFixed(2)})`;
+            ctx.fillStyle = `rgba(245, 158, 11, ${(0.16 * bracePulse).toFixed(2)})`;
             ctx.beginPath();
-            ctx.arc(hx, hy, 22, 0, Math.PI * 2);
+            ctx.arc(hx, hy, 23, 0, Math.PI * 2);
             ctx.fill();
-            ctx.strokeStyle = `rgba(254, 240, 138, ${(0.92 * bracePulse).toFixed(2)})`;
-            ctx.lineWidth = 2.6;
+            ctx.strokeStyle = `rgba(254, 240, 138, ${(0.95 * bracePulse).toFixed(2)})`;
+            ctx.lineWidth = 3.0;
             ctx.beginPath();
-            ctx.arc(hx, hy, 22, ang - 1.05, ang + 1.05);
+            ctx.arc(hx, hy, 23, ang - 1.05, ang + 1.05);
             ctx.stroke();
-            ctx.strokeStyle = `rgba(251, 191, 36, 0.55)`;
-            ctx.lineWidth = 1.4;
+            ctx.strokeStyle = `rgba(251, 191, 36, 0.65)`;
+            ctx.lineWidth = 1.6;
             ctx.beginPath();
             ctx.arc(hx, hy, 18, 0, Math.PI * 2);
             ctx.stroke();
+            ctx.fillStyle = '#FEF08A';
+            for (let b = 0; b < 3; b++) {
+              const ba = rot + (b * Math.PI * 2) / 3;
+              ctx.fillRect(hx + Math.cos(ba) * 20 - 1.5, hy + Math.sin(ba) * 20 - 1.5, 3, 3);
+            }
             ctx.restore();
           }
           if ((p.crimsonFrenzyMs || 0) > 0) {
-            // Crimson Frenzy pulsing blood-rage battle aura
-            const frenzyPulse = 0.75 + 0.25 * Math.sin(now * 0.018);
+            // Volumetric, atmospheric Crimson Frenzy blood-fire aura with depth, radial bloom, and swirling plasma wisps
             ctx.save();
-            ctx.fillStyle = `rgba(220, 38, 38, ${(0.14 * frenzyPulse).toFixed(2)})`;
+            const time = now * 0.018;
+            const pulse = 0.85 + 0.15 * Math.sin(now * 0.03);
+
+            // 1. Deep atmospheric ground glow (volumetric pool)
+            const groundGrad = ctx.createRadialGradient(hx, hy + 6, 4, hx, hy + 6, 34 * pulse);
+            groundGrad.addColorStop(0, 'rgba(239, 68, 68, 0.4)');
+            groundGrad.addColorStop(0.4, 'rgba(185, 28, 28, 0.25)');
+            groundGrad.addColorStop(0.8, 'rgba(127, 29, 29, 0.1)');
+            groundGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+            ctx.fillStyle = groundGrad;
             ctx.beginPath();
-            ctx.arc(hx, hy, 21, 0, Math.PI * 2);
+            ctx.arc(hx, hy + 6, 34 * pulse, 0, Math.PI * 2);
             ctx.fill();
-            ctx.strokeStyle = `rgba(248, 113, 113, ${(0.9 * frenzyPulse).toFixed(2)})`;
-            ctx.lineWidth = 2;
-            const rot = now * 0.008;
+
+            // 2. Volumetric core aura haze
+            const coreGrad = ctx.createRadialGradient(hx, hy - 4, 2, hx, hy - 4, 24 * pulse);
+            coreGrad.addColorStop(0, 'rgba(254, 202, 202, 0.35)');
+            coreGrad.addColorStop(0.5, 'rgba(239, 68, 68, 0.25)');
+            coreGrad.addColorStop(1, 'rgba(153, 27, 27, 0)');
+            ctx.fillStyle = coreGrad;
             ctx.beginPath();
-            ctx.arc(hx, hy, 21, rot, rot + Math.PI * 0.75);
-            ctx.stroke();
-            ctx.beginPath();
-            ctx.arc(hx, hy, 21, rot + Math.PI, rot + Math.PI * 1.75);
-            ctx.stroke();
+            ctx.arc(hx, hy - 4, 24 * pulse, 0, Math.PI * 2);
+            ctx.fill();
+
+            // 3. Swirling atmospheric energy wisps (wrapping around with depth)
+            for (let w = 0; w < 4; w++) {
+              const wAngle = time * (w % 2 === 0 ? 1.2 : -1.5) + (w * Math.PI / 2);
+              const wx = hx + Math.cos(wAngle) * 18;
+              const wy = (hy - 6) + Math.sin(wAngle) * 10;
+              const wRadius = 12 + Math.sin(time * 2 + w) * 3;
+
+              const wGrad = ctx.createRadialGradient(wx, wy, 1, wx, wy, wRadius);
+              wGrad.addColorStop(0, 'rgba(254, 240, 138, 0.6)');
+              wGrad.addColorStop(0.4, 'rgba(239, 68, 68, 0.45)');
+              wGrad.addColorStop(1, 'rgba(153, 27, 27, 0)');
+
+              ctx.fillStyle = wGrad;
+              ctx.beginPath();
+              ctx.arc(wx, wy, wRadius, 0, Math.PI * 2);
+              ctx.fill();
+            }
+
+            // 4. Upward swirling fire tongues with soft bezier curves and depth
+            const numFlames = 12;
+            for (let i = 0; i < numFlames; i++) {
+              const angle = (i / numFlames) * Math.PI * 2 + Math.sin(time * 1.5 + i) * 0.2;
+              const radius = 15 + Math.sin(time + i * 1.5) * 4;
+              const fx = hx + Math.cos(angle) * radius;
+              const fy = (hy + 4) + Math.sin(angle) * radius * 0.65;
+
+              const flameH = 22 + 14 * Math.sin(time * 2.5 + i * 1.8) * pulse;
+              const flameW = 6 + 3 * Math.cos(time * 2 + i);
+
+              ctx.beginPath();
+              ctx.moveTo(fx - flameW, fy);
+              ctx.bezierCurveTo(
+                fx - flameW * 1.5, fy - flameH * 0.4,
+                fx + Math.sin(time + i) * 6, fy - flameH * 0.8,
+                fx + Math.sin(time * 2 + i) * 3, fy - flameH
+              );
+              ctx.bezierCurveTo(
+                fx + flameW * 0.8, fy - flameH * 0.5,
+                fx + flameW * 1.5, fy - flameH * 0.2,
+                fx + flameW, fy
+              );
+              ctx.closePath();
+
+              const flameGrad = ctx.createLinearGradient(fx, fy, fx, fy - flameH);
+              flameGrad.addColorStop(0, 'rgba(185, 28, 28, 0.6)');
+              flameGrad.addColorStop(0.4, 'rgba(239, 68, 68, 0.75)');
+              flameGrad.addColorStop(0.8, 'rgba(254, 202, 202, 0.85)');
+              flameGrad.addColorStop(1, 'rgba(254, 240, 138, 0.2)');
+              ctx.fillStyle = flameGrad;
+              ctx.fill();
+            }
+
+            // 5. Dense cascading glowing embers
+            for (let e = 0; e < 10; e++) {
+              const et = (now * 0.0025 + e * 0.3) % 1.0;
+              const ex = hx + Math.sin(e * 13 + now * 0.015) * 22;
+              const ey = (hy + 14) - et * 44;
+              const eAlpha = Math.max(0, 1 - et) * 0.95;
+              const eSize = 2 + (e % 3);
+
+              ctx.fillStyle = e % 3 === 0 ? `rgba(254, 240, 138, ${eAlpha})` : `rgba(239, 68, 68, ${eAlpha})`;
+              ctx.beginPath();
+              ctx.arc(ex, ey, eSize, 0, Math.PI * 2);
+              ctx.fill();
+            }
+
             ctx.restore();
+            particleManager.spawnCrimsonFrenzyMote(hx, hy, now);
+            particleManager.spawnCrimsonFrenzyMote(hx, hy, now + 12);
           }
         }
         if (p.heroClass === 'ranger') {
@@ -5231,16 +5703,18 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
         });
 
         const swingState = playerWeaponSwings.get(p.id);
-        const swingProgress = swingState
-          ? Math.max(0, Math.min(1, (now - swingState.bornAt) / swingState.durationMs))
-          : undefined;
+        const swingSample = swingState ? computeEffectiveSwingProgress(swingState, now) : undefined;
         drawHeroSprite(ctx, p, hx, hy, {
           aimAngle: ang,
           bob,
           moving,
           now,
-          swingProgress,
+          swingProgress: swingSample?.progress,
           swingKind: swingState?.kind,
+          comboStep: swingState?.comboStep ?? p.attackComboStep ?? 0,
+          eclipseChargeRatio: p.eclipseChargeRatio ?? 0,
+          hitStopActive: swingSample?.isHitStopped,
+          impactJitter: swingSample?.impactJitter,
           facingLeft: playerPose.facingLeft,
           facingDirection: playerPose.dir,
         });
@@ -5726,6 +6200,17 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
       particleManager.updateAndDraw(ctx, now, dtSec, worldView);
 
       ctx.restore();
+
+      // Brief impact-frame screen accent flash for local player heavy finishers & crits
+      if (impactVignetteFlash.until > now) {
+        const flashRem = Math.max(0, (impactVignetteFlash.until - now) / Math.max(1, impactVignetteFlash.durationMs));
+        ctx.save();
+        ctx.globalAlpha = impactVignetteFlash.alpha * flashRem;
+        ctx.strokeStyle = impactVignetteFlash.color;
+        ctx.lineWidth = 10;
+        ctx.strokeRect(0, 0, cw, ch);
+        ctx.restore();
+      }
 
       // ——— HIGH-DETAIL STONE RADAR MINIMAP ———
       const isMobileScreen = cw < 640;
