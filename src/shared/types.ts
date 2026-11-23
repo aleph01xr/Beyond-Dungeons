@@ -38,6 +38,81 @@ export const MAX_LEVEL = 50;
 export const MAX_ATTRIBUTE = 100;
 export const CRIT_DAMAGE_MULTIPLIER = 1.25;
 
+export type DailyQuestMetric =
+  | 'kills'
+  | 'boss_kills'
+  | 'floors_cleared'
+  | 'runs_played'
+  | 'revives';
+
+export interface DailyQuestEntryState {
+  questId: string;
+  progress: number;
+  claimed: boolean;
+  claimedAt?: number;
+}
+
+export interface DailyQuestState {
+  dateKey: string;
+  quests: Record<string, DailyQuestEntryState>;
+}
+
+export interface DailyQuestRewardPreview {
+  gold: number;
+  xp: number;
+  armament?: {
+    slot: 'weapon' | 'vestment';
+    itemId: string;
+    name: string;
+    rarity: string;
+    accent: string;
+    summary: string;
+    passiveName?: string;
+  } | null;
+  masteryFallback?: {
+    bonusGold: number;
+    bonusXp: number;
+    reason: string;
+  } | null;
+}
+
+export interface DailyQuestHydratedItem {
+  questId: string;
+  title: string;
+  description: string;
+  metric: DailyQuestMetric;
+  progress: number;
+  target: number;
+  completed: boolean;
+  claimed: boolean;
+  claimedAt?: number;
+  rewardsArmament: boolean;
+  rewardPreview: DailyQuestRewardPreview;
+}
+
+export interface DailyQuestClaimResult {
+  ok: boolean;
+  dateKey: string;
+  resetAtMs: number;
+  quests: DailyQuestHydratedItem[];
+  rewardGranted: {
+    questId: string;
+    questTitle: string;
+    goldAdded: number;
+    xpAdded: number;
+    levelsGained: number;
+    armamentGranted?: {
+      slot: 'weapon' | 'vestment';
+      itemId: string;
+      name: string;
+      rarity: string;
+      accent: string;
+    } | null;
+    masteryBonusApplied?: boolean;
+  };
+  user: UserProfile;
+}
+
 export interface AccountRecord {
   id: string;
   username: string;
@@ -64,6 +139,7 @@ export interface AccountRecord {
   ownedVestments?: string[];
   equippedWeapon?: string | null;
   equippedVestment?: string | null;
+  dailyQuests?: DailyQuestState;
 }
 
 export interface HeroClassStats {
@@ -84,6 +160,10 @@ export interface CombatResistances {
 }
 
 export type DamageCategory = 'physical' | 'arcane' | 'divine' | 'fire' | 'frost' | 'lightning' | 'poison' | 'bleed';
+
+export type ScalingAttribute = 'strength' | 'dexterity' | 'intelligence' | 'faith';
+
+export type DamageTypeMode = 'fixed' | 'adaptive';
 
 export type DamageTypeFamily = 'physical' | 'magic' | 'divine' | 'poison';
 
@@ -578,6 +658,10 @@ export interface PlayerState {
   storedGrace?: number;
   clericSanctity?: number;
   eclipseChargeRatio?: number;
+  bastionCounterMs?: number;
+  bastionCounterMaxMs?: number;
+  crimsonFrenzyMs?: number;
+  crimsonFrenzyMaxMs?: number;
 }
 
 export type PlayerStatusType =
@@ -746,7 +830,11 @@ export interface FieldZoneState {
     | 'chain_lightning_arc'
     | 'fireball_burn'
     | 'sunforged_shockwave'
-    | 'tempest_wheel'
+    | 'stormbreaker_slam'
+    | 'bastion_counter_cleave'
+    | 'cyclone_break'
+    | 'black_sun_zone'
+    | 'black_sun_burst'
     | 'galeburst_nova'
     | 'cinderflare_blast'
     | 'seraphim_holy_burst'
@@ -907,6 +995,8 @@ export interface UserProfile {
   ownedVestments?: string[];
   equippedWeapon?: string | null;
   equippedVestment?: string | null;
+  gold?: number;
+  dailyQuests?: DailyQuestState;
 }
 
 export type ClientMessage =

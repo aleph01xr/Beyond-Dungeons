@@ -335,7 +335,8 @@ function drawVanguard(ctx: CanvasRenderingContext2D, s: DrawHeroPartsContext): v
   const isFlail = weaponId === 'vanguard_stormbreaker_flail';
 
   const drawShield = () => {
-    if (isUnarmed) return;
+    // Crimson War Axe is wielded with an open armored gauntlet (Shield gain locked); Unarmed has no shield
+    if (isUnarmed || isHalberd) return;
     const shieldWave = isAttacking ? Math.sin(atkProgress * Math.PI) : 0;
     const shieldThrust = isAttacking
       ? shieldWave * (swingKind === 'tactical' ? 7.5 : 3.5 * swingAmp)
@@ -353,24 +354,7 @@ function drawVanguard(ctx: CanvasRenderingContext2D, s: DrawHeroPartsContext): v
     ctx.save();
     ctx.translate(sx, sy);
     ctx.rotate(shieldAngle);
-    if (isHalberd) {
-      // Compact Round Crimson & Iron Buckler
-      const r = isPureVertical ? 4.2 : 5;
-      ctx.fillStyle = '#1E293B';
-      ctx.beginPath();
-      ctx.arc(-1, 0, r + 1, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = '#991B1B';
-      ctx.beginPath();
-      ctx.arc(-1, 0, r - 0.5, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = '#EF4444';
-      ctx.beginPath();
-      ctx.arc(-1.5, -0.5, r - 2.2, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = '#FBBF24';
-      ctx.fillRect(-2, -1, 2, 2);
-    } else if (isFlail) {
+    if (isFlail) {
       // Bastion Wall Greatshield (Reinforced Tempest Blue & Gold)
       ctx.fillStyle = '#0F172A';
       ctx.fillRect(-4.5, -9, w + 1, 18);
@@ -422,30 +406,58 @@ function drawVanguard(ctx: CanvasRenderingContext2D, s: DrawHeroPartsContext): v
   let slashProgressT = -1;
 
   if (isAttacking) {
-    const targetRot = localAim + Math.PI / 2;
-    const windupAngle = targetRot - 1.48 * swingAmp;
-    const windupX = aimCos * 4.5 + 2 * (aimCos >= 0 ? 1 : -1);
-    const windupY = aimSin * 3 - 2 + bodyBob;
-    const endAngle = targetRot + 1.25 * swingAmp;
-    const strikeEndX = aimCos * (10.5 + (swingAmp - 1) * 4);
-    const strikeEndY = aimSin * 9 + 1 + bodyBob;
+    if (isFlail && swingKind === 'primary') {
+      // Stormbreaker Flail: Overhead raise followed by downward heavy slam forward
+      const overheadAngle = -0.35 + (aimCos < 0 ? -0.2 : 0.2);
+      const overheadX = aimCos * 2;
+      const overheadY = -9 + bodyBob;
+      const slamAngle = localAim + Math.PI / 2;
+      const slamEndX = aimCos * 14;
+      const slamEndY = aimSin * 11 + 4 + bodyBob;
 
-    if (atkProgress < 0.22) {
-      const t = easeOutCubic(atkProgress / 0.22);
-      swordAngle = lerp(baseSwordAngle, windupAngle, t);
-      swordOffX = lerp(baseSwordX, windupX, t);
-      swordOffY = lerp(baseSwordY, windupY, t);
-    } else if (atkProgress < 0.62) {
-      const t = easeOutCubic((atkProgress - 0.22) / 0.4);
-      slashProgressT = t;
-      swordAngle = lerp(windupAngle, endAngle, t);
-      swordOffX = lerp(windupX, strikeEndX, t) + aimCos * Math.sin(t * Math.PI) * 4.5 * swingAmp;
-      swordOffY = lerp(windupY, strikeEndY, t) + aimSin * Math.sin(t * Math.PI) * 3.5 * swingAmp;
+      if (atkProgress < 0.28) {
+        const t = easeOutCubic(atkProgress / 0.28);
+        swordAngle = lerp(baseSwordAngle, overheadAngle, t);
+        swordOffX = lerp(baseSwordX, overheadX, t);
+        swordOffY = lerp(baseSwordY, overheadY, t);
+      } else if (atkProgress < 0.65) {
+        const t = easeOutCubic((atkProgress - 0.28) / 0.37);
+        slashProgressT = t;
+        swordAngle = lerp(overheadAngle, slamAngle, t);
+        swordOffX = lerp(overheadX, slamEndX, t);
+        swordOffY = lerp(overheadY, slamEndY, t) - Math.sin(t * Math.PI) * 5;
+      } else {
+        const t = easeOutCubic((atkProgress - 0.65) / 0.35);
+        swordAngle = lerp(slamAngle, baseSwordAngle, t);
+        swordOffX = lerp(slamEndX, baseSwordX, t);
+        swordOffY = lerp(slamEndY, baseSwordY, t);
+      }
     } else {
-      const t = easeOutCubic((atkProgress - 0.62) / 0.38);
-      swordAngle = lerp(endAngle, baseSwordAngle, t);
-      swordOffX = lerp(strikeEndX, baseSwordX, t);
-      swordOffY = lerp(strikeEndY, baseSwordY, t);
+      const targetRot = localAim + Math.PI / 2;
+      const windupAngle = targetRot - 1.48 * swingAmp;
+      const windupX = aimCos * 4.5 + 2 * (aimCos >= 0 ? 1 : -1);
+      const windupY = aimSin * 3 - 2 + bodyBob;
+      const endAngle = targetRot + 1.25 * swingAmp;
+      const strikeEndX = aimCos * (10.5 + (swingAmp - 1) * 4);
+      const strikeEndY = aimSin * 9 + 1 + bodyBob;
+
+      if (atkProgress < 0.22) {
+        const t = easeOutCubic(atkProgress / 0.22);
+        swordAngle = lerp(baseSwordAngle, windupAngle, t);
+        swordOffX = lerp(baseSwordX, windupX, t);
+        swordOffY = lerp(baseSwordY, windupY, t);
+      } else if (atkProgress < 0.62) {
+        const t = easeOutCubic((atkProgress - 0.22) / 0.4);
+        slashProgressT = t;
+        swordAngle = lerp(windupAngle, endAngle, t);
+        swordOffX = lerp(windupX, strikeEndX, t) + aimCos * Math.sin(t * Math.PI) * 4.5 * swingAmp;
+        swordOffY = lerp(windupY, strikeEndY, t) + aimSin * Math.sin(t * Math.PI) * 3.5 * swingAmp;
+      } else {
+        const t = easeOutCubic((atkProgress - 0.62) / 0.38);
+        swordAngle = lerp(endAngle, baseSwordAngle, t);
+        swordOffX = lerp(strikeEndX, baseSwordX, t);
+        swordOffY = lerp(strikeEndY, baseSwordY, t);
+      }
     }
   }
 
@@ -511,35 +523,37 @@ function drawVanguard(ctx: CanvasRenderingContext2D, s: DrawHeroPartsContext): v
       ctx.fillRect(-1, ballY + 3.8, 2, 2.2);
       ctx.restore();
     } else if (isHalberd) {
-      // Crimson War Halberd: Extended crimson polearm + razor crescent axe head + spear spike
-      ctx.fillStyle = '#7F1D1D';
-      ctx.fillRect(-0.5, -21, 2.5, 31);
-      ctx.fillStyle = '#DC2626';
-      ctx.fillRect(0, -20, 1.5, 29);
+      // Crimson War Axe: Heavy crimson war-haft + brutal double-bearded crimson-etched steel axe head
+      ctx.fillStyle = '#450A0A';
+      ctx.fillRect(-1, -20, 3, 29);
+      ctx.fillStyle = '#B91C1C';
+      ctx.fillRect(-0.5, -19, 2, 27);
       ctx.fillStyle = '#1E293B';
-      ctx.fillRect(-0.5, 8, 2.5, 3); // Buttcap ferrule
+      ctx.fillRect(-1, 7, 3, 3); // Heavy iron pommel cap
       ctx.fillStyle = '#F59E0B';
-      ctx.fillRect(-1.5, -13, 4.5, 2); // Collar ring
-      // Top spear pike
-      ctx.fillStyle = '#94A3B8';
-      ctx.fillRect(-0.5, -29, 2.5, 8);
-      ctx.fillStyle = '#FFFFFF';
-      ctx.fillRect(0.5, -30, 1, 8);
-      // Curved crescent axe blade
-      ctx.fillStyle = '#475569';
-      ctx.fillRect(1.5, -22, 5.5, 11);
-      ctx.fillStyle = '#EF4444';
-      ctx.fillRect(2, -19, 2.5, 6);
+      ctx.fillRect(-2, -13, 5, 2); // Gold bolster collar
+      // Axe crown finial (blunt war-spike)
+      ctx.fillStyle = '#64748B';
+      ctx.fillRect(-0.5, -24, 2, 4);
+      // Primary forward bearded crimson axe blade
+      ctx.fillStyle = '#334155';
+      ctx.fillRect(1.5, -21, 6, 12);
+      ctx.fillStyle = '#DC2626';
+      ctx.fillRect(2, -19, 3, 8);
       ctx.fillStyle = '#F8FAFC';
-      ctx.fillRect(6, -23, 2, 13);
-      ctx.fillRect(7.5, -21, 1.2, 9);
-      // Animated crimson edge sheen gliding along crescent blade
-      const edgeGlintY = -22 + ((now * 0.012) % 10);
+      ctx.fillRect(6.5, -22, 2, 14);
+      ctx.fillRect(8, -20, 1.5, 10);
+      // Secondary rear axe bit (double-bit silhouette)
+      ctx.fillStyle = '#334155';
+      ctx.fillRect(-5.5, -19, 4.5, 8);
+      ctx.fillStyle = '#991B1B';
+      ctx.fillRect(-4.5, -18, 2.5, 6);
+      ctx.fillStyle = '#E2E8F0';
+      ctx.fillRect(-6.5, -20, 1.5, 10);
+      // Animated crimson edge sheen gliding along main axe blade
+      const edgeGlintY = -21 + ((now * 0.012) % 10);
       ctx.fillStyle = isAttacking ? '#FEF2F2' : '#FCA5A5';
-      ctx.fillRect(6.5, edgeGlintY, 1.6, 2.5);
-      // Rear armor-piercing fluke
-      ctx.fillStyle = '#CBD5E1';
-      ctx.fillRect(-4.5, -18, 4, 2.5);
+      ctx.fillRect(7, edgeGlintY, 1.6, 2.5);
     } else if (!isUnarmed) {
       // Sunforged Claymore (Default) + traveling golden blade sheen
       ctx.fillStyle = '#475569';
@@ -570,6 +584,27 @@ function drawVanguard(ctx: CanvasRenderingContext2D, s: DrawHeroPartsContext): v
     if (slashProgressT < 0) return;
     const t = slashProgressT;
     ctx.save();
+    if (isFlail && swingKind === 'primary') {
+      // Stormbreaker Flail: Forward downward slam impact ring + lightning crack
+      const slamX = aimCos * 18;
+      const slamY = aimSin * 15 + 3 + bodyBob;
+      const slamR = 10 + t * 14;
+      ctx.translate(slamX, slamY);
+      ctx.strokeStyle = `rgba(56, 189, 248, ${(0.92 * (1 - t * 0.45)).toFixed(2)})`;
+      ctx.lineWidth = 3.2 * (1 - t * 0.45);
+      ctx.beginPath();
+      ctx.ellipse(0, 0, slamR, slamR * 0.58, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.strokeStyle = `rgba(253, 224, 71, ${(0.9 * (1 - t * 0.4)).toFixed(2)})`;
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.moveTo(-slamR * 0.6, -4);
+      ctx.lineTo(0, 2);
+      ctx.lineTo(slamR * 0.7, -3);
+      ctx.stroke();
+      ctx.restore();
+      return;
+    }
     ctx.translate(aimCos * 5.5, aimSin * 6 + bodyBob);
     ctx.rotate(localAim);
     const radiusBase = isUnarmed ? 15 : isHalberd ? 25 : 22;
@@ -598,7 +633,6 @@ function drawVanguard(ctx: CanvasRenderingContext2D, s: DrawHeroPartsContext): v
       ctx.arc(2, 0, (radiusBase + 2) * (1 + (swingAmp - 1) * 0.4), -1.1, -1.1 + t * 2.35);
       ctx.stroke();
       if (isFlail) {
-        // Jagged electric lightning tooth sparks on Stormbreaker cleave
         const sparkAng = -1.0 + t * 2.2;
         const rSp = radiusBase * (1 + (swingAmp - 1) * 0.4);
         ctx.strokeStyle = '#E0F2FE';
@@ -608,7 +642,7 @@ function drawVanguard(ctx: CanvasRenderingContext2D, s: DrawHeroPartsContext): v
         ctx.lineTo(2 + Math.cos(sparkAng + 0.14) * (rSp + 5), Math.sin(sparkAng + 0.14) * (rSp + 5));
         ctx.stroke();
       } else if (isHalberd) {
-        // Outer Crimson Tipper wave rim
+        // Outer Crimson War Axe cleave rim
         ctx.strokeStyle = 'rgba(220, 38, 38, 0.65)';
         ctx.lineWidth = 2.2 * (1 - t * 0.4);
         ctx.beginPath();

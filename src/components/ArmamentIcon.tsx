@@ -64,20 +64,19 @@ export const ArmamentIcon: React.FC<ArmamentIconProps> = ({
       case 'vanguard_crimson_halberd':
         return (
           <>
-            {/* Crimson polearm shaft */}
-            <rect x="10" y="6" width="2" height="15" fill="#991B1B" />
-            <rect x="11" y="6" width="1" height="14" fill="#EF4444" />
-            <rect x="9" y="9" width="4" height="2" fill="#F59E0B" />
-            {/* Top Spear Spike */}
-            <rect x="10" y="2" width="2" height="4" fill="#CBD5E1" />
-            <rect x="11" y="2" width="1" height="3" fill="#FFFFFF" />
-            {/* Crescent Axe Head */}
-            <rect x="12" y="4" width="5" height="7" fill="#475569" />
-            <rect x="13" y="5" width="3" height="5" fill="#EF4444" />
-            <rect x="16" y="3" width="2" height="9" fill="#F8FAFC" />
-            <rect x="18" y="5" width="1" height="5" fill="#FFFFFF" />
-            {/* Rear Fluke */}
-            <rect x="7" y="6" width="3" height="2" fill="#CBD5E1" />
+            {/* Crimson War Axe Haft & Collar */}
+            <rect x="11" y="5" width="2" height="16" fill="#7F1D1D" />
+            <rect x="11" y="6" width="1" height="14" fill="#DC2626" />
+            <rect x="9" y="10" width="6" height="2" fill="#F59E0B" />
+            <rect x="10" y="20" width="4" height="2" fill="#334155" />
+            {/* Heavy Double-Bearded War Axe Blades */}
+            <rect x="13" y="4" width="5" height="8" fill="#334155" />
+            <rect x="14" y="5" width="3" height="6" fill="#EF4444" />
+            <rect x="17" y="3" width="2" height="10" fill="#F8FAFC" />
+            <rect x="19" y="5" width="1" height="6" fill="#FFFFFF" />
+            <rect x="6" y="5" width="5" height="6" fill="#334155" />
+            <rect x="7" y="6" width="3" height="4" fill="#B91C1C" />
+            <rect x="5" y="4" width="1" height="8" fill="#E2E8F0" />
           </>
         );
 

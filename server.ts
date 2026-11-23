@@ -54,6 +54,12 @@ import {
   getDefaultWeaponIdForClass,
   parseArmamentIdArray,
 } from './src/shared/armaments.ts';
+import {
+  applyDailyQuestEvent,
+  claimDailyQuestForAccount,
+  hydrateDailyQuestsForAccount,
+  normalizeDailyQuestState,
+} from './src/shared/dailyQuests.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -99,6 +105,7 @@ function normalizeAccountLevel(acc: AccountRecord): void {
 function toPublicProfile(acc: AccountRecord): UserProfile {
   normalizeAccountLevel(acc);
   applyAccountArmamentMigration(acc);
+  acc.dailyQuests = normalizeDailyQuestState(acc.dailyQuests);
   return {
     id: acc.id,
     username: acc.username,
@@ -121,6 +128,8 @@ function toPublicProfile(acc: AccountRecord): UserProfile {
     ownedVestments: [...(acc.ownedVestments || [])],
     equippedWeapon: acc.equippedWeapon ?? null,
     equippedVestment: acc.equippedVestment ?? null,
+    gold: Math.max(0, Number(acc.gold) || 0),
+    dailyQuests: acc.dailyQuests,
   };
 }
 
@@ -180,8 +189,8 @@ async function persistAccount(acc: AccountRecord): Promise<void> {
             runs_completed, highest_floor, total_kills, total_revives, gold, is_admin,
             level, xp,
             strength, vitality, dexterity, intelligence, faith, attribute_points,
-            owned_weapons, owned_vestments, equipped_weapon, equipped_vestment, updated_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, NOW())
+            owned_weapons, owned_vestments, equipped_weapon, equipped_vestment, daily_quests, updated_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, NOW())
           ON CONFLICT (username_lower) DO UPDATE SET
             password_hash = EXCLUDED.password_hash,
             locked_class = EXCLUDED.locked_class,
@@ -204,6 +213,7 @@ async function persistAccount(acc: AccountRecord): Promise<void> {
             owned_vestments = EXCLUDED.owned_vestments,
             equipped_weapon = EXCLUDED.equipped_weapon,
             equipped_vestment = EXCLUDED.equipped_vestment,
+            daily_quests = EXCLUDED.daily_quests,
             updated_at = NOW();`,
           [
             acc.id,
@@ -230,6 +240,7 @@ async function persistAccount(acc: AccountRecord): Promise<void> {
             JSON.stringify(acc.ownedVestments || []),
             acc.equippedWeapon ?? null,
             acc.equippedVestment ?? null,
+            JSON.stringify(normalizeDailyQuestState(acc.dailyQuests)),
           ]
         );
       } catch (err) {
@@ -292,6 +303,7 @@ async function initStorage(): Promise<void> {
           owned_vestments TEXT NOT NULL DEFAULT '[]',
           equipped_weapon VARCHAR(64),
           equipped_vestment VARCHAR(64),
+          daily_quests TEXT NOT NULL DEFAULT '{}',
           created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
           updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
         );
@@ -338,6 +350,9 @@ async function initStorage(): Promise<void> {
           END IF;
           IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='accounts' AND column_name='equipped_vestment') THEN
             ALTER TABLE accounts ADD COLUMN equipped_vestment VARCHAR(64);
+          END IF;
+          IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='accounts' AND column_name='daily_quests') THEN
+            ALTER TABLE accounts ADD COLUMN daily_quests TEXT NOT NULL DEFAULT '{}';
           END IF;
           -- Increase password_hash length for scrypt
           ALTER TABLE accounts ALTER COLUMN password_hash TYPE VARCHAR(255);
@@ -418,6 +433,7 @@ async function initStorage(): Promise<void> {
           ownedVestments: parsedVestments,
           equippedWeapon: isLegacyRow ? undefined : (row.equipped_weapon ?? null),
           equippedVestment: isLegacyRow ? undefined : (row.equipped_vestment ?? null),
+          dailyQuests: normalizeDailyQuestState(row.daily_quests),
         };
         normalizeAccountLevel(rec);
         const changed = applyAccountArmamentMigration(rec, needsArmamentMigration);
@@ -506,6 +522,7 @@ async function initStorage(): Promise<void> {
           rec.attributePoints = Number(rec.attributePoints) || 0;
         }
         normalizeAccountLevel(rec);
+        rec.dailyQuests = normalizeDailyQuestState(rec.dailyQuests);
         if (applyAccountArmamentMigration(rec, needsArmamentMigration)) {
           anyJsonChanged = true;
         }
@@ -599,6 +616,7 @@ function buildAccountRecord(
     ownedVestments: [defaultVestment],
     equippedWeapon: defaultWeapon,
     equippedVestment: defaultVestment,
+    dailyQuests: normalizeDailyQuestState(undefined),
   };
 }
 
@@ -680,20 +698,31 @@ function broadcastToRoom(roomId: string, msg: ServerMessage, options: SendFrameO
 }
 
 function attachRoomPersistenceCallbacks(room: GameRoom): void {
+  const isExpeditionRoom = room.roomId !== 'TAVERN-HUB';
   room.onFloorClearedCallback = async (playerIds, floor) => {
     for (const pid of playerIds) {
       const acc = accountsById.get(pid);
       if (acc) {
         acc.highestFloor = Math.max(acc.highestFloor, floor);
         if (floor >= 3) acc.runsCompleted += 1;
+        if (isExpeditionRoom) {
+          acc.dailyQuests = applyDailyQuestEvent(acc.dailyQuests, 'floors_cleared', 1).state;
+        }
         await persistAccount(acc).catch(err => console.error('Failed to persist floor clear:', err));
       }
     }
   };
-  room.onKillCallback = async (pid) => {
+  room.onKillCallback = async (pid, meta) => {
     const acc = accountsById.get(pid);
     if (acc) {
       acc.totalKills += 1;
+      if (isExpeditionRoom) {
+        let next = applyDailyQuestEvent(acc.dailyQuests, 'kills', 1).state;
+        if (meta?.isBoss) {
+          next = applyDailyQuestEvent(next, 'boss_kills', 1).state;
+        }
+        acc.dailyQuests = next;
+      }
       await persistAccount(acc).catch(err => console.error('Failed to persist kill:', err));
     }
   };
@@ -701,7 +730,20 @@ function attachRoomPersistenceCallbacks(room: GameRoom): void {
     const acc = accountsById.get(pid);
     if (acc) {
       acc.totalRevives += 1;
+      if (isExpeditionRoom) {
+        acc.dailyQuests = applyDailyQuestEvent(acc.dailyQuests, 'revives', 1).state;
+      }
       await persistAccount(acc).catch(err => console.error('Failed to persist revive:', err));
+    }
+  };
+  room.onRunEndedCallback = async (playerIds) => {
+    if (!isExpeditionRoom) return;
+    for (const pid of playerIds) {
+      const acc = accountsById.get(pid);
+      if (acc) {
+        acc.dailyQuests = applyDailyQuestEvent(acc.dailyQuests, 'runs_played', 1).state;
+        await persistAccount(acc).catch(err => console.error('Failed to persist run completion:', err));
+      }
     }
   };
   room.onProgressionUpdateCallback = async (pid, state) => {
@@ -1035,6 +1077,118 @@ async function startServer() {
     const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
     if (token) sessionsByToken.delete(token);
     res.json({ ok: true });
+  });
+
+  function requireAuthenticatedAccount(
+    req: express.Request,
+    res: express.Response
+  ): AccountRecord | null {
+    const authHeader = req.headers.authorization || '';
+    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
+    const session = sessionsByToken.get(token);
+    const userId = session && session.expiresAt > Date.now() ? session.userId : null;
+    if (!userId) {
+      res.status(401).json({ error: 'Authentication required.' });
+      return null;
+    }
+    const acc = accountsById.get(userId);
+    if (!acc) {
+      res.status(401).json({ error: 'Account not found.' });
+      return null;
+    }
+    return acc;
+  }
+
+  const claimingDailyQuestAccounts = new Set<string>();
+
+  app.get('/api/daily-quests', (req, res) => {
+    const acc = requireAuthenticatedAccount(req, res);
+    if (!acc) return;
+    applyAccountArmamentMigration(acc);
+    const hydrated = hydrateDailyQuestsForAccount(acc);
+    acc.dailyQuests = hydrated.state;
+    res.json({
+      dateKey: hydrated.dateKey,
+      resetAtMs: hydrated.resetAtMs,
+      quests: hydrated.quests,
+      user: toPublicProfile(acc),
+    });
+  });
+
+  app.post('/api/daily-quests/claim', async (req, res) => {
+    const acc = requireAuthenticatedAccount(req, res);
+    if (!acc) return;
+    const questId = typeof req.body?.questId === 'string' ? req.body.questId.trim() : '';
+    if (!questId) {
+      res.status(400).json({ error: 'Missing questId.' });
+      return;
+    }
+    if (claimingDailyQuestAccounts.has(acc.id)) {
+      res.status(409).json({ error: 'Quest reward claim already in progress.' });
+      return;
+    }
+
+    claimingDailyQuestAccounts.add(acc.id);
+    const snapshot = {
+      gold: acc.gold,
+      level: acc.level,
+      xp: acc.xp,
+      attributePoints: acc.attributePoints,
+      ownedWeapons: acc.ownedWeapons ? [...acc.ownedWeapons] : undefined,
+      ownedVestments: acc.ownedVestments ? [...acc.ownedVestments] : undefined,
+      dailyQuests: acc.dailyQuests ? JSON.parse(JSON.stringify(acc.dailyQuests)) : undefined,
+    };
+
+    try {
+      const claimRes = claimDailyQuestForAccount(acc, questId);
+      if (!claimRes.ok) {
+        res.status(claimRes.status).json({ error: claimRes.error });
+        return;
+      }
+
+      await persistAccount(acc);
+
+      // Sync newly earned Armaments / XP / Level into any active GameRoom the player is currently in
+      for (const room of rooms.values()) {
+        if (!room.hasPlayer(acc.id)) continue;
+        if (claimRes.rewardGranted.armamentGranted) {
+          room.grantArmament(
+            acc.id,
+            claimRes.rewardGranted.armamentGranted.slot,
+            claimRes.rewardGranted.armamentGranted.itemId
+          );
+        }
+        room.syncPlayerProgression(
+          acc.id,
+          acc.level || 1,
+          acc.xp || 0,
+          acc.attributePoints || 0
+        );
+        partyCoordinator.markRoomDirty(room.roomId);
+      }
+
+      res.json({
+        ok: true,
+        dateKey: claimRes.dateKey,
+        resetAtMs: claimRes.resetAtMs,
+        quests: claimRes.quests,
+        rewardGranted: claimRes.rewardGranted,
+        user: toPublicProfile(acc),
+      });
+    } catch (err) {
+      // Roll back mutations on storage failure
+      acc.gold = snapshot.gold;
+      acc.level = snapshot.level;
+      acc.xp = snapshot.xp;
+      acc.attributePoints = snapshot.attributePoints;
+      acc.ownedWeapons = snapshot.ownedWeapons;
+      acc.ownedVestments = snapshot.ownedVestments;
+      acc.dailyQuests = snapshot.dailyQuests;
+      console.error('Failed to claim daily quest reward:', err);
+      res.status(500).json({ error: 'Failed to persist daily quest reward. Please retry.' });
+    } finally {
+      claimingDailyQuestAccounts.delete(acc.id);
+    }
   });
 
   const internalIdentityRateLimiter = new SlidingWindowRateLimiter(120, 60_000);

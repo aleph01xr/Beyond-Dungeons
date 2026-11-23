@@ -18,6 +18,7 @@ import { PixelHeroPreview } from './PixelHeroPreview.tsx';
 import {
   getDefaultVestmentIdForClass,
   getVestmentDef,
+  resolveActiveTacticalDef,
   resolveEquippedVestmentForClass,
   resolveEquippedWeaponForClass,
 } from '../shared/armaments.ts';
@@ -28,9 +29,13 @@ import {
 } from './TouchControls.tsx';
 import { TouchSettingsModal } from './TouchSettingsModal.tsx';
 import { useFullscreenState } from '../client/fullscreen.ts';
+import { hydrateDailyQuestsForAccount } from '../shared/dailyQuests.ts';
+import { DailyQuestsPanel } from './DailyQuestsPanel.tsx';
 
 interface SanctuaryLobbyProps {
   user: UserProfile;
+  authToken: string;
+  onUserUpdated: (user: UserProfile) => void;
   rooms: RoomSummary[];
   onlineCount: number;
   selectedClass: HeroClassId;
@@ -46,10 +51,12 @@ interface SanctuaryLobbyProps {
   errorBanner: string | null;
 }
 
-type LobbyTab = 'expeditions' | 'classes' | 'codex' | 'controls';
+type LobbyTab = 'expeditions' | 'quests' | 'classes' | 'codex' | 'controls';
 
 export const SanctuaryLobby: React.FC<SanctuaryLobbyProps> = ({
   user,
+  authToken,
+  onUserUpdated,
   rooms,
   onlineCount,
   selectedClass,
@@ -143,6 +150,9 @@ export const SanctuaryLobby: React.FC<SanctuaryLobbyProps> = ({
   };
 
   const currentClassDef = HERO_CLASSES[selectedClass];
+  const dailySummary = hydrateDailyQuestsForAccount(user);
+  const readyDailyCount = dailySummary.quests.filter((q) => q.completed && !q.claimed).length;
+  const completedDailyCount = dailySummary.quests.filter((q) => q.completed).length;
 
   return (
     <div className="min-h-screen bg-[#17171F] text-[#ECEAF2] flex flex-col">
@@ -164,6 +174,7 @@ export const SanctuaryLobby: React.FC<SanctuaryLobbyProps> = ({
           {(
             [
               ['expeditions', 'Expeditions'],
+              ['quests', 'Daily Quests'],
               ['classes', 'Hero Classes'],
               ['codex', 'Relic Codex'],
               ['controls', 'Controls'],
@@ -176,13 +187,18 @@ export const SanctuaryLobby: React.FC<SanctuaryLobbyProps> = ({
                 sfx.playUiClick();
                 setActiveTab(id);
               }}
-              className={`py-1 border-b-2 transition-colors whitespace-nowrap shrink-0 cursor-pointer min-h-[40px] flex items-center ${
+              className={`py-1 border-b-2 transition-colors whitespace-nowrap shrink-0 cursor-pointer min-h-[40px] flex items-center gap-1.5 ${
                 activeTab === id
                   ? 'border-[#D9AA52] text-white font-semibold'
                   : 'border-transparent hover:text-[#E4E2EC]'
               }`}
             >
-              {label}
+              <span>{label}</span>
+              {id === 'quests' && readyDailyCount > 0 && (
+                <span className="px-1.5 py-0.5 bg-[#1B2C24] border border-[#34D399] text-[#6EE7B7] font-mono text-[10px] font-semibold tabular-nums leading-none">
+                  {readyDailyCount}
+                </span>
+              )}
             </button>
           ))}
         </nav>
@@ -225,6 +241,10 @@ export const SanctuaryLobby: React.FC<SanctuaryLobbyProps> = ({
                 {currentClassDef.name} ({currentClassDef.title})
               </span>
               <span aria-hidden="true">·</span>
+              <span>Lv {user.level || 1}</span>
+              <span aria-hidden="true">·</span>
+              <span className="text-[#FBBF24]">{user.gold ?? 0} Gold</span>
+              <span aria-hidden="true">·</span>
               <span>{onlineCount} Online</span>
               <span aria-hidden="true">·</span>
               <span>Best Floor {user.highestFloor}</span>
@@ -232,6 +252,18 @@ export const SanctuaryLobby: React.FC<SanctuaryLobbyProps> = ({
               <span>{user.totalKills} Slain</span>
               <span aria-hidden="true">·</span>
               <span>{user.totalRevives} Revives</span>
+              <span aria-hidden="true">·</span>
+              <button
+                type="button"
+                onClick={() => {
+                  sfx.playUiClick();
+                  setActiveTab('quests');
+                }}
+                className="text-left underline decoration-[#D9AA52]/60 hover:text-white cursor-pointer"
+              >
+                Daily Quests {completedDailyCount}/{dailySummary.quests.length}
+                {readyDailyCount > 0 ? ` (${readyDailyCount} Ready)` : ''}
+              </button>
             </div>
           </div>
 
@@ -597,7 +629,13 @@ export const SanctuaryLobby: React.FC<SanctuaryLobbyProps> = ({
                   <div className="flex justify-between">
                     <span>Tactical Skill [Q]</span>
                     <span className="text-[#E6E4EE] font-medium truncate max-w-[170px]">
-                      {currentClassDef.tacticalName}
+                      {
+                        resolveActiveTacticalDef(
+                          currentClassDef.id,
+                          currentClassDef.id === user.lockedClass ? user.equippedWeapon : undefined,
+                          null
+                        ).name
+                      }
                     </span>
                   </div>
                   <div className="flex justify-between">
@@ -617,7 +655,22 @@ export const SanctuaryLobby: React.FC<SanctuaryLobbyProps> = ({
               </form>
             </section>
           </div>
-         </div>
+
+            <DailyQuestsPanel
+              user={user}
+              authToken={authToken}
+              onUserUpdated={onUserUpdated}
+            />
+          </div>
+        )}
+
+        {/* TAB 1B: DEDICATED DAILY QUESTS VIEW */}
+        {activeTab === 'quests' && (
+          <DailyQuestsPanel
+            user={user}
+            authToken={authToken}
+            onUserUpdated={onUserUpdated}
+          />
         )}
 
         {/* TAB 2: HERO SANCTUM & CODEX */}

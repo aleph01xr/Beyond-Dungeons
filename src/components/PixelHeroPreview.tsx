@@ -169,16 +169,14 @@ export const PixelHeroPreview: React.FC<PixelHeroPreviewProps> = ({
           ctx.fillRect(18 + plumeWave, 3 + bob, 2, 2);
         }
 
-        // Left Hand: Shield (hidden when unarmed)
+        // Left Hand: Shield (Crimson War Axe wields open crimson-trimmed gauntlet; hidden when unarmed)
         const shieldBob = animate ? Math.round(Math.sin(time * 0.004) * 1) : 0;
         if (weaponId === 'vanguard_crimson_halberd') {
-          // Round Crimson & Iron Buckler
-          ctx.fillStyle = '#1E293B';
-          ctx.fillRect(3, 14 + bob + shieldBob, 7, 7);
-          ctx.fillStyle = '#991B1B';
-          ctx.fillRect(4, 15 + bob + shieldBob, 5, 5);
-          ctx.fillStyle = '#FBBF24';
-          ctx.fillRect(6, 17 + bob + shieldBob, 1, 1);
+          // Open armored crimson war-gauntlet (no shield)
+          ctx.fillStyle = '#334155';
+          ctx.fillRect(5, 16 + bob + shieldBob, 4, 4);
+          ctx.fillStyle = '#DC2626';
+          ctx.fillRect(6, 17 + bob + shieldBob, 2, 2);
         } else if (weaponId === 'vanguard_stormbreaker_flail') {
           // Bastion Wall Tempest Shield
           ctx.fillStyle = '#0F172A';
@@ -211,18 +209,20 @@ export const PixelHeroPreview: React.FC<PixelHeroPreviewProps> = ({
           ctx.fillStyle = '#475569';
           ctx.fillRect(-1, -2, 3, 3);
         } else if (weaponId === 'vanguard_crimson_halberd') {
+          // Crimson War Axe: Crimson haft + double-bearded obsidian/steel axe blades
           ctx.fillStyle = '#991B1B';
-          ctx.fillRect(-1, -15, 2, 21);
+          ctx.fillRect(-1, -14, 2, 20);
           ctx.fillStyle = '#F59E0B';
-          ctx.fillRect(-1, -10, 2, 1);
-          ctx.fillStyle = '#E2E8F0';
-          ctx.fillRect(-1, -19, 2, 4);
-          ctx.fillStyle = '#475569';
+          ctx.fillRect(-2, -10, 4, 1);
+          ctx.fillStyle = '#334155';
           ctx.fillRect(1, -16, 3, 7);
+          ctx.fillRect(-4, -15, 3, 5);
           ctx.fillStyle = '#F8FAFC';
           ctx.fillRect(3, -17, 2, 8);
+          ctx.fillRect(-5, -16, 1, 6);
           ctx.fillStyle = '#EF4444';
           ctx.fillRect(1, -14, 2, 3);
+          ctx.fillRect(-3, -14, 2, 3);
           if (animate) {
             const glintY = -17 + Math.round((time * 0.01) % 7);
             ctx.fillStyle = '#FCA5A5';

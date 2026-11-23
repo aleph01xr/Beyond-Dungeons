@@ -3,6 +3,17 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { GameRoom } from './src/server/gameEngine.ts';
 import { TILE_SIZE, MAX_LEVEL, HERO_CLASSES, type AccountRecord, type HeroClassId, type EnemyState, type PropState } from './src/shared/types.ts';
+import { ARCANIST_SCROLLS } from './src/shared/arcanist.ts';
+import {
+  applyDailyQuestEvent,
+  claimDailyQuestForAccount,
+  DAILY_MASTERY_FALLBACK_GOLD,
+  DAILY_MASTERY_FALLBACK_XP,
+  getDailyQuestTemplatesForDate,
+  getUtcDateKey,
+  hydrateDailyQuestsForAccount,
+  normalizeDailyQuestState,
+} from './src/shared/dailyQuests.ts';
 import {
   computeGroundTargetPosition,
   findBestAutoTarget,
@@ -84,14 +95,36 @@ import {
   DEFAULT_WEAPON_BY_CLASS,
   VESTMENT_CATALOG,
   WEAPON_CATALOG,
+  WEAPON_TACTICALS,
   applyAccountArmamentMigration,
   getClassVestments,
   getClassWeapons,
+  getWeaponTacticalDef,
   normalizeArmamentLoadout,
+  resolveActiveTacticalDef,
   resolveActiveVestmentPassive,
   resolveEquippedVestmentForClass,
   resolveEquippedWeaponForClass,
+  resolveWeaponCombatProfile,
+  type WeaponDef,
 } from './src/shared/armaments.ts';
+import {
+  computeEclipseChargeProfile,
+  computePlayerAttackCooldownMs,
+  computePlayerCcTenacity,
+  computePlayerCdrMult,
+  computePlayerCritChance,
+  computePlayerCritMultiplier,
+  computePlayerDamageMultiplier,
+  computePlayerDotMultiplier,
+  computePlayerHpRegenPerTick,
+  computePlayerMaxHp,
+  computePlayerMaxShieldCap,
+  computePlayerStartingShield,
+  isCrimsonFrenzyActive,
+  isShieldGainLocked,
+  resolveEnemyResistance,
+} from './src/shared/combatMechanics.ts';
 import { calculatePlayerStatProjections } from './src/shared/statUtils.ts';
 import {
   applySnapshotDelta,
@@ -533,12 +566,12 @@ async function runRegressionTests() {
     // Damage ally so they have room to be healed
     ally.hp = 100;
     const expectedHeal = GameRoom.computeHealingAmount(24, cleric, ally);
-    // Level 10, 15 FTH: 24 * (1 + 9*0.015) * (1 + 15*0.006) = 24 * 1.135 * 1.09 = 29.69 -> 30
-    assert.strictEqual(expectedHeal, 30);
+    // Level 10, 15 FTH + Prelate Raiment (+5%): 24 * (1 + 9*0.015) * (1 + 15*0.006) * 1.05 = 31.17 -> 31
+    assert.strictEqual(expectedHeal, 31);
 
     // Cleric uses tactical skill
     room.performAction(clericId, 'tactical');
-    assert.strictEqual(ally.hp, 100 + expectedHeal, 'Ally HP must increase by exactly 30');
+    assert.strictEqual(ally.hp, 100 + expectedHeal, 'Ally HP must increase by exactly 31');
   });
 
   // --- Test 9: Radiant Aura uses scaling helper ---
@@ -1291,6 +1324,7 @@ async function runRegressionTests() {
     room.addOrReconnectPlayer(idV, 'StrVanguard', 'vanguard', false, {
       level: 1, xp: 0, strength: 10, vitality: 0, dexterity: 0, intelligence: 0, faith: 0, attributePoints: 0,
     });
+    room.unequipArmament(idV, 'weapon');
     const pV = room.getPlayerState(idV)!;
     pV.x = 100; pV.y = 100;
     const multV = room.computeDamageMult(pV, 'physical');
@@ -2257,9 +2291,9 @@ async function runRegressionTests() {
       level: 1, xp: 0, strength: 0, vitality: 0, dexterity: 0, intelligence: 50, faith: 0, attributePoints: 0,
     });
     const pInt = room.getPlayerState(idInt)!;
-    // 50 INT grants 50 * 0.002 = 10% CDR. Astral Nova base CD = 5000ms -> 4500ms.
+    // 50 INT grants 50 * 0.002 = 10% CDR + Spireweaver Astral Vestments 3% CDR = 13% CDR -> 4350ms.
     room.performAction(idInt, 'tactical');
-    assert.strictEqual(pInt.skillCooldownMs, 4500, '50 INT reduces 5000ms tactical CD to 4500ms');
+    assert.strictEqual(pInt.skillCooldownMs, 4350, '50 INT + Spireweaver 3% CDR reduces 5000ms tactical CD to 4350ms');
 
     // 3. Faith confers crowd-control duration reduction (+0.3 percentage points/FTH)
     const idFth = 'p_fth_test';
@@ -6190,9 +6224,9 @@ async function runRegressionTests() {
     // Cleric Faith healing projection matches GameRoom.computeHealingAmount
     const cState = room.getPlayerState('c_dmg')!;
     const cProj = calculatePlayerStatProjections(cState, 1);
-    const expectedHealMult = (1 + 29 * 0.015) * (1 + 40 * 0.006); // 1.435 * 1.24 = 1.7794 -> 1.78
-    assert.strictEqual(cProj.healingMultiplier, Number(expectedHealMult.toFixed(2)), 'Cleric projected healingMultiplier must match Lv & Faith scaling');
-    assert.strictEqual(GameRoom.computeHealingAmount(24, cState), Math.round(24 * expectedHealMult), 'GameRoom healing amount must match Cleric Lv & Faith formula');
+    const expectedHealMult = (1 + 29 * 0.015) * (1 + 40 * 0.006) * 1.05; // 1.435 * 1.24 * 1.05 (Prelate +5%) = 1.86837 -> 1.87
+    assert.strictEqual(cProj.healingMultiplier, Number(expectedHealMult.toFixed(2)), 'Cleric projected healingMultiplier must match Lv, Faith & Prelate Raiment scaling');
+    assert.strictEqual(GameRoom.computeHealingAmount(24, cState), Math.round(24 * expectedHealMult), 'GameRoom healing amount must match Cleric Lv, Faith & Prelate Raiment formula');
 
     // 4. All attribute caps + relic & blessing stacking parity between GameRoom and statUtils
     const stacked = room.addOrReconnectPlayer('p_stack', 'StackHero', 'arcanist', false, {
@@ -6207,7 +6241,7 @@ async function runRegressionTests() {
     });
     stacked.relics = ['sunfire_signet', 'keen_arrowhead', 'runic_carapace', 'hourglass_shard', 'zephyr_greaves', 'bastion_pauldron', 'twinstring_charm'];
     stacked.floorBlessings = ['fury', 'swiftness', 'bastion'];
-    stacked.maxHp = GameRoom.computePlayerMaxHp(stacked.heroClass, stacked.level, stacked.vitality, stacked.relics);
+    stacked.maxHp = GameRoom.computePlayerMaxHp(stacked.heroClass, stacked.level, stacked.vitality, stacked.relics, stacked.equippedVestment);
     stacked.hp = stacked.maxHp;
 
     const projStacked = calculatePlayerStatProjections(stacked, 5);
@@ -6500,7 +6534,7 @@ async function runRegressionTests() {
       const pulseHeal = GameRoom.computeHealingAmount(24, c);
       const beaconTick = GameRoom.computeHealingAmount(4, c);
       const auraNormal = GameRoom.computeHealingAmount(2, c);
-      const expectedMult = (1 + (t.level - 1) * 0.015) * (1 + t.faith * 0.006);
+      const expectedMult = (1 + (t.level - 1) * 0.015) * (1 + t.faith * 0.006) * 1.05;
       assert.strictEqual(proj.healingMultiplier, Number(expectedMult.toFixed(2)), `${t.label} statUtils healingMultiplier parity`);
 
       // Sustained HP/sec from Pulse (6.8s CD) + Beacon (10 ticks / 18s CD) + Aura (2s pulse)
@@ -6684,17 +6718,18 @@ async function runRegressionTests() {
     arc0.x = origin.x;
     arc0.y = origin.y;
 
-    // 0) Default [Q] without Scroll = Astral Nova (8-way burst, 5000ms CD)
+    // 0) Default [Q] without Scroll = Astral Nova (5000ms base * 0.97 from Spireweaver Vestments = 4850ms CD)
     assert.strictEqual(arc0.equippedScrollId || null, null, 'Arcanist must start with no Scroll equipped (Astral Nova default)');
     room.performAction(arc0.id, 'tactical', 0, { aimDistance: 120, explicitAim: true });
     assert.strictEqual(room.projectiles.length, 8, 'Default Astral Nova [Q] must fire 8 radial projectiles');
-    assert.strictEqual(arc0.skillCooldownMs, HERO_CLASSES.arcanist.tacticalCooldownMs, 'Astral Nova must start 5000ms tactical CD');
+    assert.strictEqual(arc0.skillCooldownMs, Math.round(HERO_CLASSES.arcanist.tacticalCooldownMs * 0.97), 'Astral Nova must start 4850ms tactical CD (with starter +3% CDR vestment)');
     room.projectiles = [];
     arc0.skillCooldownMs = 0;
 
     // 1) All 7 Spell Scrolls equip onto [Q], activate via tactical action, and enforce exact CDs
     for (const spellId of ARCANIST_SPELL_ORDER) {
       const spec = ARCANIST_SPELLS[spellId];
+      const expectedStarterCd = Math.round(spec.cooldownMs * 0.97);
       arc0.pendingScrollChoices = [spellId];
       room.selectArcanistScroll(arc0.id, spellId);
       assert.strictEqual(arc0.equippedScrollId, spellId, `Must equip ${spellId} Scroll onto [Q]`);
@@ -6703,7 +6738,7 @@ async function runRegressionTests() {
       if (spellId === 'chain_lightning') {
         // Cone blast fires forward immediately even if no enemy is inside the cone
         room.performAction(arc0.id, 'tactical', 0, { aimDistance: 340, explicitAim: true });
-        assert.strictEqual(arc0.skillCooldownMs, spec.cooldownMs, 'Chain Lightning cone must consume cooldown on cast');
+        assert.strictEqual(arc0.skillCooldownMs, expectedStarterCd, 'Chain Lightning cone must consume cooldown on cast');
         assert.ok(room.zones.some((z) => z.kind === 'chain_lightning_arc' && Math.abs((z.coneHalfAngleRad || 0) - 0.56) < 0.01), 'Chain Lightning must spawn cone discharge zone');
         room.zones = [];
         arc0.skillCooldownMs = 0;
@@ -6724,13 +6759,13 @@ async function runRegressionTests() {
       }
       assert.strictEqual(
         arc0.skillCooldownMs,
-        spec.cooldownMs,
-        `${spellId} must start exact ${spec.cooldownMs}ms tactical cooldown (0 INT/CDR)`
+        expectedStarterCd,
+        `${spellId} must start exact ${expectedStarterCd}ms tactical cooldown (0 INT + 3% Spireweaver CDR)`
       );
       assert.strictEqual(
         arc0.maxSkillCooldownMs,
-        spec.cooldownMs,
-        `${spellId} maxSkillCooldownMs must reflect ${spec.cooldownMs}ms`
+        expectedStarterCd,
+        `${spellId} maxSkillCooldownMs must reflect ${expectedStarterCd}ms`
       );
       if (spellId === 'arcane_barrage') {
         for (let step = 0; step < 14; step++) {
@@ -7067,7 +7102,7 @@ async function runRegressionTests() {
       assert.strictEqual(arc.potions, 2, 'Scroll must never alter Potions');
       assert.strictEqual(
         arc.maxSkillCooldownMs,
-        Math.round(scroll.cooldownMs * (1 - 30 * 0.002)),
+        Math.round(scroll.cooldownMs * (1 - (30 * 0.002 + 0.03))),
         `${scroll.id} must update [Q] tactical max CD`
       );
       assert.ok(getArcanistScrollDef(arc.equippedScrollId), 'Equipped scroll helper must resolve cleanly');
@@ -7159,11 +7194,11 @@ async function runRegressionTests() {
       ownerId: boss.id,
     });
 
-    // Cast Chrono Well centered on caster (check 45000ms CD base on 0-INT caster)
+    // Cast Chrono Well centered on caster (check 45000ms base * 0.97 from Spireweaver Vestments on 0-INT caster)
     assert.strictEqual(HERO_CLASSES.arcanist.ultCooldownMs, 45000, 'Arcanist ultCooldownMs must be 45000ms');
     p1.ultCooldownMs = 0;
     room.performAction(p1.id, 'ult', 0, { aimDistance: 0, explicitAim: true });
-    assert.strictEqual(p1.ultCooldownMs, 45000, 'Chrono Well must enforce exact 45s cooldown');
+    assert.strictEqual(p1.ultCooldownMs, Math.round(45000 * 0.97), 'Chrono Well must enforce exact 45s base cooldown with Spireweaver +3% CDR');
 
     const well = room.zones.find((z) => z.kind === 'chrono_well');
     assert.ok(well && well.radius === 115 && well.ttlMs === 3000, 'Chrono Well zone must spawn with 115u radius and 3000ms duration');
@@ -8444,7 +8479,7 @@ async function runRegressionTests() {
     assert.strictEqual(eqVest.ok, true);
     assert.strictEqual(
       room.getPlayerState('p_vanguard')!.maxHp,
-      defaultVestHp + ARMAMENT_TUNING.passives ? defaultVestHp + 25 : defaultVestHp + 25
+      defaultVestHp + 25
     );
     assert.strictEqual(room.getPlayerState('p_vanguard')!.activePassiveId, 'war_monger');
 
@@ -8600,36 +8635,39 @@ async function runRegressionTests() {
       assert.ok(vRoom.zones.some((z) => z.kind === 'sunforged_shockwave'), 'Claymore must emit sunforged_shockwave when Shield > 0');
       assert.ok(clayTarget.hp < clayHpUnshielded, 'Sunforged shockwave must strike cone targets out to 118px');
 
-      // Halberd (+3 pierce, +26px reach, hits each target once per swing & inflicts Bleed)
+      // Crimson War Axe (ID preserved 'vanguard_crimson_halberd': +3 pierce, +26px reach, Bleed, NO shield-on-hit)
       vRoom.grantArmament('v1', 'weapon', 'vanguard_crimson_halberd');
       vRoom.equipArmament('v1', 'weapon', 'vanguard_crimson_halberd');
+      vpLive.shield = 10;
       const halberdSkeleton = makeEnemy('v_halb', 'skeleton', vpLive.x + 56, vpLive.y);
       vRoom.enemies = [halberdSkeleton];
       Math.random = () => 0.2; // triggers 45% bleedChance
       vRoom.projectiles = [];
       vRoom.firePrimaryAttack(vpLive);
       assert.strictEqual(vRoom.projectiles[0].weaponId, 'vanguard_crimson_halberd');
-      assert.ok(vRoom.projectiles[0].pierce >= 7, 'Crimson Halberd adds +3 pierce (base 4 + 3 = 7)');
+      assert.ok(vRoom.projectiles[0].pierce >= 7, 'Crimson War Axe adds +3 pierce (base 4 + 3 = 7)');
       const hpBeforeHalb = halberdSkeleton.hp;
       stepRoom(vRoom, 120);
-      assert.ok(halberdSkeleton.hp < hpBeforeHalb, 'Crimson Halberd must strike extended range targets');
-      assert.ok(halberdSkeleton.bleedingMs > 0, 'Crimson Halberd primary hit should inflict Bleed');
+      assert.ok(halberdSkeleton.hp < hpBeforeHalb, 'Crimson War Axe must strike extended range targets');
+      assert.ok(halberdSkeleton.bleedingMs > 0, 'Crimson War Axe primary hit should inflict Bleed');
+      assert.strictEqual(vpLive.shield, 10, 'Crimson War Axe must grant 0 Shield on hit (Shield Lock preserved existing 10)');
 
-      // Stormbreaker Flail (360° Tempest Wheel around Vanguard + Shock + +3 Shield)
+      // Stormbreaker Flail (Downward Heavy Slam + localized forward AoE + Shock + +3 Shield)
       Math.random = () => 0.2; // triggers 25% shockChance
       vRoom.grantArmament('v1', 'weapon', 'vanguard_stormbreaker_flail');
       vRoom.equipArmament('v1', 'weapon', 'vanguard_stormbreaker_flail');
-      const flailFront = makeEnemy('v_flail_0', 'goblin', vpLive.x + 68, vpLive.y);
-      const flailBehind = makeEnemy('v_flail_1', 'goblin', vpLive.x - 68, vpLive.y);
+      const flailFront = makeEnemy('v_flail_0', 'goblin', vpLive.x + 54, vpLive.y);
+      const flailBehind = makeEnemy('v_flail_1', 'goblin', vpLive.x - 85, vpLive.y);
       vRoom.enemies = [flailFront, flailBehind];
       vpLive.shield = 10;
       vRoom.projectiles = [];
       vRoom.zones = [];
       vRoom.firePrimaryAttack(vpLive);
-      assert.strictEqual(vRoom.projectiles.length, 0, 'Stormbreaker Tempest Wheel replaces directional cleave projectile with 360° AoE');
-      assert.ok(vRoom.zones.some((z) => z.kind === 'tempest_wheel'), 'Stormbreaker must spawn tempest_wheel zone');
-      assert.ok(flailFront.hp < 1000 && flailBehind.hp < 1000, 'Stormbreaker Tempest Wheel must damage enemies 360° around Vanguard');
-      assert.ok(vpLive.shield >= 16, `Expected +3 shield per hit (10 + 6 = 16), got ${vpLive.shield}`);
+      assert.strictEqual(vRoom.projectiles.length, 0, 'Stormbreaker heavy slam replaces directional cleave projectile with localized forward AoE');
+      assert.ok(vRoom.zones.some((z) => z.kind === 'stormbreaker_slam'), 'Stormbreaker must spawn stormbreaker_slam zone');
+      assert.ok(flailFront.hp < 1000, 'Stormbreaker heavy slam must damage enemies in localized forward slam zone');
+      assert.strictEqual(flailBehind.hp, 1000, 'Stormbreaker heavy slam must NOT hit enemies behind Vanguard');
+      assert.ok(vpLive.shield >= 13, `Expected +3 shield on hit (10 + 3 = 13), got ${vpLive.shield}`);
       assert.ok(flailFront.shockedMs > 0, 'Stormbreaker Flail primary hit should Shock enemy');
 
       // 2. RANGER: Ashwood Recurve (Barbed Broadheads +15% vs Slowed), Galewind Twinbow (per-target 3rd-hit Galeburst wind AoE), Eclipse Longbow (Hold-to-Charge + INT scaling)
@@ -8823,6 +8861,7 @@ async function runRegressionTests() {
       allyP.y = cp.y;
       const skeletonTarget = makeEnemy('skel_c', 'skeleton', cp.x + 35, cp.y);
       cRoom.enemies = [skeletonTarget];
+      (cRoom as any).floorMasteryAwarded = true;
 
       cp.aimAngle = 0;
       cp.shield = 10;
@@ -9890,6 +9929,1185 @@ async function runRegressionTests() {
       enemies: [{ id: 'far', x: 191, y: 100, hp: 50 }],
     });
     assert.strictEqual(outOfRange, null, 'Out-of-range candidate must return null');
+  });
+
+  // --- Test 120: Combat Sync Phase 1 — All 12 Weapons Config & Eclipse Arcane/INT Preservation ---
+  await test('120. All 12 weapons resolve configured scalingAttribute, damageCategory, damageTypeMode, and Eclipse uses INT/Arcane with intact charge mechanics', () => {
+    const expectedTable: Record<string, { attr: 'strength' | 'dexterity' | 'intelligence' | 'faith'; cat: 'physical' | 'arcane' | 'divine'; mode: 'fixed' | 'adaptive' }> = {
+      vanguard_sunforged_claymore: { attr: 'strength', cat: 'physical', mode: 'fixed' },
+      vanguard_crimson_halberd: { attr: 'strength', cat: 'physical', mode: 'fixed' },
+      vanguard_stormbreaker_flail: { attr: 'strength', cat: 'physical', mode: 'fixed' },
+      ranger_ashwood_recurve: { attr: 'dexterity', cat: 'physical', mode: 'fixed' },
+      ranger_galewind_twinbow: { attr: 'dexterity', cat: 'physical', mode: 'fixed' },
+      ranger_eclipse_longbow: { attr: 'intelligence', cat: 'arcane', mode: 'fixed' },
+      arcanist_runebound_spire: { attr: 'intelligence', cat: 'arcane', mode: 'fixed' },
+      arcanist_cinderflare_rod: { attr: 'intelligence', cat: 'arcane', mode: 'fixed' },
+      arcanist_chronostar_scepter: { attr: 'intelligence', cat: 'arcane', mode: 'fixed' },
+      cleric_dawnstar_mace: { attr: 'faith', cat: 'divine', mode: 'fixed' },
+      cleric_solaris_censer: { attr: 'faith', cat: 'divine', mode: 'fixed' },
+      cleric_seraphim_crozier: { attr: 'faith', cat: 'divine', mode: 'fixed' },
+    };
+    assert.strictEqual(WEAPON_CATALOG.length, Object.keys(expectedTable).length);
+
+    for (const wpn of WEAPON_CATALOG) {
+      const exp = expectedTable[wpn.id];
+      assert.ok(exp, `Unexpected weapon in catalog: ${wpn.id}`);
+      const profile = resolveWeaponCombatProfile(wpn.heroClass, wpn.id, {
+        strength: 40,
+        dexterity: 40,
+        intelligence: 40,
+        faith: 40,
+      });
+      assert.strictEqual(profile.scalingAttribute, exp.attr, `${wpn.id} scalingAttribute mismatch`);
+      assert.strictEqual(profile.damageCategory, exp.cat, `${wpn.id} damageCategory mismatch`);
+      assert.strictEqual(profile.damageTypeMode, exp.mode, `${wpn.id} damageTypeMode mismatch`);
+    }
+
+    // Eclipse Longbow preserves charge, pierce, projectile speed, and crit modifiers while switching to INT/Arcane
+    const room = new GameRoom({
+      roomId: 'SYNC_T120',
+      name: 'Eclipse Sync',
+      hostName: 'Tester',
+      difficulty: 'Normal',
+      seed: 120,
+    });
+    const ranger = room.addOrReconnectPlayer('r_sync', 'EclipseUser', 'ranger');
+    room.startExpedition();
+    room.grantArmament('r_sync', 'weapon', 'ranger_eclipse_longbow');
+    room.equipArmament('r_sync', 'weapon', 'ranger_eclipse_longbow');
+    ranger.intelligence = 50;
+    ranger.dexterity = 0;
+
+    const proj = calculatePlayerStatProjections(ranger, 1);
+    assert.strictEqual(proj.primaryCategory, 'arcane');
+    assert.strictEqual(proj.scalingAttribute, 'intelligence');
+    assert.strictEqual(proj.primaryStatName, 'Intelligence');
+    assert.strictEqual(proj.isChargedWeapon, true);
+    assert.strictEqual(proj.pierceCount, 3);
+    assert.strictEqual(proj.critMultiplier, 1.35);
+
+    room.projectiles = [];
+    room.fireEclipseChargedShot(ranger, ARMAMENT_TUNING.weapons.eclipse.maxChargeMs);
+    const arrow = room.projectiles[0];
+    assert.strictEqual(arrow.damageCategory, 'arcane', 'Eclipse charged arrow must deal Arcane damage');
+    assert.strictEqual(arrow.pierce, 3, 'Eclipse bonusPierce +2 must remain intact');
+    assert.ok(arrow.damage >= proj.scaledHitDamage, 'Full draw projectile damage must match/exceed full-draw projection (incl. crit)');
+  });
+
+  // --- Test 121: Adaptive Damage Mode & Independence from Scaling Attribute ---
+  await test('121. Adaptive damage mode resolves STR > INT -> Physical, INT > STR -> Arcane, STR === INT -> configured default without altering scalingAttribute', () => {
+    const adaptiveWeapon: WeaponDef = {
+      id: 'synthetic_adaptive_blade',
+      slot: 'weapon',
+      heroClass: 'vanguard',
+      name: 'Synthetic Adaptive Blade',
+      rarity: 'Ascendant',
+      archetype: 'Adaptive Edge',
+      summary: 'Synthetic adaptive test weapon scaling with FAITH.',
+      effectLines: [],
+      unlockHint: 'Test',
+      accent: '#C084FC',
+      modifiers: {
+        scalingAttribute: 'faith',
+        damageCategory: 'divine',
+        damageTypeMode: 'adaptive',
+      },
+    };
+
+    const strHigher = resolveWeaponCombatProfile('vanguard', adaptiveWeapon, {
+      strength: 60,
+      intelligence: 20,
+      faith: 50,
+    });
+    assert.strictEqual(strHigher.damageCategory, 'physical', 'STR > INT must resolve Physical');
+    assert.strictEqual(strHigher.scalingAttribute, 'faith', 'Scaling attribute must stay independent of adaptive result');
+    assert.strictEqual(strHigher.effectiveAttributeValue, 50);
+
+    const intHigher = resolveWeaponCombatProfile('vanguard', adaptiveWeapon, {
+      strength: 15,
+      intelligence: 55,
+      faith: 50,
+    });
+    assert.strictEqual(intHigher.damageCategory, 'arcane', 'INT > STR must resolve Arcane');
+    assert.strictEqual(intHigher.scalingAttribute, 'faith');
+
+    const tie = resolveWeaponCombatProfile('vanguard', adaptiveWeapon, {
+      strength: 35,
+      intelligence: 35,
+      faith: 50,
+    });
+    assert.strictEqual(tie.damageCategory, 'divine', 'STR === INT must fall back to configured default category');
+    assert.strictEqual(tie.scalingAttribute, 'faith');
+
+    // Damage multiplier uses scalingAttribute ('faith') regardless of whether adaptive resolves Physical or Arcane
+    const room = new GameRoom({
+      roomId: 'ADAPT_T121',
+      name: 'Adaptive Sync',
+      hostName: 'Tester',
+      difficulty: 'Normal',
+      seed: 121,
+    });
+    const p = room.addOrReconnectPlayer('v_adp', 'AdaptiveTester', 'vanguard');
+    p.strength = 60;
+    p.intelligence = 10;
+    p.faith = 0;
+    const multFaith0 = room.computeDamageMult(p, strHigher.damageCategory, {
+      isPrimaryAttack: true,
+      weaponDef: adaptiveWeapon,
+    });
+    p.faith = 50;
+    const multFaith50 = room.computeDamageMult(p, strHigher.damageCategory, {
+      isPrimaryAttack: true,
+      weaponDef: adaptiveWeapon,
+    });
+    assert.ok(multFaith50 > multFaith0, 'Increasing configured FAITH scalingAttribute must increase damage even when adaptive resolves Physical');
+    assert.ok(Math.abs(multFaith50 / multFaith0 - 1.4) < 1e-9, '50 FAITH scales damage by exact +40% independent of STR/INT tiebreak');
+  });
+
+  // --- Test 122: Attribute Sweeps (0, 50, 100), Galewind/Eclipse Parity, Tenacity & Vanguard Shield Exclusivity ---
+  await test('122. Attribute sweeps (0, 50, 100) and Galewind/Eclipse/Solaris/Tenacity/Shield formulas match 1:1 between server & statUtils', () => {
+    const room = new GameRoom({
+      roomId: 'SWEEP_T122',
+      name: 'Sweep Sync',
+      hostName: 'Tester',
+      difficulty: 'Normal',
+      seed: 122,
+    });
+    const sweepValues = [0, 50, 100];
+
+    // 1. Vanguard STR & VIT sweep + CC tenacity + Shield exclusivity
+    const v = room.addOrReconnectPlayer('v_sw', 'VanSweep', 'vanguard');
+    const c = room.addOrReconnectPlayer('c_sw', 'ClrSweep', 'cleric');
+    const r = room.addOrReconnectPlayer('r_sw', 'RngSweep', 'ranger');
+    const a = room.addOrReconnectPlayer('a_sw', 'ArcSweep', 'arcanist');
+    room.startExpedition();
+
+    for (const val of sweepValues) {
+      v.strength = val;
+      v.vitality = val;
+      v.dexterity = val;
+      v.intelligence = val;
+      v.faith = val;
+      v.maxHp = GameRoom.computePlayerMaxHp(v.heroClass, v.level, v.vitality, v.relics, v.equippedVestment);
+      const vp = calculatePlayerStatProjections(v, 1);
+
+      // Direct multiplier parity
+      assert.strictEqual(
+        Number(room.computeDamageMult(v, 'physical', { isPrimaryAttack: true }).toFixed(2)),
+        vp.damageMultiplier,
+        `Vanguard STR=${val} damageMultiplier parity`
+      );
+      // DoT multiplier parity
+      assert.strictEqual(
+        Number(GameRoom.computeDotMultiplier(v, { sourceKind: 'weapon' }).toFixed(3)),
+        vp.dotMultiplier,
+        `Vanguard val=${val} dotMultiplier parity`
+      );
+      // Max HP & regen parity
+      assert.strictEqual(v.maxHp, vp.maxHp, `VIT=${val} maxHp parity`);
+      assert.strictEqual(
+        computePlayerHpRegenPerTick(v.heroClass, v.vitality, v.equippedVestment),
+        vp.hpRegenPerTick,
+        `VIT=${val} regen parity`
+      );
+      // Crit, Attack CD, CDR, Tenacity parity
+      assert.strictEqual(
+        Number((computePlayerCritChance(v) * 100).toFixed(1)),
+        vp.critChancePct,
+        `DEX=${val} critChance parity`
+      );
+      assert.strictEqual(
+        computePlayerAttackCooldownMs(v),
+        vp.attackCooldownMs,
+        `DEX=${val} attackCooldownMs parity`
+      );
+      assert.strictEqual(
+        Number(((1 - computePlayerCdrMult(v)) * 100).toFixed(1)),
+        vp.cooldownReductionPct,
+        `INT=${val} CDR parity`
+      );
+      assert.strictEqual(
+        Number((computePlayerCcTenacity(v) * 100).toFixed(1)),
+        vp.faithCcTenacityPct,
+        `FAITH=${val} tenacity parity`
+      );
+    }
+
+    // Cleric FAITH healing sweep (0, 50, 100)
+    for (const fthVal of sweepValues) {
+      c.faith = fthVal;
+      const cp = calculatePlayerStatProjections(c, 1);
+      const healed = GameRoom.computeHealingAmount(100, c, v);
+      assert.ok(
+        Math.abs(healed - Math.round(100 * cp.healingMultiplier)) <= 2,
+        `Cleric FTH=${fthVal} heal=${healed} matches projection`
+      );
+    }
+
+    // Tenacity bugfix verification: applyStatusEffect stun uses full computePlayerCcTenacity (up to 0.55 incl. vestment)
+    room.grantArmament('c_sw', 'vestment', 'cleric_templar_cassock');
+    room.equipArmament('c_sw', 'vestment', 'cleric_templar_cassock');
+    c.faith = 100;
+    c.stunnedMs = 0;
+    room.applyStatusEffect(c, 'stun', 1000);
+    // Faith 100 => 0.30 tenacity => 700ms stun (consistent with applyPlayerStatus, previously capped differently at 0.40 without vestment)
+    assert.strictEqual(c.stunnedMs, Math.round(1000 * (1 - computePlayerCcTenacity(c))));
+
+    // Galewind 0.78x DEX scaling reflected identically in GameRoom and calculatePlayerStatProjections
+    room.grantArmament('r_sw', 'weapon', 'ranger_galewind_twinbow');
+    room.equipArmament('r_sw', 'weapon', 'ranger_galewind_twinbow');
+    r.dexterity = 50;
+    const gwProj = calculatePlayerStatProjections(r, 1);
+    assert.strictEqual(gwProj.dexScalingMult, ARMAMENT_TUNING.weapons.galewind.dexScalingMult);
+    assert.strictEqual(gwProj.primaryStatDamageBonusPct, 31.2, 'Galewind 50 DEX * 0.78 * 0.8 = +31.2%');
+    assert.strictEqual(
+      Number(room.computeDamageMult(r, 'physical', { isPrimaryAttack: true }).toFixed(2)),
+      gwProj.damageMultiplier
+    );
+
+    // Ashwood +30% Longshot bonus parity
+    room.equipArmament('r_sw', 'weapon', 'ranger_ashwood_recurve');
+    const ashProj = calculatePlayerStatProjections(r, 1);
+    assert.strictEqual(ashProj.longshotBonusPct, 30);
+
+    // Eclipse charge DPS & full-draw parity
+    room.grantArmament('r_sw', 'weapon', 'ranger_eclipse_longbow');
+    room.equipArmament('r_sw', 'weapon', 'ranger_eclipse_longbow');
+    r.intelligence = 50;
+    r.dexterity = 50;
+    const ecProj = calculatePlayerStatProjections(r, 1);
+    const fullProf = computeEclipseChargeProfile(ARMAMENT_TUNING.weapons.eclipse.maxChargeMs);
+    const expectedCycleMs = computePlayerAttackCooldownMs(r) + ARMAMENT_TUNING.weapons.eclipse.maxChargeMs;
+    assert.strictEqual(ecProj.chargeTimeMs, ARMAMENT_TUNING.weapons.eclipse.maxChargeMs);
+    assert.strictEqual(ecProj.effectiveAttackCycleMs, expectedCycleMs);
+    assert.strictEqual(ecProj.attacksPerSecond, Number((1000 / expectedCycleMs).toFixed(2)));
+    assert.strictEqual(
+      ecProj.scaledHitDamage,
+      Math.round(HERO_CLASSES.ranger.damage * room.computeDamageMult(r, 'arcane', { isPrimaryAttack: true }) * fullProf.damageRatio)
+    );
+    // Ashwood retains Ranger Frost Volley Tactical while Ascendant Eclipse replaces Tactical with Black Sun
+    assert.strictEqual(
+      ashProj.activeTacticalHitDamage,
+      Math.round(18 * room.computeDamageMult(r, 'physical', { isPrimaryAttack: false }))
+    );
+    assert.strictEqual(
+      ecProj.activeTacticalHitDamage,
+      Math.round(
+        ARMAMENT_TUNING.weapons.eclipse.blackSunStrikeBaseDamage *
+          room.computeDamageMult(r, 'arcane', { isPrimaryAttack: false })
+      )
+    );
+
+    // Arcanist unarmed pierce & shield exclusivity check
+    room.unequipArmament('a_sw', 'weapon');
+    assert.strictEqual(calculatePlayerStatProjections(a, 1).pierceCount, 1);
+    assert.strictEqual(computePlayerMaxShieldCap(a), 60);
+    assert.strictEqual(computePlayerStartingShield(a), 15);
+    assert.strictEqual(calculatePlayerStatProjections(a, 1).selfShieldPerSec, 0);
+  });
+
+  // --- Test 123: Weapon-Derived vs Class DoT Scaling & Enemy Arcane Resistance ---
+  await test('123. Weapon-derived DoT uses Eclipse INT while class-skill DoT uses Ranger DEX, and Arcane resistance applies to Eclipse & Arcanist', () => {
+    const room = new GameRoom({
+      roomId: 'DOT_T123',
+      name: 'DoT & Res Sync',
+      hostName: 'Tester',
+      difficulty: 'Normal',
+      seed: 123,
+    });
+    const ranger = room.addOrReconnectPlayer('r_dot', 'DoTRanger', 'ranger');
+    room.startExpedition();
+    room.grantArmament('r_dot', 'weapon', 'ranger_eclipse_longbow');
+    room.equipArmament('r_dot', 'weapon', 'ranger_eclipse_longbow');
+    ranger.intelligence = 100;
+    ranger.dexterity = 0;
+    ranger.relics = ['cinder_heart'];
+
+    // Weapon-derived DoT with Eclipse scales off INT (100 -> 1.1x), whereas class skill DoT scales off DEX (0 -> 1.0x)
+    const weaponDotMult = GameRoom.computeDotMultiplier(ranger, { sourceKind: 'weapon' });
+    const classDotMult = GameRoom.computeDotMultiplier(ranger, { sourceKind: 'class' });
+    assert.strictEqual(weaponDotMult, 1.1);
+    assert.strictEqual(classDotMult, 1.0);
+    assert.strictEqual(calculatePlayerStatProjections(ranger, 1).dotMultiplier, 1.1);
+
+    // Enemy resistance check: explicit arcane resistance & fallback average
+    assert.strictEqual(
+      resolveEnemyResistance({ physical: 0.1, fire: 0.2, frost: 0.4, lightning: 0.6, poison: 0, bleed: 0, tenacity: 0 }, 'arcane'),
+      0.4,
+      'Missing arcane resistance must fall back to average of fire/frost/lightning'
+    );
+    const resTarget = room.spawnEnemyForTesting('cultist', ranger.x + 80, ranger.y);
+    resTarget.resistances = {
+      physical: 0,
+      fire: 0,
+      frost: 0,
+      lightning: 0,
+      arcane: 0.5,
+      divine: 0,
+      poison: 0,
+      bleed: 0,
+      tenacity: 0,
+    };
+    resTarget.hp = 1000;
+    resTarget.maxHp = 1000;
+    const prevRandom = Math.random;
+    try {
+      Math.random = () => 0.99; // suppress crit & variance
+      const dealtArcane = room.damageEnemy(resTarget, 100, ranger, false, 'arcane', true);
+      assert.strictEqual(dealtArcane, 50, '50% arcane resistance must halve Eclipse Arcane arrow damage');
+    } finally {
+      Math.random = prevRandom;
+    }
+  });
+
+  // --- Test 124: Armament Overhaul Extra Matrix (Passives, Arcanist Scrolls & Co-op Isolation) ---
+  await test('124. Replacement passives (War Monger, Heat, Momentum, Predator, Void, Shared Grace, Sacred Retribution) & all 7 Arcanist scrolls preserve co-op isolation', () => {
+    const room = new GameRoom({
+      roomId: 'PASS_T124',
+      name: 'Passives Matrix',
+      hostName: 'Tester',
+      difficulty: 'Normal',
+      seed: 124,
+    });
+    const v1 = room.addOrReconnectPlayer('v1', 'Van1', 'vanguard');
+    const r1 = room.addOrReconnectPlayer('r1', 'Rng1', 'ranger');
+    const a1 = room.addOrReconnectPlayer('a1', 'Arc1', 'arcanist');
+    const c1 = room.addOrReconnectPlayer('c1', 'Clr1', 'cleric');
+    room.startExpedition();
+
+    // Heat builds on hit and amplifies damage
+    room.grantArmament('v1', 'vestment', 'vanguard_aegis_sovereign_mail');
+    room.equipArmament('v1', 'vestment', 'vanguard_aegis_sovereign_mail');
+    assert.strictEqual(v1.activePassiveId, 'heat');
+    const foe = room.spawnEnemyForTesting('goblin', v1.x + 28, v1.y);
+    foe.hp = 5000;
+    foe.maxHp = 5000;
+    const multCold = room.computeDamageMult(v1, 'physical', { isPrimaryAttack: true });
+    room.firePrimaryAttack(v1);
+    for (let i = 0; i < 6; i++) room.tick(25);
+    assert.ok((v1.vanguardHeat || 0) > 0, 'Heat stacks on confirmed primary hit');
+    assert.ok(room.computeDamageMult(v1, 'physical', { isPrimaryAttack: true }) > multCold, 'Heat increases damage multiplier');
+
+    // War Monger heals on hit (and strongly <= 30% HP)
+    room.grantArmament('v1', 'vestment', 'vanguard_obsidian_juggernaut');
+    room.equipArmament('v1', 'vestment', 'vanguard_obsidian_juggernaut');
+    v1.hp = Math.floor(v1.maxHp * 0.2);
+    const hpLowBefore = v1.hp;
+    room.damageEnemy(foe, 100, v1, false, 'physical', true);
+    assert.ok(v1.hp > hpLowBefore + 30, 'War Monger triggers 50% low-HP lifesteal');
+
+    // Predator's Instinct stacks on same target, resets on target switch (without touching other players)
+    room.grantArmament('r1', 'vestment', 'ranger_briarheart_leather');
+    room.equipArmament('r1', 'vestment', 'ranger_briarheart_leather');
+    const foeB = room.spawnEnemyForTesting('goblin', r1.x + 80, r1.y);
+    foeB.hp = 5000;
+    room.damageEnemy(foe, 40, r1, false, 'physical', true);
+    room.damageEnemy(foe, 40, r1, false, 'physical', true);
+    assert.strictEqual(r1.predatorStacks, 2);
+    assert.strictEqual(v1.predatorStacks, 0, 'Co-op players keep isolated passive stacks');
+    room.damageEnemy(foeB, 40, r1, false, 'physical', true);
+    assert.strictEqual(r1.predatorStacks, 1, 'Target switch resets prior stacks then applies 1 stack on new target');
+
+    // Void Consumption reaches cap on primaries then empowers tactical and drains to 0
+    room.grantArmament('a1', 'vestment', 'arcanist_voidward_robes');
+    room.equipArmament('a1', 'vestment', 'arcanist_voidward_robes');
+    a1.voidEnergy = ARMAMENT_TUNING.passives.voidConsumption.cap;
+    a1.skillCooldownMs = 0;
+    room.performAction('a1', 'tactical');
+    assert.strictEqual(a1.voidEnergy, 0, 'Tactical skill consumes full Void Energy');
+
+    // Shared Grace stores healing from ally heals & auto-heals injured allies; Sacred Retribution triggers holy burst
+    room.grantArmament('c1', 'vestment', 'cleric_martyr_surplice');
+    room.equipArmament('c1', 'vestment', 'cleric_martyr_surplice');
+    v1.hp = Math.floor(v1.maxHp * 0.4);
+    v1.x = c1.x + 20;
+    v1.y = c1.y;
+    c1.skillCooldownMs = 0;
+    room.performAction('c1', 'tactical');
+    assert.ok((c1.storedGrace || 0) >= 0, 'Shared Grace stores overflow healing');
+
+    room.grantArmament('c1', 'vestment', 'cleric_templar_cassock');
+    room.equipArmament('c1', 'vestment', 'cleric_templar_cassock');
+    c1.clericSanctity = ARMAMENT_TUNING.passives.sacredRetribution.cap;
+    room.zones = [];
+    room.firePrimaryAttack(c1);
+    assert.ok(room.zones.some((z) => z.kind === 'sacred_retribution'), 'Full Sanctity triggers Sacred Retribution shockwave');
+    assert.strictEqual(c1.clericSanctity, 0);
+
+    // All 7 Arcanist scrolls remain selectable and equippable
+    for (const scroll of ARCANIST_SCROLLS) {
+      room.adminEquipScroll('a1', scroll.id);
+      assert.strictEqual(a1.equippedScrollId, scroll.id);
+    }
+  });
+
+  // --- Test 125: Multiplayer Combat Sync, Rejoin & Server-Authoritative Clamping ---
+  await test('125. Multiplayer host & guest weapon swaps, charged Eclipse hits, death/revive, rejoin persistence & anti-tamper server authority', () => {
+    const room = new GameRoom({
+      roomId: 'MP_T125',
+      name: 'Multiplayer Sync Room',
+      hostName: 'HostArc',
+      hostId: 'host_1',
+      difficulty: 'Normal',
+      seed: 125,
+    });
+    const host = room.addOrReconnectPlayer('host_1', 'HostArc', 'arcanist', false, {
+      level: 10,
+      xp: 0,
+      strength: 0,
+      vitality: 0,
+      dexterity: 0,
+      intelligence: 40,
+      faith: 0,
+      attributePoints: 0,
+      ownedWeapons: ['arcanist_runebound_spire', 'arcanist_cinderflare_rod'],
+      equippedWeapon: 'arcanist_cinderflare_rod',
+    });
+    const guest = room.addOrReconnectPlayer('guest_1', 'GuestRng', 'ranger', false, {
+      level: 10,
+      xp: 0,
+      strength: 0,
+      vitality: 0,
+      dexterity: 20,
+      intelligence: 50,
+      faith: 0,
+      attributePoints: 0,
+      ownedWeapons: ['ranger_ashwood_recurve', 'ranger_eclipse_longbow'],
+      ownedVestments: ['ranger_thornwood_brigandine', 'ranger_windrunner_mantle'],
+      equippedWeapon: 'ranger_ashwood_recurve',
+      equippedVestment: 'ranger_thornwood_brigandine',
+    });
+    room.startExpedition();
+
+    // Guest swaps weapon to Eclipse and Vestment to Windrunner Mistcloak mid-run; delta sync reflects updates
+    const baseSnap = cloneSnapshotBaseline(room.buildNetworkSnapshot());
+    assert.strictEqual(room.equipArmament('guest_1', 'weapon', 'ranger_eclipse_longbow').ok, true);
+    assert.strictEqual(room.equipArmament('guest_1', 'vestment', 'ranger_windrunner_mantle').ok, true);
+    const updatedSnap = room.buildNetworkSnapshot();
+    const delta = computeSnapshotDelta(baseSnap, updatedSnap, 1, 2);
+    const guestApplied = applySnapshotDelta(baseSnap, delta).players.find((pl) => pl.id === 'guest_1')!;
+    assert.strictEqual(guestApplied.equippedWeapon, 'ranger_eclipse_longbow');
+    assert.strictEqual(guestApplied.equippedVestment, 'ranger_windrunner_mantle');
+    assert.strictEqual(guestApplied.activePassiveId, 'momentum');
+
+    // Guest death & host revive
+    const lethalDmg = guest.hp + guest.shield + 500;
+    room.damagePlayer(guest, lethalDmg, 'physical');
+    assert.strictEqual(guest.downed, true);
+    guest.x = host.x + 20;
+    guest.y = host.y;
+    for (let i = 0; i < 120 && guest.downed; i++) {
+      room.tick(25);
+    }
+    assert.strictEqual(guest.downed, false, 'Host must successfully revive downed guest');
+
+    // Reconnect/rejoin preserves guest equipment & progression
+    room.markPlayerDisconnected('guest_1');
+    const rejoined = room.addOrReconnectPlayer('guest_1', 'GuestRng', 'ranger');
+    assert.strictEqual(rejoined.connected, true);
+    assert.strictEqual(rejoined.equippedWeapon, 'ranger_eclipse_longbow');
+    assert.strictEqual(rejoined.equippedVestment, 'ranger_windrunner_mantle');
+
+    // Server authority ignores tampered cross-class weapon swap attempts & invalid equipment normalization
+    const badSwap = room.equipArmament('guest_1', 'weapon', 'arcanist_cinderflare_rod');
+    assert.strictEqual(badSwap.ok, false);
+    assert.strictEqual(rejoined.equippedWeapon, 'ranger_eclipse_longbow');
+  });
+
+  // --- Test 126: Daily Quest UTC Rotation, Clamping & Day Rollover ---
+  await test('126. Daily quests rotate deterministically per UTC day, accumulate metrics cleanly, and reset on UTC rollover', () => {
+    const day1Ms = Date.UTC(2026, 10, 22, 14, 0, 0);
+    const day2Ms = Date.UTC(2026, 10, 23, 0, 5, 0);
+    const day1Key = getUtcDateKey(day1Ms);
+    const day2Key = getUtcDateKey(day2Ms);
+    assert.strictEqual(day1Key, '2026-11-22');
+    assert.strictEqual(day2Key, '2026-11-23');
+
+    const day1Templates = getDailyQuestTemplatesForDate(day1Key);
+    assert.strictEqual(day1Templates.length, 4);
+    assert.strictEqual(new Set(day1Templates.map((t) => t.metric)).size, 4, 'All 4 daily quests should track distinct metrics');
+    assert.strictEqual(day1Templates.filter((t) => t.rewardsArmament).length, 1, 'Daily rotation should include 1 Armory Bounty');
+
+    let state = normalizeDailyQuestState(undefined, day1Ms);
+    const killTpl = day1Templates.find((t) => t.metric === 'kills')!;
+    const floorTpl = day1Templates.find((t) => t.metric === 'floors_cleared')!;
+    const bossTpl = day1Templates.find((t) => t.metric === 'boss_kills')!;
+    const runsTpl = day1Templates.find((t) => t.metric === 'runs_played')!;
+
+    // Partial progress across multiple increments clamps cleanly at target
+    state = applyDailyQuestEvent(state, 'kills', 10, day1Ms).state;
+    state = applyDailyQuestEvent(state, 'kills', 999, day1Ms).state;
+    assert.strictEqual(state.quests[killTpl.id].progress, killTpl.target);
+
+    state = applyDailyQuestEvent(state, 'floors_cleared', 1, day1Ms).state;
+    state = applyDailyQuestEvent(state, 'boss_kills', 1, day1Ms).state;
+    state = applyDailyQuestEvent(state, 'runs_played', 1, day1Ms).state;
+    assert.strictEqual(state.quests[floorTpl.id].progress, Math.min(1, floorTpl.target));
+    assert.strictEqual(state.quests[bossTpl.id].progress, Math.min(1, bossTpl.target));
+    assert.strictEqual(state.quests[runsTpl.id].progress, Math.min(1, runsTpl.target));
+
+    // Rollover to next UTC day resets progress & claims
+    const rolled = normalizeDailyQuestState(state, day2Ms);
+    assert.strictEqual(rolled.dateKey, day2Key);
+    for (const entry of Object.values(rolled.quests)) {
+      assert.strictEqual(entry.progress, 0);
+      assert.strictEqual(entry.claimed, false);
+    }
+  });
+
+  // --- Test 127: Multi-Run GameRoom Daily Quest Accumulation & Tavern Isolation ---
+  await test('127. Multi-run GameRoom callbacks accumulate kills, boss kills, floors, and run completions across expeditions while excluding Tavern', () => {
+    const fixedMs = Date.UTC(2026, 10, 22, 18, 0, 0);
+    const acc: AccountRecord = {
+      id: 'dq_runner_1',
+      username: 'QuestRunner',
+      usernameLower: 'questrunner',
+      passwordHash: 'hash',
+      lockedClass: 'vanguard',
+      preferredClass: 'vanguard',
+      runsCompleted: 0,
+      highestFloor: 0,
+      totalKills: 0,
+      totalRevives: 0,
+      gold: 0,
+      level: 1,
+      xp: 0,
+      ownedWeapons: ['vanguard_iron_blade'],
+      ownedVestments: ['vanguard_plate'],
+      equippedWeapon: 'vanguard_iron_blade',
+      equippedVestment: 'vanguard_plate',
+      dailyQuests: normalizeDailyQuestState(undefined, fixedMs),
+    };
+
+    const wireRoomForAccount = (room: GameRoom) => {
+      const isExpedition = room.roomId !== 'TAVERN-HUB';
+      room.onKillCallback = (pid, meta) => {
+        if (pid !== acc.id || !isExpedition) return;
+        let next = applyDailyQuestEvent(acc.dailyQuests, 'kills', 1, fixedMs).state;
+        if (meta?.isBoss) {
+          next = applyDailyQuestEvent(next, 'boss_kills', 1, fixedMs).state;
+        }
+        acc.dailyQuests = next;
+      };
+      room.onFloorClearedCallback = (pids) => {
+        if (!isExpedition || !pids.includes(acc.id)) return;
+        acc.dailyQuests = applyDailyQuestEvent(acc.dailyQuests, 'floors_cleared', 1, fixedMs).state;
+      };
+      room.onRunEndedCallback = (pids) => {
+        if (!isExpedition || !pids.includes(acc.id)) return;
+        acc.dailyQuests = applyDailyQuestEvent(acc.dailyQuests, 'runs_played', 1, fixedMs).state;
+      };
+    };
+
+    // Tavern kills must NOT advance daily quest progress
+    const tavern = new GameRoom({
+      roomId: 'TAVERN-HUB',
+      name: 'Sanctuary Tavern',
+      hostName: 'System',
+      difficulty: 'Normal',
+      initialFloor: 0,
+      initialStatus: 'playing',
+    });
+    wireRoomForAccount(tavern);
+    const tavernPlayer = tavern.addOrReconnectPlayer(acc.id, acc.username, 'vanguard');
+    tavernPlayer.godMode = true;
+    (tavern as any).enemies.push({
+      id: 'tavern_test_slime',
+      kind: 'slime',
+      name: 'Stray Slime',
+      roomId: 0,
+      x: tavernPlayer.x + 20,
+      y: tavernPlayer.y,
+      vx: 0,
+      vy: 0,
+      hp: 5,
+      maxHp: 5,
+      radius: 14,
+      state: 'idle',
+      windupMs: 0,
+      targetX: 0,
+      targetY: 0,
+      markedMs: 0,
+      slowedMs: 0,
+      stunnedMs: 0,
+      burnedMs: 0,
+      frozenMs: 0,
+      shockedMs: 0,
+      poisonedMs: 0,
+      bleedingMs: 0,
+      silencedMs: 0,
+      elite: false,
+    });
+    tavern.damageEnemy((tavern as any).enemies[0], 999, tavernPlayer, false, 'physical');
+    const afterTavern = hydrateDailyQuestsForAccount(acc, fixedMs).quests;
+    assert.strictEqual(afterTavern.every((q) => q.progress === 0), true, 'Tavern kills must not advance expedition daily quests');
+
+    // Run 1: clear 1 mob + 1 boss + defeat on Floor 1
+    const run1 = new GameRoom({
+      roomId: 'DQ_RUN_1',
+      name: 'Run 1',
+      hostName: acc.username,
+      hostId: acc.id,
+      difficulty: 'Normal',
+      seed: 12701,
+    });
+    wireRoomForAccount(run1);
+    const p1 = run1.addOrReconnectPlayer(acc.id, acc.username, 'vanguard');
+    run1.startExpedition();
+    const run1Enemies = (run1 as any).enemies as EnemyState[];
+    const mob = run1Enemies.find((e) => e.kind !== 'boss');
+    if (mob) run1.damageEnemy(mob, 99999, p1, false, 'physical');
+    run1Enemies.push({
+      id: 'dq_boss_1',
+      kind: 'boss',
+      name: 'Boss 1',
+      roomId: 0,
+      x: p1.x + 24,
+      y: p1.y,
+      vx: 0,
+      vy: 0,
+      hp: 10,
+      maxHp: 10,
+      radius: 20,
+      state: 'idle',
+      windupMs: 0,
+      targetX: 0,
+      targetY: 0,
+      markedMs: 0,
+      slowedMs: 0,
+      stunnedMs: 0,
+      burnedMs: 0,
+      frozenMs: 0,
+      shockedMs: 0,
+      poisonedMs: 0,
+      bleedingMs: 0,
+      silencedMs: 0,
+      elite: true,
+    });
+    run1.damageEnemy(run1Enemies[run1Enemies.length - 1], 99999, p1, false, 'physical');
+    run1.damagePlayer(p1, p1.hp + p1.shield + 9999, 'physical');
+    run1.tick(25);
+    assert.strictEqual(run1.buildNetworkSnapshot().status, 'defeat');
+
+    // Run 2: clear Floor 1 portal + kill a second boss -> accumulates across runs!
+    const run2 = new GameRoom({
+      roomId: 'DQ_RUN_2',
+      name: 'Run 2',
+      hostName: acc.username,
+      hostId: acc.id,
+      difficulty: 'Normal',
+      seed: 12702,
+    });
+    wireRoomForAccount(run2);
+    const p2 = run2.addOrReconnectPlayer(acc.id, acc.username, 'vanguard');
+    run2.startExpedition();
+    const run2Enemies = (run2 as any).enemies as EnemyState[];
+    run2Enemies.length = 0;
+    run2Enemies.push({
+      id: 'dq_boss_2',
+      kind: 'boss',
+      name: 'Boss 2',
+      roomId: 0,
+      x: p2.x + 24,
+      y: p2.y,
+      vx: 0,
+      vy: 0,
+      hp: 10,
+      maxHp: 10,
+      radius: 20,
+      state: 'idle',
+      windupMs: 0,
+      targetX: 0,
+      targetY: 0,
+      markedMs: 0,
+      slowedMs: 0,
+      stunnedMs: 0,
+      burnedMs: 0,
+      frozenMs: 0,
+      shockedMs: 0,
+      poisonedMs: 0,
+      bleedingMs: 0,
+      silencedMs: 0,
+      elite: true,
+    });
+    run2.damageEnemy(run2Enemies[0], 99999, p2, false, 'physical');
+    (run2 as any).map.portalActive = true;
+    p2.x = (run2 as any).map.portalPos.x;
+    p2.y = (run2 as any).map.portalPos.y;
+    run2.performAction(acc.id, 'interact', 0);
+
+    const hydrated = hydrateDailyQuestsForAccount(acc, fixedMs).quests;
+    const byMetric = new Map(hydrated.map((q) => [q.metric, q]));
+    assert.ok((byMetric.get('kills')?.progress ?? 0) >= 2, 'Kills should accumulate across Run 1 and Run 2');
+    assert.strictEqual(byMetric.get('boss_kills')?.progress, Math.min(2, byMetric.get('boss_kills')!.target));
+    assert.strictEqual(byMetric.get('floors_cleared')?.progress, 1);
+    assert.strictEqual(byMetric.get('runs_played')?.progress, 1);
+  });
+
+  // --- Test 128: Daily Quest Armament Claiming, Double-Claim Guard & Mastery Bonus Fallback ---
+  await test('128. Authoritative Daily Quest claims unlock existing catalog Armaments, prevent double claims, and grant Mastery Bonus when class armory is complete', () => {
+    const fixedMs = Date.UTC(2026, 10, 22, 18, 0, 0);
+    const acc: AccountRecord = {
+      id: 'dq_claimer_1',
+      username: 'ClaimHero',
+      usernameLower: 'claimhero',
+      passwordHash: 'hash',
+      lockedClass: 'arcanist',
+      preferredClass: 'arcanist',
+      runsCompleted: 0,
+      highestFloor: 0,
+      totalKills: 0,
+      totalRevives: 0,
+      gold: 50,
+      level: 1,
+      xp: 0,
+      attributePoints: 0,
+      ownedWeapons: ['arcanist_runebound_spire'],
+      ownedVestments: ['arcanist_astral_vestments'],
+      equippedWeapon: 'arcanist_runebound_spire',
+      equippedVestment: 'arcanist_astral_vestments',
+      dailyQuests: normalizeDailyQuestState(undefined, fixedMs),
+    };
+
+    const hydratedBefore = hydrateDailyQuestsForAccount(acc, fixedMs);
+    const bounty = hydratedBefore.quests.find((q) => q.rewardsArmament)!;
+    assert.ok(bounty.rewardPreview.armament, 'Armory Bounty should preview an unowned Arcanist Armament');
+
+    // Premature claim rejected
+    const earlyClaim = claimDailyQuestForAccount(acc, bounty.questId, fixedMs);
+    assert.strictEqual(earlyClaim.ok, false);
+    if (!earlyClaim.ok) assert.strictEqual(earlyClaim.status, 400);
+
+    // Complete bounty metric across runs
+    acc.dailyQuests = applyDailyQuestEvent(acc.dailyQuests, bounty.metric, bounty.target, fixedMs).state;
+
+    const claimOk = claimDailyQuestForAccount(acc, bounty.questId, fixedMs);
+    assert.strictEqual(claimOk.ok, true);
+    if (claimOk.ok) {
+      assert.ok(claimOk.rewardGranted.armamentGranted, 'Claimed bounty must unlock an Armament');
+      const granted = claimOk.rewardGranted.armamentGranted!;
+      const catalogExists =
+        granted.slot === 'weapon'
+          ? WEAPON_CATALOG.some((w) => w.id === granted.itemId && w.heroClass === 'arcanist' && !w.isDefault)
+          : VESTMENT_CATALOG.some((v) => v.id === granted.itemId && v.heroClass === 'arcanist' && !v.isDefault);
+      assert.strictEqual(catalogExists, true, 'Granted Armament must come from existing class catalog');
+      assert.ok((acc.gold ?? 0) > 50);
+      assert.ok((acc.level ?? 1) > 1, 'Quest XP reward should level up a Lv 1 hero');
+      assert.strictEqual(acc.attributePoints, ((acc.level ?? 1) - 1) * 3);
+    }
+
+    // Duplicate claim rejected (409)
+    const doubleClaim = claimDailyQuestForAccount(acc, bounty.questId, fixedMs);
+    assert.strictEqual(doubleClaim.ok, false);
+    if (!doubleClaim.ok) assert.strictEqual(doubleClaim.status, 409);
+
+    // If account already owns ALL Arcanist weapons & vestments AND is Lv 50 -> Mastery Bonus + Lv 50 XP cap
+    const maxAcc: AccountRecord = {
+      ...acc,
+      id: 'dq_claimer_max',
+      gold: 0,
+      level: MAX_LEVEL,
+      xp: 0,
+      attributePoints: 0,
+      ownedWeapons: WEAPON_CATALOG.filter((w) => w.heroClass === 'arcanist').map((w) => w.id),
+      ownedVestments: VESTMENT_CATALOG.filter((v) => v.heroClass === 'arcanist').map((v) => v.id),
+      dailyQuests: applyDailyQuestEvent(normalizeDailyQuestState(undefined, fixedMs), bounty.metric, bounty.target, fixedMs).state,
+    };
+    const previewMax = hydrateDailyQuestsForAccount(maxAcc, fixedMs).quests.find((q) => q.questId === bounty.questId)!;
+    assert.strictEqual(previewMax.rewardPreview.armament, null);
+    assert.ok(previewMax.rewardPreview.masteryFallback);
+
+    const maxClaim = claimDailyQuestForAccount(maxAcc, bounty.questId, fixedMs);
+    assert.strictEqual(maxClaim.ok, true);
+    if (maxClaim.ok) {
+      assert.strictEqual(maxClaim.rewardGranted.masteryBonusApplied, true);
+      assert.strictEqual(maxClaim.rewardGranted.goldAdded, previewMax.rewardPreview.gold + DAILY_MASTERY_FALLBACK_GOLD);
+      assert.strictEqual(maxClaim.rewardGranted.xpAdded, previewMax.rewardPreview.xp + DAILY_MASTERY_FALLBACK_XP);
+      assert.strictEqual(maxAcc.level, MAX_LEVEL);
+      assert.strictEqual(maxAcc.xp, 0, 'Lv 50 XP must stay clamped at 0');
+    }
+  });
+
+  // --- Test 129: Universal Weapon Rarity Rules, Vestment Preservation & Shared Tactical System ---
+  await test('129. Weapon rarities strictly follow Tactical replacement rule (Vestments untouched; Arcanist Scrolls independent) and weapon switching updates Tactical cleanly without stale state', () => {
+    const expectedWeaponRarities: Record<string, 'Forged' | 'Ascendant'> = {
+      vanguard_sunforged_claymore: 'Ascendant',
+      vanguard_crimson_halberd: 'Ascendant',
+      vanguard_stormbreaker_flail: 'Forged',
+      ranger_ashwood_recurve: 'Forged',
+      ranger_galewind_twinbow: 'Ascendant',
+      ranger_eclipse_longbow: 'Ascendant',
+      arcanist_runebound_spire: 'Forged',
+      arcanist_cinderflare_rod: 'Forged',
+      arcanist_chronostar_scepter: 'Forged',
+      cleric_dawnstar_mace: 'Forged',
+      cleric_solaris_censer: 'Forged',
+      cleric_seraphim_crozier: 'Ascendant',
+    };
+
+    assert.strictEqual(WEAPON_CATALOG.length, 12);
+    for (const w of WEAPON_CATALOG) {
+      assert.strictEqual(
+        w.rarity,
+        expectedWeaponRarities[w.id],
+        `Unexpected rarity for ${w.id}: got ${w.rarity}, expected ${expectedWeaponRarities[w.id]}`
+      );
+      const hasWeaponTactical = Boolean(getWeaponTacticalDef(w.id));
+      if (w.rarity === 'Ascendant') {
+        assert.strictEqual(hasWeaponTactical, true, `Ascendant weapon ${w.id} MUST define a weapon Tactical`);
+      } else {
+        assert.strictEqual(hasWeaponTactical, false, `Forged weapon ${w.id} MUST NOT replace class Tactical`);
+      }
+    }
+
+    // Vestment rarities untouched (4 Standard starters + 4 Forged + 4 Ascendant)
+    assert.strictEqual(VESTMENT_CATALOG.filter((v) => v.rarity === 'Standard').length, 4);
+    assert.strictEqual(VESTMENT_CATALOG.filter((v) => v.rarity === 'Forged').length, 4);
+    assert.strictEqual(VESTMENT_CATALOG.filter((v) => v.rarity === 'Ascendant').length, 4);
+
+    // Arcanist Scrolls remain separate system overriding Arcanist Tactical when equipped
+    const arcTacNoScroll = resolveActiveTacticalDef('arcanist', 'arcanist_chronostar_scepter', null);
+    assert.strictEqual(arcTacNoScroll.id, 'astral_nova');
+    const arcTacScroll = resolveActiveTacticalDef('arcanist', 'arcanist_chronostar_scepter', 'arcane_meteor');
+    assert.strictEqual(arcTacScroll.id, 'arcane_meteor');
+    assert.strictEqual(arcTacScroll.source, 'scroll');
+
+    // Live weapon switching updates Tactical, target spec, stat projections, cooldown cap, and clears stale state/zones
+    const room = new GameRoom({
+      roomId: 'TAC_SW_129',
+      name: 'Shared Tactical Switch',
+      hostName: 'Tester',
+      difficulty: 'Normal',
+      seed: 129,
+    });
+    room.addOrReconnectPlayer('v1', 'Bulwark', 'vanguard');
+    room.addOrReconnectPlayer('r1', 'Ranger', 'ranger');
+    room.startExpedition();
+
+    const vp = room.getPlayerState('v1')!;
+    const rp = room.getPlayerState('r1')!;
+    room.grantArmament('v1', 'weapon', 'vanguard_crimson_halberd');
+    room.grantArmament('v1', 'weapon', 'vanguard_stormbreaker_flail');
+    room.grantArmament('r1', 'weapon', 'ranger_galewind_twinbow');
+    room.grantArmament('r1', 'weapon', 'ranger_eclipse_longbow');
+
+    // Default Sunforged -> Bastion Counter
+    assert.strictEqual(resolveActiveTacticalDef('vanguard', vp.equippedWeapon, null).id, 'bastion_counter');
+    assert.strictEqual(getAbilityTargetSpec('vanguard', 'tactical', null, vp.equippedWeapon).label, 'Bastion Counter');
+    assert.strictEqual(vp.maxSkillCooldownMs, WEAPON_TACTICALS.bastion_counter.cooldownMs);
+
+    // Activate Bastion Counter brace, then swap to Crimson War Axe -> stale brace cleared immediately
+    room.performAction('v1', 'tactical', 0);
+    assert.ok((vp.bastionCounterMs || 0) > 0, 'Bastion Counter brace should activate');
+    room.equipArmament('v1', 'weapon', 'vanguard_crimson_halberd');
+    assert.strictEqual(vp.bastionCounterMs, 0, 'Stale Bastion brace must clear on weapon switch');
+    assert.strictEqual(resolveActiveTacticalDef('vanguard', vp.equippedWeapon, null).id, 'crimson_frenzy');
+    assert.strictEqual(calculatePlayerStatProjections(vp, 1).activeTacticalLabel, 'Crimson Frenzy');
+    assert.strictEqual(vp.maxSkillCooldownMs, WEAPON_TACTICALS.crimson_frenzy.cooldownMs);
+
+    // Activate Crimson Frenzy buff, then swap to Forged Stormbreaker -> stale Frenzy buff cleared, Bulwark Dash restored
+    vp.skillCooldownMs = 0;
+    room.performAction('v1', 'tactical', 0);
+    assert.ok((vp.crimsonFrenzyMs || 0) > 0, 'Crimson Frenzy buff should activate');
+    room.equipArmament('v1', 'weapon', 'vanguard_stormbreaker_flail');
+    assert.strictEqual(vp.crimsonFrenzyMs, 0, 'Stale Crimson Frenzy buff must clear when unequipped/swapped');
+    assert.strictEqual(resolveActiveTacticalDef('vanguard', vp.equippedWeapon, null).id, 'bulwark_dash');
+    assert.strictEqual(getAbilityTargetSpec('vanguard', 'tactical', null, vp.equippedWeapon).label, 'Bulwark Dash');
+    assert.strictEqual(vp.maxSkillCooldownMs, HERO_CLASSES.vanguard.tacticalCooldownMs);
+
+    // Ranger switching: Galewind Cyclone Break -> unequip/Ashwood clears cyclone zone and restores Frost Volley
+    room.equipArmament('r1', 'weapon', 'ranger_galewind_twinbow');
+    assert.strictEqual(resolveActiveTacticalDef('ranger', rp.equippedWeapon, null).id, 'cyclone_break');
+    room.performAction('r1', 'tactical', 0, { aimDistance: 120, explicitAim: true });
+    assert.ok(room.zones.some((z) => z.kind === 'cyclone_break' && z.ownerId === 'r1'));
+    room.equipArmament('r1', 'weapon', 'ranger_ashwood_recurve');
+    assert.strictEqual(room.zones.some((z) => z.ownerId === 'r1' && z.kind === 'cyclone_break'), false, 'Stale cyclone_break zone must be cleared on weapon switch');
+    assert.strictEqual(resolveActiveTacticalDef('ranger', rp.equippedWeapon, null).id, 'frost_volley');
+    assert.strictEqual(getAbilityTargetSpec('ranger', 'tactical', null, rp.equippedWeapon).kind, 'cone_volley');
+  });
+
+  // --- Test 130: Crimson War Axe Rename, Permanent Shield Lock Across ALL Sources & Crimson Frenzy Buff ---
+  await test('130. Crimson War Axe preserves ID, enforces continuous Shield Lock across every source without wiping existing Shield, restores gain on unequip, and runs Crimson Frenzy buff independently', () => {
+    const crimsonDef = WEAPON_CATALOG.find((w) => w.id === 'vanguard_crimson_halberd')!;
+    assert.ok(crimsonDef);
+    assert.strictEqual(crimsonDef.name, 'Crimson War Axe');
+    assert.strictEqual(crimsonDef.modifiers.shieldOnPrimaryHit, undefined);
+    assert.strictEqual(crimsonDef.modifiers.shieldGainLocked, true);
+
+    const room = new GameRoom({
+      roomId: 'CRIM_130',
+      name: 'Crimson Shield Lock & Frenzy',
+      hostName: 'Tester',
+      difficulty: 'Normal',
+      seed: 130,
+    });
+    room.addOrReconnectPlayer('v1', 'Berserker', 'vanguard', false, {
+      level: 5,
+      xp: 0,
+      strength: 10,
+      vitality: 5,
+      dexterity: 5,
+      intelligence: 0,
+      faith: 0,
+      attributePoints: 0,
+      ownedWeapons: ['vanguard_sunforged_claymore', 'vanguard_crimson_halberd'],
+      equippedWeapon: 'vanguard_crimson_halberd',
+    });
+    room.addOrReconnectPlayer('v2', 'Ally', 'vanguard', false, {
+      level: 5,
+      xp: 0,
+      strength: 5,
+      vitality: 5,
+      dexterity: 5,
+      intelligence: 0,
+      faith: 0,
+      attributePoints: 0,
+      ownedWeapons: ['vanguard_stormbreaker_flail'],
+      equippedWeapon: 'vanguard_stormbreaker_flail',
+    });
+    room.startExpedition();
+
+    const p1 = room.getPlayerState('v1')!;
+    const p2 = room.getPlayerState('v2')!;
+    assert.strictEqual(p1.shield, 0, 'Starting Shield must be 0 when Crimson War Axe is equipped');
+    assert.strictEqual(isShieldGainLocked(p1), true);
+    assert.strictEqual(calculatePlayerStatProjections(p1, 1).selfShieldPerSec, 0);
+
+    // Equipping Crimson while carrying pre-existing Shield must NOT strip existing Shield
+    room.equipArmament('v1', 'weapon', 'vanguard_sunforged_claymore');
+    p1.shield = 25;
+    room.equipArmament('v1', 'weapon', 'vanguard_crimson_halberd');
+    assert.strictEqual(p1.shield, 25, 'Existing Shield must NOT be removed when equipping Crimson War Axe');
+
+    // Test EVERY centralized Shield source while Crimson is equipped (outside AND inside Tactical):
+    // 1. Direct grantShield / Admin heal
+    room.grantShield(p1, 20, 'add');
+    room.healPlayer('v1');
+    assert.strictEqual(p1.shield, 25, 'healPlayer/grantShield must not increase Shield under Crimson Lock');
+
+    // 2. Ally Bulwark Dash AoE Shield
+    p2.x = p1.x;
+    p2.y = p1.y;
+    p2.skillCooldownMs = 0;
+    room.performAction('v2', 'tactical', 0);
+    assert.strictEqual(p1.shield, 25, 'Ally Bulwark Dash must not grant Shield to Crimson-locked Vanguard');
+
+    // 3. Runic Carapace relic
+    p1.relics = ['runic_carapace'];
+    (room as any).runicCarapaceTimerMs = 15000;
+    room.tick(100);
+    assert.strictEqual(p1.shield, 25, 'Runic Carapace must not grant Shield under Crimson Lock');
+
+    // 4. Bastion Totem blessing prop ((roomId: 1 + floor: 1 + value: 0) % 5 === 2 => 'bastion')
+    room.props.push({ id: 't_b', kind: 'totem', x: p1.x, y: p1.y, opened: false, locked: false, roomId: 1, value: 0 });
+    room.tick(100);
+    assert.strictEqual(p1.shield, 25, 'Bastion Totem must not grant Shield under Crimson Lock');
+
+    // 5. Shrine Shield blessing
+    room.props.push({ id: 's_b', kind: 'shrine', x: p1.x, y: p1.y, opened: false, value: 30 });
+    room.performAction('v1', 'interact', 0);
+    assert.strictEqual(p1.shield, 25, 'Shrine blessing must not grant Shield under Crimson Lock');
+
+    // 6. Combat Room Clear & Floor Mastery Bastion bonuses
+    const roomFloor = room.map.rooms.find((r) => r.type === 'combat') || room.map.rooms[0];
+    (room as any).awardCombatRoomClear(roomFloor);
+    (room as any).floorMasteryAwarded = false;
+    (room as any).awardFullFloorMastery();
+    assert.strictEqual(p1.shield, 25, 'Room Clear and Floor Mastery must not grant Shield under Crimson Lock');
+
+    // 7. Complete Revive shield (normal revive grants 20 Shield after reset; Crimson Lock yields 0)
+    p1.downed = true;
+    (room as any).completeRevive(p1, p2.id);
+    assert.strictEqual(p1.downed, false);
+    assert.strictEqual(p1.shield, 0, 'Revive shield must not be granted under Crimson Lock');
+    p1.shield = 25;
+
+    // Unequipping restores Shield gain immediately
+    room.unequipArmament('v1', 'weapon');
+    assert.strictEqual(isShieldGainLocked(p1), false);
+    room.grantShield(p1, 15, 'add');
+    assert.strictEqual(p1.shield, 40, 'Unequipping Crimson War Axe must restore Shield gain');
+
+    // Re-equip Crimson War Axe & test Crimson Frenzy Tactical Buff (+25% DMG, +14% Lifesteal, +25% Attack Speed)
+    room.equipArmament('v1', 'weapon', 'vanguard_crimson_halberd');
+    const baseDmgMult = computePlayerDamageMultiplier(p1);
+    const baseAtkCd = computePlayerAttackCooldownMs(p1);
+
+    p1.skillCooldownMs = 0;
+    room.performAction('v1', 'tactical', 0);
+    assert.strictEqual(isCrimsonFrenzyActive(p1), true, 'Crimson Frenzy buff must activate');
+    assert.strictEqual(p1.crimsonFrenzyMs, ARMAMENT_TUNING.weapons.crimson.frenzyDurationMs);
+
+    const frenzyDmgMult = computePlayerDamageMultiplier(p1);
+    const frenzyAtkCd = computePlayerAttackCooldownMs(p1);
+    assert.ok(frenzyDmgMult > baseDmgMult, `Expected frenzy Damage mult (${frenzyDmgMult}) > base (${baseDmgMult})`);
+    assert.ok(frenzyAtkCd < baseAtkCd, `Expected frenzy Attack cooldown (${frenzyAtkCd}) < base (${baseAtkCd})`);
+
+    // Lifesteal heals HP while Shield remains locked during Frenzy
+    p1.hp = Math.floor(p1.maxHp * 0.5);
+    const hpBeforeHit = p1.hp;
+    const targetDummy: EnemyState = {
+      id: 'crim_dummy',
+      kind: 'goblin',
+      name: 'Target',
+      roomId: 0,
+      x: p1.x + 40,
+      y: p1.y,
+      vx: 0,
+      vy: 0,
+      hp: 800,
+      maxHp: 800,
+      radius: 14,
+      state: 'idle',
+      windupMs: 5000,
+      targetX: p1.x,
+      targetY: p1.y,
+      markedMs: 0,
+      slowedMs: 0,
+      burnedMs: 0,
+      frozenMs: 0,
+      shockedMs: 0,
+      poisonedMs: 0,
+      bleedingMs: 0,
+      stunnedMs: 0,
+      silencedMs: 0,
+      elite: false,
+    };
+    room.enemies = [targetDummy];
+    room.firePrimaryAttack(p1);
+    room.tick(50);
+    assert.ok(p1.hp > hpBeforeHit, `Crimson Frenzy 14% Lifesteal must heal HP on hit (before=${hpBeforeHit}, after=${p1.hp})`);
+    room.grantShield(p1, 20, 'add');
+    assert.strictEqual(p1.shield, 40, 'Shield Lock remains active even while Crimson Frenzy buff is active');
+  });
+
+  // --- Test 131: Bastion Counter, Cyclone Break, Black Sun & Multiplayer Delta Sync ---
+  await test('131. Sunforged Bastion Counter, Galewind Cyclone Break, Eclipse Black Sun & snapshotDelta sync work end-to-end', () => {
+    const room = new GameRoom({
+      roomId: 'TAC_AB_131',
+      name: 'Weapon Tacticals End-to-End',
+      hostName: 'Tester',
+      difficulty: 'Normal',
+      seed: 131,
+    });
+    room.addOrReconnectPlayer('v1', 'Knight', 'vanguard');
+    room.addOrReconnectPlayer('r1', 'Scout', 'ranger');
+    room.startExpedition();
+
+    const vp = room.getPlayerState('v1')!;
+    const rp = room.getPlayerState('r1')!;
+    room.grantArmament('r1', 'weapon', 'ranger_galewind_twinbow');
+    room.grantArmament('r1', 'weapon', 'ranger_eclipse_longbow');
+
+    const makeGoblin = (id: string, x: number, y: number): EnemyState => ({
+      id,
+      kind: 'goblin',
+      name: 'Goblin',
+      roomId: 0,
+      x,
+      y,
+      vx: 0,
+      vy: 0,
+      hp: 1000,
+      maxHp: 1000,
+      radius: 14,
+      state: 'idle',
+      windupMs: 5000,
+      targetX: x,
+      targetY: y,
+      markedMs: 0,
+      slowedMs: 0,
+      burnedMs: 0,
+      frozenMs: 0,
+      shockedMs: 0,
+      poisonedMs: 0,
+      bleedingMs: 0,
+      stunnedMs: 0,
+      silencedMs: 0,
+      elite: false,
+    });
+
+    // 1. Sunforged Bastion Counter: 60% damage mitigation brace -> golden cone cleave retaliation + stun
+    vp.aimAngle = 0;
+    const unbracedTaken = room.damagePlayer(vp, 50, 'physical');
+    vp.hp = vp.maxHp;
+    vp.shield = 0;
+    room.performAction('v1', 'tactical', 0);
+    assert.ok((vp.bastionCounterMs || 0) > 0, 'Bastion Counter brace should activate');
+    const bracedTaken = room.damagePlayer(vp, 50, 'physical');
+    assert.ok(bracedTaken < unbracedTaken, `Bastion Counter brace (${bracedTaken}) must significantly reduce incoming damage vs unbraced (${unbracedTaken})`);
+
+    const bastionFoe = makeGoblin('b_foe', vp.x + 70, vp.y);
+    room.enemies = [bastionFoe];
+    room.zones = [];
+    for (let t = 0; t < ARMAMENT_TUNING.weapons.sunforged.bastionBraceMs + 100; t += 50) {
+      room.tick(50);
+    }
+    assert.strictEqual(vp.bastionCounterMs, 0, 'Brace expires upon retaliation');
+    assert.ok(bastionFoe.hp < 1000, 'Bastion Counter cleave must damage targets in front cone');
+    assert.ok(bastionFoe.stunnedMs > 0, 'Bastion Counter retaliation should stun targets');
+
+    // 2. Galewind Twinbow Cyclone Break: pulls enemies inward & detonates Galeburst marks
+    room.equipArmament('r1', 'weapon', 'ranger_galewind_twinbow');
+    rp.skillCooldownMs = 0;
+    rp.aimAngle = 0;
+    const cycX = rp.x + 120;
+    const cycY = rp.y;
+    const pullGoblin = makeGoblin('cyc_pull', cycX + 90, cycY);
+    const markedGoblin = makeGoblin('cyc_mark', cycX + 20, cycY);
+    markedGoblin.galeburstMarks = 2;
+    room.enemies = [pullGoblin, markedGoblin];
+    room.zones = [];
+    room.performAction('r1', 'tactical', 0, { aimDistance: 120, explicitAim: true });
+    assert.ok(room.zones.some((z) => z.kind === 'cyclone_break'), 'Cyclone Break zone must spawn');
+    const distBefore = Math.hypot(pullGoblin.x - cycX, pullGoblin.y - cycY);
+    room.tick(50);
+    assert.strictEqual(markedGoblin.galeburstMarks, 0, 'Cyclone Break must detonate Galeburst marks');
+    assert.ok(room.zones.some((z) => z.kind === 'galeburst_nova'), 'Marked target detonation spawns galeburst_nova');
+    room.tick(300);
+    const distAfter = Math.hypot(pullGoblin.x - cycX, pullGoblin.y - cycY);
+    assert.ok(distAfter < distBefore, `Cyclone Break must pull enemies inward (before=${distBefore.toFixed(1)}, after=${distAfter.toFixed(1)})`);
+
+    // 3. Eclipse Longbow Black Sun: creates eclipse zone pulsing Arcane damage, then strikes & detonates
+    room.equipArmament('r1', 'weapon', 'ranger_eclipse_longbow');
+    rp.skillCooldownMs = 0;
+    const sunTarget = makeGoblin('sun_foe', rp.x + 120, rp.y);
+    room.enemies = [sunTarget];
+    room.zones = [];
+    room.performAction('r1', 'tactical', 0, { aimDistance: 120, explicitAim: true });
+    assert.ok(room.zones.some((z) => z.kind === 'black_sun_zone'), 'Black Sun must create black_sun_zone');
+    for (let t = 0; t < 400; t += 50) room.tick(50);
+    const hpAfterZoneTick = sunTarget.hp;
+    assert.ok(hpAfterZoneTick < 1000, 'Black Sun eclipse zone must deal periodic Arcane damage');
+    for (let t = 0; t < ARMAMENT_TUNING.weapons.eclipse.blackSunZoneDurationMs - 350; t += 50) {
+      room.tick(50);
+    }
+    assert.ok(room.zones.some((z) => z.kind === 'black_sun_burst'), 'Black Sun must detonate with black_sun_burst celestial strike');
+    assert.ok(sunTarget.hp < hpAfterZoneTick, 'Black Sun celestial arrow strike must deal burst damage on expiry');
+
+    // 4. Multiplayer snapshotDelta sync preserves new PlayerState timers and new FieldZoneState kinds
+    const hostSnapA = cloneSnapshotBaseline(room.buildSnapshot());
+    vp.bastionCounterMs = 950;
+    vp.bastionCounterMaxMs = 1400;
+    vp.crimsonFrenzyMs = 3200;
+    vp.crimsonFrenzyMaxMs = 5000;
+    room.zones.push({
+      id: 'sync_bs_zone',
+      kind: 'black_sun_zone',
+      ownerId: 'r1',
+      x: 200,
+      y: 200,
+      radius: 115,
+      ttlMs: 900,
+      maxTtlMs: 1400,
+    });
+    const hostSnapB = room.buildSnapshot();
+    const delta = computeSnapshotDelta(hostSnapA, hostSnapB, 1, 2);
+    const guestSynced = applySnapshotDelta(cloneSnapshotBaseline(hostSnapA), delta);
+    const syncedVp = guestSynced.players.find((p) => p.id === 'v1')!;
+    assert.strictEqual(syncedVp.bastionCounterMs, 950);
+    assert.strictEqual(syncedVp.crimsonFrenzyMs, 3200);
+    assert.ok(guestSynced.zones.some((z) => z.id === 'sync_bs_zone' && z.kind === 'black_sun_zone'));
   });
 
   console.log(`\nAll regression tests completed: ${passed}/${total} passed.`);

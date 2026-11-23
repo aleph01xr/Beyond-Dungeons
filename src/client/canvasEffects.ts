@@ -7589,16 +7589,16 @@ export function drawEnhancedProjectile(
         drawSize
       );
     } else if (isHalberd) {
-      // Crimson War Halberd: Wide sweeping crimson crescent with razor tipper outer edge
+      // Crimson War Axe: Wide brutal crimson axe cleave with double-edge blood flares
       const rOuter = Math.max(24, proj.radius * 0.85);
-      ctx.strokeStyle = 'rgba(220, 38, 38, 0.45)';
-      ctx.lineWidth = 8;
+      ctx.strokeStyle = 'rgba(220, 38, 38, 0.48)';
+      ctx.lineWidth = 9;
       ctx.beginPath();
       ctx.arc(0, 0, rOuter, -1.05, 1.05);
       ctx.stroke();
 
       ctx.strokeStyle = '#EF4444';
-      ctx.lineWidth = 4;
+      ctx.lineWidth = 4.2;
       ctx.beginPath();
       ctx.arc(0, 0, rOuter + 1, -0.95, 0.95);
       ctx.stroke();
@@ -7609,37 +7609,31 @@ export function drawEnhancedProjectile(
       ctx.arc(0, 0, rOuter + 3, -0.8, 0.8);
       ctx.stroke();
 
-      // Crimson tipper edge flare ticks
+      // Crimson axe-bit edge flare ticks
       ctx.fillStyle = '#FCA5A5';
       ctx.fillRect(rOuter + 1, -7, 3, 2);
       ctx.fillRect(rOuter + 2, -1, 3.5, 2);
       ctx.fillRect(rOuter + 1, 5, 3, 2);
     } else if (isFlail) {
-      // Stormbreaker Flail: Crackling azure-gold tempest arc with jagged lightning glints
-      const rArc = Math.max(21, proj.radius * 0.78);
-      ctx.strokeStyle = 'rgba(56, 189, 248, 0.48)';
-      ctx.lineWidth = 7;
+      // Stormbreaker Flail: Overhead downward slam impact oval & thunderbolt shatter
+      const rSlam = Math.max(18, proj.radius * 0.65);
+      ctx.strokeStyle = 'rgba(56, 189, 248, 0.55)';
+      ctx.lineWidth = 5;
       ctx.beginPath();
-      ctx.arc(0, 0, rArc, -1.0, 1.0);
-      ctx.stroke();
-
-      ctx.strokeStyle = '#38BDF8';
-      ctx.lineWidth = 3.2;
-      ctx.beginPath();
-      ctx.arc(0, 0, rArc, -0.9, 0.9);
+      ctx.ellipse(6, 0, rSlam, rSlam * 0.62, 0, 0, Math.PI * 2);
       ctx.stroke();
 
       ctx.strokeStyle = '#FDE047';
-      ctx.lineWidth = 1.8;
+      ctx.lineWidth = 2;
       ctx.beginPath();
-      ctx.moveTo(rArc - 4, -10);
-      ctx.lineTo(rArc + 4, -3);
-      ctx.lineTo(rArc - 2, 2);
-      ctx.lineTo(rArc + 5, 9);
+      ctx.moveTo(-4, -8);
+      ctx.lineTo(8, -2);
+      ctx.lineTo(3, 3);
+      ctx.lineTo(14, 9);
       ctx.stroke();
 
       ctx.fillStyle = '#FFFFFF';
-      ctx.fillRect(rArc + 2, -2, 3, 4);
+      ctx.fillRect(5, -2, 4, 4);
     } else {
       // Sunforged Claymore vector fallback arc
       const pulse = Math.sin(now * 0.02) * 2;

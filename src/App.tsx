@@ -627,6 +627,8 @@ export function App() {
   return (
     <SanctuaryLobby
       user={user}
+      authToken={token || ''}
+      onUserUpdated={setUser}
       rooms={rooms}
       onlineCount={onlineCount}
       selectedClass={selectedClass}

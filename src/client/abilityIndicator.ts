@@ -5,6 +5,7 @@ import {
   simulateDashEndpoint,
   type AbilityAimState,
 } from '../shared/abilityTargeting.ts';
+import { resolveActiveTacticalDef } from '../shared/armaments.ts';
 import { distancePointToSegment } from '../shared/arcanist.ts';
 import type {
   DungeonMap,
@@ -321,25 +322,35 @@ export function drawAbilityTargetingIndicator(
     ctx.stroke();
     ctx.setLineDash([]);
 
-    // Crackling electric preview arcs inside the cone
-    for (let r = 0; r < 3; r++) {
-      const frac = r === 0 ? -0.55 : r === 1 ? 0 : 0.55;
-      const rayAng = aim.aimAngle + frac * halfSpread;
-      ctx.strokeStyle = hexToRgba(r === 1 ? primary : secondary, r === 1 ? 0.85 : 0.6);
-      ctx.lineWidth = r === 1 ? 2 : 1.3;
-      ctx.beginPath();
-      ctx.moveTo(playerX + Math.cos(rayAng) * 18, playerY + Math.sin(rayAng) * 18);
-      for (let s = 1; s <= 5; s++) {
-        const d = (spec.range * s) / 5;
-        const j = s < 5 ? Math.sin(now * 0.02 + r * 5 + s * 2.7) * 9 : 0;
-        const px = playerX + Math.cos(rayAng) * d - Math.sin(rayAng) * j;
-        const py = playerY + Math.sin(rayAng) * d + Math.cos(rayAng) * j;
-        ctx.lineTo(px, py);
+    // Tactical cone interior accents (golden brace arcs for Bastion Counter, jagged arcs for Arcanist)
+    if (player.heroClass === 'vanguard') {
+      for (let arc = 0.45; arc <= 0.95; arc += 0.25) {
+        ctx.strokeStyle = hexToRgba(arc > 0.8 ? primary : secondary, 0.72);
+        ctx.lineWidth = arc > 0.8 ? 2.2 : 1.5;
+        ctx.beginPath();
+        ctx.arc(playerX, playerY, spec.range * arc, minAng, maxAng);
+        ctx.stroke();
       }
-      ctx.stroke();
+    } else {
+      for (let r = 0; r < 3; r++) {
+        const frac = r === 0 ? -0.55 : r === 1 ? 0 : 0.55;
+        const rayAng = aim.aimAngle + frac * halfSpread;
+        ctx.strokeStyle = hexToRgba(r === 1 ? primary : secondary, r === 1 ? 0.85 : 0.6);
+        ctx.lineWidth = r === 1 ? 2 : 1.3;
+        ctx.beginPath();
+        ctx.moveTo(playerX + Math.cos(rayAng) * 18, playerY + Math.sin(rayAng) * 18);
+        for (let s = 1; s <= 5; s++) {
+          const d = (spec.range * s) / 5;
+          const j = s < 5 ? Math.sin(now * 0.02 + r * 5 + s * 2.7) * 9 : 0;
+          const px = playerX + Math.cos(rayAng) * d - Math.sin(rayAng) * j;
+          const py = playerY + Math.sin(rayAng) * d + Math.cos(rayAng) * j;
+          ctx.lineTo(px, py);
+        }
+        ctx.stroke();
+      }
     }
 
-    // Highlight enemies inside the lightning cone
+    // Highlight enemies inside the cone
     for (const en of snap.enemies) {
       if (en.hp <= 0) continue;
       const dx = en.x - playerX;
@@ -419,35 +430,28 @@ export function drawAbilityTargetingIndicator(
     ctx.restore();
 
     // Highlight affected enemies / allies inside ground AoE
-    if (player.heroClass === 'arcanist') {
-      for (const en of snap.enemies) {
-        if (en.hp <= 0) continue;
-        if (Math.hypot(en.x - target.x, en.y - target.y) <= spec.aoeRadius) {
-          drawTargetBracket(ctx, en.x, en.y, en.radius, secondary, now);
+    const activeTac =
+      aim.action === 'tactical'
+        ? resolveActiveTacticalDef(player.heroClass, player.equippedWeapon, player.equippedScrollId)
+        : null;
+    if (player.heroClass === 'cleric' && activeTac?.id !== 'seraphic_judgment') {
+      for (const ally of snap.players) {
+        if (Math.hypot(ally.x - target.x, ally.y - target.y) <= spec.aoeRadius) {
+          drawTargetBracket(
+            ctx,
+            ally.x,
+            ally.y,
+            14,
+            cancelled ? '#EF4444' : '#34D399',
+            now
+          );
         }
       }
-    } else if (player.heroClass === 'cleric') {
-      const isSeraphimJudgment =
-        aim.action === 'tactical' && player.equippedWeapon === 'cleric_seraphim_crozier';
-      if (!isSeraphimJudgment) {
-        for (const ally of snap.players) {
-          if (Math.hypot(ally.x - target.x, ally.y - target.y) <= spec.aoeRadius) {
-            drawTargetBracket(
-              ctx,
-              ally.x,
-              ally.y,
-              14,
-              cancelled ? '#EF4444' : '#34D399',
-              now
-            );
-          }
-        }
-      }
-      for (const en of snap.enemies) {
-        if (en.hp <= 0) continue;
-        if (Math.hypot(en.x - target.x, en.y - target.y) <= spec.aoeRadius) {
-          drawTargetBracket(ctx, en.x, en.y, en.radius, primary, now);
-        }
+    }
+    for (const en of snap.enemies) {
+      if (en.hp <= 0) continue;
+      if (Math.hypot(en.x - target.x, en.y - target.y) <= spec.aoeRadius) {
+        drawTargetBracket(ctx, en.x, en.y, en.radius, secondary, now);
       }
     }
   } else if (spec.kind === 'self_aoe') {
@@ -524,7 +528,18 @@ export function drawAbilityTargetingIndicator(
     }
 
     // Highlight affected enemies or allies
-    if (player.heroClass === 'vanguard') {
+    const selfActiveTac =
+      aim.action === 'tactical'
+        ? resolveActiveTacticalDef(player.heroClass, player.equippedWeapon, player.equippedScrollId)
+        : null;
+    if (player.heroClass === 'vanguard' && selfActiveTac?.id === 'crimson_frenzy') {
+      for (const en of snap.enemies) {
+        if (en.hp <= 0) continue;
+        if (Math.hypot(en.x - playerX, en.y - playerY) <= spec.aoeRadius) {
+          drawTargetBracket(ctx, en.x, en.y, en.radius, primary, now);
+        }
+      }
+    } else if (player.heroClass === 'vanguard') {
       for (const ally of snap.players) {
         if (!ally.downed && Math.hypot(ally.x - playerX, ally.y - playerY) <= spec.aoeRadius) {
           drawTargetBracket(ctx, ally.x, ally.y, 14, secondary, now);

@@ -3912,26 +3912,159 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
           ctx.arc(0, 0, r, coneAng - halfArc, coneAng + halfArc);
           ctx.stroke();
           ctx.restore();
-        } else if (z.kind === 'tempest_wheel') {
-          const alpha = Math.max(0.15, Math.min(1, z.ttlMs / Math.max(1, z.maxTtlMs)));
-          const r = z.radius || 92;
-          const spin = now * 0.018;
+        } else if (z.kind === 'stormbreaker_slam') {
+          const alpha = Math.max(0.14, Math.min(1, z.ttlMs / Math.max(1, z.maxTtlMs)));
+          const progress = 1 - alpha;
+          const baseR = z.radius || 62;
+          const shockR = baseR * (0.48 + 0.52 * progress);
           ctx.save();
           ctx.translate(z.x, z.y);
-          ctx.fillStyle = `rgba(56, 189, 248, ${(0.12 * alpha).toFixed(3)})`;
+          // Ground impact crater fill
+          ctx.fillStyle = `rgba(56, 189, 248, ${(0.24 * alpha).toFixed(3)})`;
+          ctx.beginPath();
+          ctx.arc(0, 0, baseR * 0.92, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = `rgba(15, 23, 42, ${(0.42 * alpha).toFixed(3)})`;
+          ctx.beginPath();
+          ctx.arc(0, 0, baseR * 0.42, 0, Math.PI * 2);
+          ctx.fill();
+          // Outer expanding thunder ring
+          ctx.strokeStyle = `rgba(125, 211, 252, ${(0.95 * alpha).toFixed(3)})`;
+          ctx.lineWidth = 3.2;
+          ctx.beginPath();
+          ctx.arc(0, 0, shockR, 0, Math.PI * 2);
+          ctx.stroke();
+          // Radial lightning impact fissures
+          ctx.strokeStyle = `rgba(253, 224, 71, ${(0.9 * alpha).toFixed(3)})`;
+          ctx.lineWidth = 2;
+          for (let i = 0; i < 6; i++) {
+            const a = (i * Math.PI) / 3 + 0.2;
+            ctx.beginPath();
+            ctx.moveTo(Math.cos(a) * 8, Math.sin(a) * 8);
+            ctx.lineTo(Math.cos(a + 0.14) * (baseR * 0.55), Math.sin(a + 0.14) * (baseR * 0.55));
+            ctx.lineTo(Math.cos(a - 0.08) * (baseR * 0.9), Math.sin(a - 0.08) * (baseR * 0.9));
+            ctx.stroke();
+          }
+          ctx.restore();
+        } else if (z.kind === 'bastion_counter_cleave') {
+          const alpha = Math.max(0.14, Math.min(1, z.ttlMs / Math.max(1, z.maxTtlMs)));
+          const progress = 1 - alpha;
+          const coneAng = z.angle ?? 0;
+          const halfArc = z.coneHalfAngleRad ?? 1.05;
+          const r = (z.radius || 116) * (0.4 + 0.6 * progress);
+          ctx.save();
+          ctx.translate(z.x, z.y);
+          ctx.fillStyle = `rgba(245, 158, 11, ${(0.28 * alpha).toFixed(3)})`;
+          ctx.beginPath();
+          ctx.moveTo(0, 0);
+          ctx.arc(0, 0, r, coneAng - halfArc, coneAng + halfArc);
+          ctx.closePath();
+          ctx.fill();
+          ctx.strokeStyle = `rgba(254, 240, 138, ${(0.95 * alpha).toFixed(3)})`;
+          ctx.lineWidth = 4;
+          ctx.beginPath();
+          ctx.arc(0, 0, r, coneAng - halfArc, coneAng + halfArc);
+          ctx.stroke();
+          ctx.strokeStyle = `rgba(255, 255, 255, ${(0.88 * alpha).toFixed(3)})`;
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.arc(0, 0, r * 0.72, coneAng - halfArc * 0.85, coneAng + halfArc * 0.85);
+          ctx.stroke();
+          ctx.restore();
+        } else if (z.kind === 'cyclone_break') {
+          const alpha = Math.max(0.18, Math.min(1, z.ttlMs / Math.max(1, z.maxTtlMs)));
+          const r = z.radius || 120;
+          const spin = now * 0.012;
+          ctx.save();
+          ctx.translate(z.x, z.y);
+          ctx.fillStyle = `rgba(16, 185, 129, ${(0.14 * alpha).toFixed(3)})`;
           ctx.beginPath();
           ctx.arc(0, 0, r, 0, Math.PI * 2);
           ctx.fill();
-          ctx.strokeStyle = `rgba(251, 191, 36, ${(0.88 * alpha).toFixed(3)})`;
-          ctx.lineWidth = 3;
+          ctx.strokeStyle = `rgba(52, 211, 153, ${(0.82 * alpha).toFixed(3)})`;
+          ctx.lineWidth = 2.4;
           ctx.beginPath();
-          ctx.arc(0, 0, r, spin, spin + Math.PI * 1.4);
+          ctx.arc(0, 0, r, 0, Math.PI * 2);
           ctx.stroke();
-          ctx.strokeStyle = `rgba(125, 211, 252, ${(0.85 * alpha).toFixed(3)})`;
+          // Swirling inner cyclone spiral ribbons pulling inward
+          for (let arm = 0; arm < 4; arm++) {
+            const baseA = spin + (arm * Math.PI) / 2;
+            ctx.strokeStyle =
+              arm % 2 === 0
+                ? `rgba(110, 231, 183, ${(0.9 * alpha).toFixed(3)})`
+                : `rgba(56, 189, 248, ${(0.85 * alpha).toFixed(3)})`;
+            ctx.lineWidth = 2.2;
+            ctx.beginPath();
+            ctx.arc(0, 0, r * 0.72, baseA, baseA + 1.05);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.arc(0, 0, r * 0.42, baseA + 0.6, baseA + 1.85);
+            ctx.stroke();
+          }
+          // Eye of the storm core
+          ctx.fillStyle = `rgba(167, 243, 208, ${(0.55 * alpha).toFixed(3)})`;
+          ctx.beginPath();
+          ctx.arc(0, 0, 12, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+        } else if (z.kind === 'black_sun_zone') {
+          const alpha = Math.max(0.2, Math.min(1, z.ttlMs / Math.max(1, z.maxTtlMs)));
+          const progress = 1 - alpha;
+          const r = z.radius || 115;
+          ctx.save();
+          ctx.translate(z.x, z.y);
+          // Dark eclipse void well
+          ctx.fillStyle = `rgba(30, 27, 75, ${(0.42 * alpha + 0.14).toFixed(3)})`;
+          ctx.beginPath();
+          ctx.arc(0, 0, r, 0, Math.PI * 2);
+          ctx.fill();
+          // Outer golden solar corona
+          ctx.strokeStyle = `rgba(251, 191, 36, ${(0.88 * alpha + 0.1).toFixed(3)})`;
+          ctx.lineWidth = 2.6;
+          ctx.beginPath();
+          ctx.arc(0, 0, r, 0, Math.PI * 2);
+          ctx.stroke();
+          // Contracting convergence ring counting down celestial strike
+          const collapseR = Math.max(14, r * (1 - progress));
+          ctx.strokeStyle = `rgba(192, 132, 252, 0.92)`;
+          ctx.lineWidth = 2.2;
+          ctx.setLineDash([7, 5]);
+          ctx.beginPath();
+          ctx.arc(0, 0, collapseR, now * 0.004, now * 0.004 + Math.PI * 2);
+          ctx.stroke();
+          ctx.setLineDash([]);
+          // Obsidian Black Sun center core
+          ctx.fillStyle = '#09090B';
+          ctx.beginPath();
+          ctx.arc(0, 0, 18, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = '#FACC15';
           ctx.lineWidth = 2;
           ctx.beginPath();
-          ctx.arc(0, 0, r * 0.72, spin + Math.PI, spin + Math.PI * 2.4);
+          ctx.arc(0, 0, 18, 0, Math.PI * 2);
           ctx.stroke();
+          ctx.restore();
+        } else if (z.kind === 'black_sun_burst') {
+          const alpha = Math.max(0.14, Math.min(1, z.ttlMs / Math.max(1, z.maxTtlMs)));
+          const progress = 1 - alpha;
+          const r = (z.radius || 115) * (0.42 + 0.58 * progress);
+          ctx.save();
+          ctx.translate(z.x, z.y);
+          ctx.fillStyle = `rgba(124, 58, 237, ${(0.34 * alpha).toFixed(3)})`;
+          ctx.beginPath();
+          ctx.arc(0, 0, r, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = `rgba(251, 191, 36, ${(0.95 * alpha).toFixed(3)})`;
+          ctx.lineWidth = 3.5;
+          ctx.beginPath();
+          ctx.arc(0, 0, r, 0, Math.PI * 2);
+          ctx.stroke();
+          // Descending celestial eclipse lance beam
+          const beamHalfW = Math.max(6, (z.radius || 115) * 0.2 * alpha);
+          ctx.fillStyle = `rgba(233, 213, 255, ${(0.5 * alpha).toFixed(3)})`;
+          ctx.fillRect(-beamHalfW, -190, beamHalfW * 2, 190);
+          ctx.fillStyle = `rgba(253, 224, 71, ${(0.65 * alpha).toFixed(3)})`;
+          ctx.fillRect(-beamHalfW * 0.45, -190, beamHalfW * 0.9, 190);
           ctx.restore();
         } else if (z.kind === 'galeburst_nova') {
           const alpha = Math.max(0.12, Math.min(1, z.ttlMs / Math.max(1, z.maxTtlMs)));
@@ -4873,6 +5006,47 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
         ctx.fillRect(hx - 10, hy + 10, 20, 5);
 
         // Class & Armament-Aware Aura / Motion Effects
+        if (p.heroClass === 'vanguard') {
+          if ((p.bastionCounterMs || 0) > 0) {
+            // Bastion Counter golden defensive brace dome + forward guard barrier
+            const bracePulse = 0.72 + 0.28 * Math.sin(now * 0.014);
+            ctx.save();
+            ctx.fillStyle = `rgba(245, 158, 11, ${(0.14 * bracePulse).toFixed(2)})`;
+            ctx.beginPath();
+            ctx.arc(hx, hy, 22, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = `rgba(254, 240, 138, ${(0.92 * bracePulse).toFixed(2)})`;
+            ctx.lineWidth = 2.6;
+            ctx.beginPath();
+            ctx.arc(hx, hy, 22, ang - 1.05, ang + 1.05);
+            ctx.stroke();
+            ctx.strokeStyle = `rgba(251, 191, 36, 0.55)`;
+            ctx.lineWidth = 1.4;
+            ctx.beginPath();
+            ctx.arc(hx, hy, 18, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.restore();
+          }
+          if ((p.crimsonFrenzyMs || 0) > 0) {
+            // Crimson Frenzy pulsing blood-rage battle aura
+            const frenzyPulse = 0.75 + 0.25 * Math.sin(now * 0.018);
+            ctx.save();
+            ctx.fillStyle = `rgba(220, 38, 38, ${(0.14 * frenzyPulse).toFixed(2)})`;
+            ctx.beginPath();
+            ctx.arc(hx, hy, 21, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = `rgba(248, 113, 113, ${(0.9 * frenzyPulse).toFixed(2)})`;
+            ctx.lineWidth = 2;
+            const rot = now * 0.008;
+            ctx.beginPath();
+            ctx.arc(hx, hy, 21, rot, rot + Math.PI * 0.75);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.arc(hx, hy, 21, rot + Math.PI, rot + Math.PI * 1.75);
+            ctx.stroke();
+            ctx.restore();
+          }
+        }
         if (p.heroClass === 'ranger') {
           const isSwift = p.hasteMs > 0 || moving;
           if (isSwift) {

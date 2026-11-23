@@ -61,8 +61,11 @@ import {
 } from '../shared/abilityTargeting.ts';
 import {
   ARMAMENT_TUNING,
+  resolveActiveTacticalDef,
   resolveActiveVestmentPassive,
 } from '../shared/armaments.ts';
+import { isShieldGainLocked } from '../shared/combatMechanics.ts';
+import { TacticalSkillIcon } from './TacticalSkillIcon.tsx';
 import {
   applyKeyboardToUnifiedInput,
   applyTouchStickToUnifiedInput,
@@ -493,9 +496,10 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
   const myDef = me ? HERO_CLASSES[me.heroClass] : HERO_CLASSES.vanguard;
   const equippedScroll =
     me?.heroClass === 'arcanist' ? getArcanistScrollDef(me.equippedScrollId) : null;
-  const isSeraphimTactical = Boolean(
-    me && me.heroClass === 'cleric' && me.equippedWeapon === 'cleric_seraphim_crozier'
-  );
+  const activeTactical = me
+    ? resolveActiveTacticalDef(me.heroClass, me.equippedWeapon, me.equippedScrollId)
+    : resolveActiveTacticalDef('vanguard', null, null);
+  const myShieldLocked = Boolean(me && isShieldGainLocked(me));
   const myActivePassive = me
     ? me.activePassiveId || resolveActiveVestmentPassive(me.heroClass, me.equippedVestment)
     : 'iron_will';
@@ -1236,30 +1240,89 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
               })}
             </div>
           )}
-          {/* Arcanist Channel / Chrono Well Status Indicators */}
-          {(isChronoSuspended || isChannelingDisintegration || me.equippedScrollId) && (
-            <div className="pt-1 border-t border-[#2E2B3D] flex flex-wrap gap-1">
-              {isChronoSuspended && (
-                <div className="px-1.5 py-0.5 rounded-sm border border-[#38BDF8]/80 bg-[#0C4A6E]/60 text-[#BAE6FD] text-[9px] font-bold tracking-wider uppercase">
-                  TIME SUSPENDED {((me.chronoSuspendedMs || 0) / 1000).toFixed(1)}s
+          {/* Armament / Tactical Buff & Channel Status Indicators */}
+          {(myShieldLocked ||
+            (me.bastionCounterMs ?? 0) > 0 ||
+            (me.crimsonFrenzyMs ?? 0) > 0 ||
+            isChronoSuspended ||
+            isChannelingDisintegration ||
+            me.equippedScrollId) && (
+            <div className="pt-1 border-t border-[#2E2B3D] space-y-1">
+              <div className="flex flex-wrap gap-1">
+                {myShieldLocked && (
+                  <div
+                    title="Permanent Shield Lock (Crimson War Axe): Shield gain from all sources is blocked while equipped. Existing Shield is preserved."
+                    className="px-1.5 py-0.5 rounded-sm border border-[#EF4444]/75 bg-[#450A0A]/75 text-[#FCA5A5] text-[9px] font-mono font-bold tracking-wide"
+                  >
+                    SHIELD LOCKED
+                  </div>
+                )}
+                {isChronoSuspended && (
+                  <div className="px-1.5 py-0.5 rounded-sm border border-[#38BDF8]/80 bg-[#0C4A6E]/60 text-[#BAE6FD] text-[9px] font-bold tracking-wider uppercase">
+                    TIME SUSPENDED {((me.chronoSuspendedMs || 0) / 1000).toFixed(1)}s
+                  </div>
+                )}
+                {isChannelingDisintegration && (
+                  <div className="px-1.5 py-0.5 rounded-sm border border-[#A855F7]/80 bg-[#4C1D95]/60 text-[#E9D5FF] text-[9px] font-bold tracking-wider uppercase">
+                    CHANNELING DISINTEGRATION
+                  </div>
+                )}
+                {equippedScroll && (
+                  <div
+                    title={`${equippedScroll.name}: ${equippedScroll.summary}`}
+                    className="px-1.5 py-0.5 rounded-sm border text-[9px] font-bold tracking-wide"
+                    style={{
+                      borderColor: `${equippedScroll.accentColor}88`,
+                      backgroundColor: `${equippedScroll.accentColor}22`,
+                      color: equippedScroll.accentColor,
+                    }}
+                  >
+                    Scroll: {equippedScroll.tacticalTitle}
+                  </div>
+                )}
+              </div>
+
+              {(me.bastionCounterMs ?? 0) > 0 && (
+                <div className="text-[9px] font-mono tabular-nums">
+                  <div className="flex justify-between text-[#FEF08A]">
+                    <span>BASTION BRACE (-{Math.round(ARMAMENT_TUNING.weapons.sunforged.bastionDamageReduction * 100)}% DMG)</span>
+                    <span>{((me.bastionCounterMs || 0) / 1000).toFixed(1)}s</span>
+                  </div>
+                  <div className="w-full h-1.5 bg-[#111018] border border-[#F59E0B]/50 overflow-hidden">
+                    <div
+                      style={{
+                        width: `${Math.min(
+                          100,
+                          ((me.bastionCounterMs ?? 0) / Math.max(1, me.bastionCounterMaxMs || ARMAMENT_TUNING.weapons.sunforged.bastionBraceMs)) * 100
+                        )}%`,
+                      }}
+                      className="h-full bg-gradient-to-r from-[#D97706] to-[#FEF08A]"
+                    />
+                  </div>
                 </div>
               )}
-              {isChannelingDisintegration && (
-                <div className="px-1.5 py-0.5 rounded-sm border border-[#A855F7]/80 bg-[#4C1D95]/60 text-[#E9D5FF] text-[9px] font-bold tracking-wider uppercase">
-                  CHANNELING DISINTEGRATION
-                </div>
-              )}
-              {equippedScroll && (
-                <div
-                  title={`${equippedScroll.name}: ${equippedScroll.summary}`}
-                  className="px-1.5 py-0.5 rounded-sm border text-[9px] font-bold tracking-wide"
-                  style={{
-                    borderColor: `${equippedScroll.accentColor}88`,
-                    backgroundColor: `${equippedScroll.accentColor}22`,
-                    color: equippedScroll.accentColor,
-                  }}
-                >
-                  Scroll: {equippedScroll.tacticalTitle}
+
+              {(me.crimsonFrenzyMs ?? 0) > 0 && (
+                <div className="text-[9px] font-mono tabular-nums">
+                  <div className="flex justify-between text-[#FCA5A5]">
+                    <span>
+                      FRENZY +{Math.round(ARMAMENT_TUNING.weapons.crimson.frenzyDamageBonusPct * 100)}% DMG ·{' '}
+                      {Math.round(ARMAMENT_TUNING.weapons.crimson.frenzyLifestealPct * 100)}% LS · +
+                      {Math.round(ARMAMENT_TUNING.weapons.crimson.frenzyAttackSpeedBonusPct * 100)}% SPD
+                    </span>
+                    <span>{((me.crimsonFrenzyMs || 0) / 1000).toFixed(1)}s</span>
+                  </div>
+                  <div className="w-full h-1.5 bg-[#111018] border border-[#EF4444]/60 overflow-hidden">
+                    <div
+                      style={{
+                        width: `${Math.min(
+                          100,
+                          ((me.crimsonFrenzyMs ?? 0) / Math.max(1, me.crimsonFrenzyMaxMs || ARMAMENT_TUNING.weapons.crimson.frenzyDurationMs)) * 100
+                        )}%`,
+                      }}
+                      className="h-full bg-gradient-to-r from-[#991B1B] to-[#F87171]"
+                    />
+                  </div>
                 </div>
               )}
             </div>
@@ -1528,20 +1591,14 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
             title={
               isSilenced
                 ? 'Silenced: Tactical ability sealed'
-                : equippedScroll
-                ? `${equippedScroll.scrollName} (${equippedScroll.role}): ${equippedScroll.summary}`
-                : isSeraphimTactical
-                ? 'Seraphic Judgment: Ground AoE Divine burst dealing immediate damage to enemies (no healing). (Hold & drag to aim, release to cast)'
-                : `${myDef.tacticalName}: ${myDef.tacticalDesc} (Hold & drag to aim, release to cast)`
+                : `${activeTactical.name}${activeTactical.source === 'weapon' && activeTactical.weaponName ? ` (${activeTactical.weaponName})` : ''}: ${activeTactical.description} (${(activeTactical.cooldownMs / 1000).toFixed(1)}s CD · Hold & drag to aim, release to cast)`
             }
             style={
-              equippedScroll && !isSilenced && tacSec === 0
-                ? { borderColor: `${equippedScroll.accentColor}99` }
-                : isSeraphimTactical && !isSilenced && tacSec === 0
-                ? { borderColor: '#FDE04799' }
+              !isSilenced && tacSec === 0 && activeTactical.source !== 'class'
+                ? { borderColor: `${activeTactical.accentColor}99` }
                 : undefined
             }
-            className={`stone-button stone-button-dark flex-col items-start min-w-[130px] h-auto py-1.5 ${
+            className={`stone-button stone-button-dark flex-col items-start min-w-[146px] h-auto py-1.5 ${
               isChannelingDisintegration
                 ? 'ring-2 ring-[#A855F7] border-[#A855F7] bg-[#2D1A47]'
                 : activeAimUi?.action === 'tactical'
@@ -1560,20 +1617,15 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
               </span>
             </div>
             <div
-              className="font-display text-sm whitespace-nowrap"
+              className="font-display text-sm whitespace-nowrap flex items-center gap-1.5"
               style={
-                equippedScroll
-                  ? { color: equippedScroll.accentColor }
-                  : isSeraphimTactical
-                  ? { color: '#FDE047' }
+                activeTactical.source !== 'class'
+                  ? { color: activeTactical.accentColor }
                   : undefined
               }
             >
-              {equippedScroll
-                ? equippedScroll.tacticalTitle
-                : isSeraphimTactical
-                ? 'Seraphic Judgment'
-                : myDef.tacticalName}
+              <TacticalSkillIcon tacticalId={activeTactical.id} color={activeTactical.accentColor} size={15} />
+              <span>{activeTactical.shortTitle}</span>
             </div>
           </button>
 

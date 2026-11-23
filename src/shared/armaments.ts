@@ -1,12 +1,47 @@
+import { getArcanistScrollDef, type ArcanistScrollId } from './arcanist.ts';
 import {
   HERO_CLASSES,
   type AccountRecord,
+  type DamageCategory,
+  type DamageTypeMode,
   type HeroClassId,
+  type ScalingAttribute,
   type VestmentPassiveId,
 } from './types.ts';
 
 export type ArmamentSlot = 'weapon' | 'vestment';
 export type ArmamentRarity = 'Standard' | 'Forged' | 'Ascendant';
+
+export type WeaponTacticalId =
+  | 'bastion_counter'
+  | 'crimson_frenzy'
+  | 'cyclone_break'
+  | 'black_sun'
+  | 'seraphic_judgment';
+
+export type ActiveTacticalId =
+  | WeaponTacticalId
+  | ArcanistScrollId
+  | 'bulwark_dash'
+  | 'frost_volley'
+  | 'astral_nova'
+  | 'sanctified_pulse';
+
+export interface ActiveTacticalDef {
+  id: ActiveTacticalId;
+  name: string;
+  shortTitle: string;
+  description: string;
+  cooldownMs: number;
+  accentColor: string;
+  secondaryColor: string;
+  source: 'class' | 'weapon' | 'scroll';
+  weaponTacticalId?: WeaponTacticalId;
+  scrollId?: ArcanistScrollId;
+  weaponId?: string | null;
+  weaponName?: string | null;
+  damageCategory: DamageCategory;
+}
 
 /**
  * Centralized balance and mechanics tuning configuration for all 12 Weapons & 12 Vestments.
@@ -19,15 +54,30 @@ export const ARMAMENT_TUNING = {
       shockwaveRangePx: 118,
       shockwaveHalfAngleRad: 0.58,
       shockwaveZoneTtlMs: 240,
+      bastionBraceMs: 1400,
+      bastionDamageReduction: 0.6,
+      bastionCleaveRadiusPx: 116,
+      bastionCleaveHalfAngleRad: 1.05,
+      bastionCleaveBaseDamage: 46,
+      bastionBlockedBonusPerHitRatio: 0.25,
+      bastionMaxBonusStacks: 3,
+      bastionCleaveZoneTtlMs: 280,
+      bastionCooldownMs: 7000,
     },
     crimson: {
       bonusPierce: 3,
       rangeBonusPx: 26,
+      frenzyDurationMs: 5000,
+      frenzyCooldownMs: 10500,
+      frenzyDamageBonusPct: 0.25,
+      frenzyLifestealPct: 0.14,
+      frenzyAttackSpeedBonusPct: 0.25,
     },
     stormbreaker: {
-      tempestRadiusPx: 92,
-      tempestDamageRatio: 1.0,
-      tempestZoneTtlMs: 240,
+      slamForwardOffsetPx: 54,
+      slamRadiusPx: 62,
+      slamDamageRatio: 1.15,
+      slamZoneTtlMs: 260,
     },
     galewind: {
       counterScope: 'per_target' as const,
@@ -37,6 +87,14 @@ export const ARMAMENT_TUNING = {
       dexScalingMult: 0.78,
       attackSpeedMult: 0.92,
       novaZoneTtlMs: 260,
+      cycloneRangePx: 230,
+      cycloneRadiusPx: 120,
+      cycloneDurationMs: 2400,
+      cycloneTickIntervalMs: 300,
+      cyclonePullSpeedPxPerTick: 18,
+      cycloneTickBaseDamage: 11,
+      cycloneDetonationBaseDamage: 36,
+      cycloneCooldownMs: 8500,
     },
     eclipse: {
       minChargeMs: 120,
@@ -46,6 +104,14 @@ export const ARMAMENT_TUNING = {
       minProjSpeedMult: 1.05,
       maxProjSpeedMult: 1.55,
       scalingStat: 'intelligence' as const,
+      blackSunRangePx: 240,
+      blackSunRadiusPx: 115,
+      blackSunZoneDurationMs: 1400,
+      blackSunTickIntervalMs: 350,
+      blackSunTickBaseDamage: 10,
+      blackSunStrikeBaseDamage: 68,
+      blackSunBurstZoneTtlMs: 360,
+      blackSunCooldownMs: 9000,
     },
     cinderflare: {
       aoeRadiusPx: 64,
@@ -123,6 +189,12 @@ export const ARMAMENT_TUNING = {
 } as const;
 
 export interface WeaponModifiers {
+  /** Attribute that scales primary weapon damage and weapon-derived scaling */
+  scalingAttribute?: ScalingAttribute;
+  /** Default/configured damage category for this weapon */
+  damageCategory?: DamageCategory;
+  /** 'fixed' (default) or 'adaptive' (STR > INT -> physical, INT > STR -> arcane, tie -> configured default) */
+  damageTypeMode?: DamageTypeMode;
   /** Multiplicative damage scaling applied to class primary/ability damage (default 1.0) */
   damageMult?: number;
   /** Multiplicative attack cadence speed (e.g. 1.12 = 12% faster attacks, default 1.0) */
@@ -157,8 +229,12 @@ export interface WeaponModifiers {
   bleedChance?: number;
   /** Sunforged Claymore: releases a short-range golden shockwave while Shield > 0 */
   sunforgedShockwave?: boolean;
-  /** Stormbreaker Flail: 360-degree circular Tempest Wheel Basic Attack */
-  tempestWheel?: boolean;
+  /** Stormbreaker Flail: downward heavy slam & localized forward AoE */
+  heavySlamAoe?: boolean;
+  /** Crimson War Axe: permanent continuous lock preventing Shield gain from any source */
+  shieldGainLocked?: boolean;
+  /** Ascendant weapon Tactical replacement identifier */
+  tacticalId?: WeaponTacticalId;
   /** Ashwood Recurve: bonus arrow damage against Slowed, Poisoned, or Frozen foes */
   impairedTargetBonusPct?: number;
   /** Galewind Twinbow: per-target 3-hit deterministic Galeburst wind explosion */
@@ -274,48 +350,57 @@ export const WEAPON_CATALOG: readonly WeaponDef[] = [
     slot: 'weapon',
     heroClass: 'vanguard',
     name: HERO_CLASSES.vanguard.weapon,
-    rarity: 'Standard',
-    archetype: 'Shield-Wave Greatsword',
-    summary: 'Broad Vanguard greatsword that unleashes a golden forward shockwave whenever you hold Shield.',
+    rarity: 'Ascendant',
+    archetype: 'Shield-Wave Bastion Greatsword',
+    summary: 'Sunforged greatsword releasing golden forward shockwaves with Shield, and replacing Bulwark Dash with Bastion Counter.',
     effectLines: [
       '+10px primary cleave reach & +3% Critical Chance',
       'Sunforged Shockwave: While Shield > 0, swings release a golden cone shockwave (55% dmg, 118px)',
+      `Bastion Counter (Tactical): Brace ${(ARMAMENT_TUNING.weapons.sunforged.bastionBraceMs / 1000).toFixed(1)}s (-${Math.round(ARMAMENT_TUNING.weapons.sunforged.bastionDamageReduction * 100)}% incoming dmg), then retaliate with a ${ARMAMENT_TUNING.weapons.sunforged.bastionCleaveRadiusPx}px golden cleave (${(ARMAMENT_TUNING.weapons.sunforged.bastionCooldownMs / 1000).toFixed(1)}s CD)`,
       'Restores +2 Shield when primary cleave hits a foe',
     ],
     unlockHint: 'Starter Vanguard armament',
     isDefault: true,
     accent: '#F59E0B',
     modifiers: {
+      scalingAttribute: 'strength',
+      damageCategory: 'physical',
+      damageTypeMode: 'fixed',
       damageMult: 1.0,
       attackSpeedMult: 1.0,
       critChanceBonus: 0.03,
       rangeBonusPx: 10,
       shieldOnPrimaryHit: 2,
       sunforgedShockwave: true,
+      tacticalId: 'bastion_counter',
     },
   },
   {
     id: 'vanguard_crimson_halberd',
     slot: 'weapon',
     heroClass: 'vanguard',
-    name: 'Crimson War Halberd & Buckler',
-    rarity: 'Forged',
-    archetype: 'Long-Reach Piercing Polearm',
-    summary: 'Extended polearm engineered to thrust deeply and pierce entire frontline formations in one sweep.',
+    name: 'Crimson War Axe',
+    rarity: 'Ascendant',
+    archetype: 'Shield-Locked Berserker Great-Axe',
+    summary: 'Extended-reach war axe that permanently locks all Shield gain in exchange for piercing cleaves, Bleed, and Crimson Frenzy.',
     effectLines: [
-      `+10% Offensive Damage, +${ARMAMENT_TUNING.weapons.crimson.rangeBonusPx}px Reach & +${ARMAMENT_TUNING.weapons.crimson.bonusPierce} Pierce (-6% cadence)`,
-      'Impaling Reach: Extended forward halberd profile hits each target once per swing',
-      '45% chance on primary hit to inflict Bleed (4s) & +1 Shield',
+      `+10% Offensive Damage, +${ARMAMENT_TUNING.weapons.crimson.rangeBonusPx}px Reach & +${ARMAMENT_TUNING.weapons.crimson.bonusPierce} Pierce (-6% cadence); 45% Bleed (4s)`,
+      'Permanent Shield Lock: While equipped, you cannot gain Shield from any source (existing Shield stays; unequipping restores Shield gain)',
+      `Crimson Frenzy (Tactical): For ${(ARMAMENT_TUNING.weapons.crimson.frenzyDurationMs / 1000).toFixed(1)}s, gain +${Math.round(ARMAMENT_TUNING.weapons.crimson.frenzyDamageBonusPct * 100)}% Damage, +${Math.round(ARMAMENT_TUNING.weapons.crimson.frenzyLifestealPct * 100)}% Lifesteal & +${Math.round(ARMAMENT_TUNING.weapons.crimson.frenzyAttackSpeedBonusPct * 100)}% Attack Speed (${(ARMAMENT_TUNING.weapons.crimson.frenzyCooldownMs / 1000).toFixed(1)}s CD)`,
     ],
     unlockHint: 'Defeat Floor Bosses as Vanguard',
     accent: '#EF4444',
     modifiers: {
+      scalingAttribute: 'strength',
+      damageCategory: 'physical',
+      damageTypeMode: 'fixed',
       damageMult: 1.1,
       attackSpeedMult: 0.94,
       bonusPierce: ARMAMENT_TUNING.weapons.crimson.bonusPierce,
       rangeBonusPx: ARMAMENT_TUNING.weapons.crimson.rangeBonusPx,
       bleedChance: 0.45,
-      shieldOnPrimaryHit: 1,
+      shieldGainLocked: true,
+      tacticalId: 'crimson_frenzy',
     },
   },
   {
@@ -323,23 +408,26 @@ export const WEAPON_CATALOG: readonly WeaponDef[] = [
     slot: 'weapon',
     heroClass: 'vanguard',
     name: 'Stormbreaker Flail & Bastion Wall',
-    rarity: 'Ascendant',
-    archetype: 'Tempest Wheel War Flail',
-    summary: 'Thunder-forged flail replacing directional cleaves with a 360° Tempest Wheel vortex around you.',
+    rarity: 'Forged',
+    archetype: 'Heavy Slam War Flail',
+    summary: 'Thunder-forged flail smashing downward into a localized forward Shock AoE while retaining Bulwark Dash.',
     effectLines: [
-      `Tempest Wheel: 360° circular flail sweep (${ARMAMENT_TUNING.weapons.stormbreaker.tempestRadiusPx}px radius around you)`,
-      '+5% Damage, +12% Attack Speed, +5% Crit Chance & +3 Shield on hit',
+      `Heavy Slam: Downward overhead slam crushes a localized ${ARMAMENT_TUNING.weapons.stormbreaker.slamRadiusPx}px forward AoE (${Math.round(ARMAMENT_TUNING.weapons.stormbreaker.slamDamageRatio * 100)}% dmg, ${ARMAMENT_TUNING.weapons.stormbreaker.slamForwardOffsetPx}px ahead)`,
+      '+5% Damage, +12% Attack Speed, +5% Crit Chance & +3 Shield on hit (retains Bulwark Dash)',
       '25% chance on primary hit to Shock foes (3.5s)',
     ],
     unlockHint: 'Defeat Floor 3+ Bosses as Vanguard',
     accent: '#FBBF24',
     modifiers: {
+      scalingAttribute: 'strength',
+      damageCategory: 'physical',
+      damageTypeMode: 'fixed',
       damageMult: 1.05,
       attackSpeedMult: 1.12,
       critChanceBonus: 0.05,
       shieldOnPrimaryHit: 3,
       shockChance: 0.25,
-      tempestWheel: true,
+      heavySlamAoe: true,
     },
   },
 
@@ -349,11 +437,11 @@ export const WEAPON_CATALOG: readonly WeaponDef[] = [
     slot: 'weapon',
     heroClass: 'ranger',
     name: HERO_CLASSES.ranger.weapon,
-    rarity: 'Standard',
+    rarity: 'Forged',
     archetype: 'Precision Hunter Recurve',
-    summary: 'Supple Thornwood recurve strung with barbed arrows that punish slowed or poisoned prey.',
+    summary: 'Supple Thornwood recurve strung with barbed arrows that punish slowed or poisoned prey while retaining Frost Volley.',
     effectLines: [
-      '+4% Critical Chance & +10% Arrow Velocity',
+      '+4% Critical Chance & +10% Arrow Velocity (retains Frost Volley)',
       'Barbed Broadheads: +15% arrow damage vs Slowed, Frozen, or Poisoned foes',
       '+5% bonus Longshot damage beyond 180u',
     ],
@@ -361,6 +449,9 @@ export const WEAPON_CATALOG: readonly WeaponDef[] = [
     isDefault: true,
     accent: '#34D399',
     modifiers: {
+      scalingAttribute: 'dexterity',
+      damageCategory: 'physical',
+      damageTypeMode: 'fixed',
       damageMult: 1.0,
       attackSpeedMult: 1.0,
       critChanceBonus: 0.04,
@@ -374,17 +465,20 @@ export const WEAPON_CATALOG: readonly WeaponDef[] = [
     slot: 'weapon',
     heroClass: 'ranger',
     name: 'Galewind Twinbow & Split Quiver',
-    rarity: 'Forged',
-    archetype: 'Galeburst 3-Hit Windbow',
-    summary: 'Twin-limbed composite bow whose arrows mark targets and detonate a violent air burst on every third hit.',
+    rarity: 'Ascendant',
+    archetype: 'Galeburst Cyclone Twinbow',
+    summary: 'Twin-limbed composite bow triggering 3-hit Galeburst wind bursts and replacing Frost Volley with Cyclone Break.',
     effectLines: [
-      `Galeburst: Every ${ARMAMENT_TUNING.weapons.galewind.hitsToTrigger}rd confirmed hit on a target triggers an ${ARMAMENT_TUNING.weapons.galewind.aoeRadiusPx}px wind AoE (${Math.round(ARMAMENT_TUNING.weapons.galewind.aoeDamageRatio * 100)}% dmg)`,
-      '+12% Arrow Velocity & +4% Crit Chance',
-      `Tuned for burst cadence (${Math.round(ARMAMENT_TUNING.weapons.galewind.attackSpeedMult * 100)}% cadence, ${Math.round(ARMAMENT_TUNING.weapons.galewind.dexScalingMult * 100)}% DEX scaling)`,
+      `Galeburst: Every ${ARMAMENT_TUNING.weapons.galewind.hitsToTrigger}rd confirmed hit on a target triggers an ${ARMAMENT_TUNING.weapons.galewind.aoeRadiusPx}px wind AoE (${Math.round(ARMAMENT_TUNING.weapons.galewind.aoeDamageRatio * 100)}% dmg) & primes Cyclone Break`,
+      `Cyclone Break (Tactical): Summon a ${ARMAMENT_TUNING.weapons.galewind.cycloneRadiusPx}px vortex (${(ARMAMENT_TUNING.weapons.galewind.cycloneDurationMs / 1000).toFixed(1)}s) pulling foes inward; Galeburst-marked targets detonate (${(ARMAMENT_TUNING.weapons.galewind.cycloneCooldownMs / 1000).toFixed(1)}s CD)`,
+      `+12% Arrow Velocity & +4% Crit Chance (${Math.round(ARMAMENT_TUNING.weapons.galewind.attackSpeedMult * 100)}% cadence, ${Math.round(ARMAMENT_TUNING.weapons.galewind.dexScalingMult * 100)}% DEX scaling)`,
     ],
     unlockHint: 'Defeat Floor Bosses as Ranger',
     accent: '#38BDF8',
     modifiers: {
+      scalingAttribute: 'dexterity',
+      damageCategory: 'physical',
+      damageTypeMode: 'fixed',
       damageMult: 0.95,
       attackSpeedMult: ARMAMENT_TUNING.weapons.galewind.attackSpeedMult,
       projectileSpeedMult: 1.12,
@@ -393,6 +487,7 @@ export const WEAPON_CATALOG: readonly WeaponDef[] = [
       galeburstTriggerHits: ARMAMENT_TUNING.weapons.galewind.hitsToTrigger,
       galeburstRadiusPx: ARMAMENT_TUNING.weapons.galewind.aoeRadiusPx,
       galeburstDamageRatio: ARMAMENT_TUNING.weapons.galewind.aoeDamageRatio,
+      tacticalId: 'cyclone_break',
     },
   },
   {
@@ -401,16 +496,19 @@ export const WEAPON_CATALOG: readonly WeaponDef[] = [
     heroClass: 'ranger',
     name: 'Eclipse Siege Longbow & Bodkins',
     rarity: 'Ascendant',
-    archetype: 'INT-Scaled Charged Siege Bow',
-    summary: 'Heavy arcane-sinew siege longbow; hold Basic Attack to draw massive INT-scaled piercing shots.',
+    archetype: 'INT-Scaled Eclipse Siege Bow',
+    summary: 'Heavy arcane-sinew bow with hold-to-charge INT shots that replaces Frost Volley with Black Sun.',
     effectLines: [
-      `Hold-to-Charge (${ARMAMENT_TUNING.weapons.eclipse.minChargeMs}-${ARMAMENT_TUNING.weapons.eclipse.maxChargeMs}ms): Deals ${Math.round(ARMAMENT_TUNING.weapons.eclipse.minDamageRatio * 100)}%-${Math.round(ARMAMENT_TUNING.weapons.eclipse.maxDamageRatio * 100)}% arrow damage`,
-      'Arcane Sinew: Damage scales with Intelligence (INT) instead of Dexterity',
-      '+2 Arrow Pierce, +6% Crit Chance & +10% Crit Multiplier',
+      `Hold-to-Charge (${ARMAMENT_TUNING.weapons.eclipse.minChargeMs}-${ARMAMENT_TUNING.weapons.eclipse.maxChargeMs}ms): Deals ${Math.round(ARMAMENT_TUNING.weapons.eclipse.minDamageRatio * 100)}%-${Math.round(ARMAMENT_TUNING.weapons.eclipse.maxDamageRatio * 100)}% Arcane arrow damage (+2 Pierce, +6% Crit, +10% Crit Mult)`,
+      `Black Sun (Tactical): Create a ${ARMAMENT_TUNING.weapons.eclipse.blackSunRadiusPx}px eclipse zone (${(ARMAMENT_TUNING.weapons.eclipse.blackSunZoneDurationMs / 1000).toFixed(1)}s) before a celestial arrow strike & explosion (${(ARMAMENT_TUNING.weapons.eclipse.blackSunCooldownMs / 1000).toFixed(1)}s CD)`,
+      'Arcane Sinew: Deals Arcane damage and scales with Intelligence (INT) instead of Dexterity',
     ],
     unlockHint: 'Defeat Floor 3+ Bosses as Ranger',
     accent: '#FBBF24',
     modifiers: {
+      scalingAttribute: 'intelligence',
+      damageCategory: 'arcane',
+      damageTypeMode: 'fixed',
       damageMult: 1.0,
       attackSpeedMult: 1.0,
       bonusPierce: 2,
@@ -419,6 +517,7 @@ export const WEAPON_CATALOG: readonly WeaponDef[] = [
       projectileSpeedMult: 1.2,
       chargeToFire: true,
       usesIntScaling: true,
+      tacticalId: 'black_sun',
     },
   },
 
@@ -428,9 +527,9 @@ export const WEAPON_CATALOG: readonly WeaponDef[] = [
     slot: 'weapon',
     heroClass: 'arcanist',
     name: HERO_CLASSES.arcanist.weapon,
-    rarity: 'Standard',
+    rarity: 'Forged',
     archetype: 'Astral Rift Conduit',
-    summary: 'Crystalline focus rod attuned with orbiting astral spheres that draw power from Star Rifts.',
+    summary: 'Crystalline focus rod attuned with orbiting astral spheres that draw power from Star Rifts; retains Astral Nova and Scroll spells.',
     effectLines: [
       '+1 Cosmic Bolt Pierce & +3% Critical Chance',
       'Rift Resonance: +12% primary bolt damage while your Star Rift is active',
@@ -440,6 +539,9 @@ export const WEAPON_CATALOG: readonly WeaponDef[] = [
     isDefault: true,
     accent: '#818CF8',
     modifiers: {
+      scalingAttribute: 'intelligence',
+      damageCategory: 'arcane',
+      damageTypeMode: 'fixed',
       damageMult: 1.0,
       attackSpeedMult: 1.0,
       bonusPierce: 1,
@@ -455,7 +557,7 @@ export const WEAPON_CATALOG: readonly WeaponDef[] = [
     name: 'Cinderflare Catalyst & Ember Crown',
     rarity: 'Forged',
     archetype: 'Detonating Pyromancy Catalyst',
-    summary: 'Obsidian-gold catalyst firing volatile ember bolts that erupt into fiery AoE blasts on hit.',
+    summary: 'Obsidian-gold catalyst firing volatile ember bolts that erupt into fiery AoE blasts on hit; retains Astral Nova and Scroll spells.',
     effectLines: [
       '+8% Arcane Bolt Damage, +1 Pierce & +10% Crit Multiplier',
       `Ember Detonation: Confirmed hits trigger a ${ARMAMENT_TUNING.weapons.cinderflare.aoeRadiusPx}px Fire AoE blast (${Math.round(ARMAMENT_TUNING.weapons.cinderflare.aoeDamageRatio * 100)}% dmg)`,
@@ -464,6 +566,9 @@ export const WEAPON_CATALOG: readonly WeaponDef[] = [
     unlockHint: 'Defeat Floor Bosses as Arcanist',
     accent: '#F97316',
     modifiers: {
+      scalingAttribute: 'intelligence',
+      damageCategory: 'arcane',
+      damageTypeMode: 'fixed',
       damageMult: 1.08,
       attackSpeedMult: 1.0,
       bonusPierce: 1,
@@ -478,9 +583,9 @@ export const WEAPON_CATALOG: readonly WeaponDef[] = [
     slot: 'weapon',
     heroClass: 'arcanist',
     name: 'Chronostar Scepter & Twin Orbs',
-    rarity: 'Ascendant',
+    rarity: 'Forged',
     archetype: 'Seeking Temporal Star-Orb Scepter',
-    summary: 'Celestial astrolabe scepter launching homing Star-Orbs that curve mid-flight and siphon spell cooldowns.',
+    summary: 'Celestial astrolabe scepter launching homing Star-Orbs that siphon spell cooldowns while retaining Astral Nova and Scroll spells.',
     effectLines: [
       `Seeking Star-Orb: Curves toward foes within ${ARMAMENT_TUNING.weapons.chronostar.seekingRadiusPx}px (+8% dmg, +8% cadence)`,
       `Temporal Siphon: Confirmed orb hits trim -${ARMAMENT_TUNING.weapons.chronostar.tacticalSiphonMs}ms Tactical & -${ARMAMENT_TUNING.weapons.chronostar.ultSiphonMs}ms Ultimate CD once per orb`,
@@ -489,6 +594,9 @@ export const WEAPON_CATALOG: readonly WeaponDef[] = [
     unlockHint: 'Defeat Floor 3+ Bosses as Arcanist',
     accent: '#38BDF8',
     modifiers: {
+      scalingAttribute: 'intelligence',
+      damageCategory: 'arcane',
+      damageTypeMode: 'fixed',
       damageMult: 1.08,
       attackSpeedMult: 1.08,
       bonusPierce: 1,
@@ -508,18 +616,21 @@ export const WEAPON_CATALOG: readonly WeaponDef[] = [
     slot: 'weapon',
     heroClass: 'cleric',
     name: HERO_CLASSES.cleric.weapon,
-    rarity: 'Standard',
+    rarity: 'Forged',
     archetype: 'Consecrated Sanctuary Mace',
-    summary: 'Flanged sun-gold mace paired with a consecrated reliquary of undead-banishing judgment.',
+    summary: 'Flanged sun-gold mace paired with a consecrated reliquary of undead-banishing judgment; retains Sanctified Pulse.',
     effectLines: [
       '+20% Smite damage vs Undead, Cultists & Bosses',
-      '+4% Critical Strike Chance',
+      '+4% Critical Strike Chance (retains Sanctified Pulse)',
       'Sanctuary Judgment: Pure radiant Smite attacks without Shield mechanics',
     ],
     unlockHint: 'Starter Cleric armament',
     isDefault: true,
     accent: '#FACC15',
     modifiers: {
+      scalingAttribute: 'faith',
+      damageCategory: 'divine',
+      damageTypeMode: 'fixed',
       damageMult: 1.0,
       attackSpeedMult: 1.0,
       critChanceBonus: 0.04,
@@ -533,15 +644,18 @@ export const WEAPON_CATALOG: readonly WeaponDef[] = [
     name: 'Solaris War-Censer & Thurible',
     rarity: 'Forged',
     archetype: 'Mending Incense Focus',
-    summary: 'Swinging emerald-gold war-censer whose confirmed hits mend the lowest-HP nearby injured ally.',
+    summary: 'Swinging emerald-gold war-censer whose confirmed hits mend the lowest-HP nearby injured ally while retaining Sanctified Pulse.',
     effectLines: [
-      '+16% Healing Power, +6% Divine Damage & +1 Radiant Bolt Pierce',
+      '+16% Healing Power, +6% Divine Damage & +1 Radiant Bolt Pierce (retains Sanctified Pulse)',
       `Incense Mending: Confirmed hits heal lowest-HP injured ally within ${ARMAMENT_TUNING.weapons.solaris.healRangePx}px (+${ARMAMENT_TUNING.weapons.solaris.allyHealBase} scaled HP, ${ARMAMENT_TUNING.weapons.solaris.procCooldownMs}ms CD)`,
       '30% chance on primary hit to Chill targets (2.5s)',
     ],
     unlockHint: 'Defeat Floor Bosses as Cleric',
     accent: '#34D399',
     modifiers: {
+      scalingAttribute: 'faith',
+      damageCategory: 'divine',
+      damageTypeMode: 'fixed',
       damageMult: 1.06,
       attackSpeedMult: 1.0,
       bonusPierce: 1,
@@ -568,6 +682,9 @@ export const WEAPON_CATALOG: readonly WeaponDef[] = [
     unlockHint: 'Defeat Floor 3+ Bosses as Cleric',
     accent: '#FDE047',
     modifiers: {
+      scalingAttribute: 'faith',
+      damageCategory: 'divine',
+      damageTypeMode: 'fixed',
       damageMult: 1.12,
       attackSpeedMult: 1.0,
       bonusPierce: 1,
@@ -575,9 +692,180 @@ export const WEAPON_CATALOG: readonly WeaponDef[] = [
       healingBonusPct: 0.1,
       undeadBossBonusPct: 0.15,
       seraphimTacticalBurst: true,
+      tacticalId: 'seraphic_judgment',
     },
   },
 ];
+
+export const WEAPON_TACTICALS: Record<WeaponTacticalId, Omit<ActiveTacticalDef, 'source' | 'weaponId' | 'weaponName'>> = {
+  bastion_counter: {
+    id: 'bastion_counter',
+    weaponTacticalId: 'bastion_counter',
+    name: 'Bastion Counter',
+    shortTitle: 'Bastion Counter',
+    description: `Brace defensively for ${(ARMAMENT_TUNING.weapons.sunforged.bastionBraceMs / 1000).toFixed(1)}s (-${Math.round(ARMAMENT_TUNING.weapons.sunforged.bastionDamageReduction * 100)}% incoming dmg), then retaliate with a ${ARMAMENT_TUNING.weapons.sunforged.bastionCleaveRadiusPx}px golden cleave (+${Math.round(ARMAMENT_TUNING.weapons.sunforged.bastionBlockedBonusPerHitRatio * 100)}% dmg per blocked hit).`,
+    cooldownMs: ARMAMENT_TUNING.weapons.sunforged.bastionCooldownMs,
+    accentColor: '#FBBF24',
+    secondaryColor: '#FEF08A',
+    damageCategory: 'physical',
+  },
+  crimson_frenzy: {
+    id: 'crimson_frenzy',
+    weaponTacticalId: 'crimson_frenzy',
+    name: 'Crimson Frenzy',
+    shortTitle: 'Crimson Frenzy',
+    description: `Unleash bloodlust for ${(ARMAMENT_TUNING.weapons.crimson.frenzyDurationMs / 1000).toFixed(1)}s: +${Math.round(ARMAMENT_TUNING.weapons.crimson.frenzyDamageBonusPct * 100)}% Damage, +${Math.round(ARMAMENT_TUNING.weapons.crimson.frenzyLifestealPct * 100)}% Lifesteal, and +${Math.round(ARMAMENT_TUNING.weapons.crimson.frenzyAttackSpeedBonusPct * 100)}% Attack Speed. Shield gain remains permanently locked.`,
+    cooldownMs: ARMAMENT_TUNING.weapons.crimson.frenzyCooldownMs,
+    accentColor: '#EF4444',
+    secondaryColor: '#FCA5A5',
+    damageCategory: 'physical',
+  },
+  cyclone_break: {
+    id: 'cyclone_break',
+    weaponTacticalId: 'cyclone_break',
+    name: 'Cyclone Break',
+    shortTitle: 'Cyclone Break',
+    description: `Summon a ${ARMAMENT_TUNING.weapons.galewind.cycloneRadiusPx}px cyclone for ${(ARMAMENT_TUNING.weapons.galewind.cycloneDurationMs / 1000).toFixed(1)}s that pulls foes inward and detonates Galeburst-marked targets.`,
+    cooldownMs: ARMAMENT_TUNING.weapons.galewind.cycloneCooldownMs,
+    accentColor: '#38BDF8',
+    secondaryColor: '#6EE7B7',
+    damageCategory: 'physical',
+  },
+  black_sun: {
+    id: 'black_sun',
+    weaponTacticalId: 'black_sun',
+    name: 'Black Sun',
+    shortTitle: 'Black Sun',
+    description: `Create a ${ARMAMENT_TUNING.weapons.eclipse.blackSunRadiusPx}px eclipse zone for ${(ARMAMENT_TUNING.weapons.eclipse.blackSunZoneDurationMs / 1000).toFixed(1)}s pulsing Arcane damage before a celestial arrow strikes and detonates.`,
+    cooldownMs: ARMAMENT_TUNING.weapons.eclipse.blackSunCooldownMs,
+    accentColor: '#A855F7',
+    secondaryColor: '#FBBF24',
+    damageCategory: 'arcane',
+  },
+  seraphic_judgment: {
+    id: 'seraphic_judgment',
+    weaponTacticalId: 'seraphic_judgment',
+    name: 'Seraphic Judgment',
+    shortTitle: 'Seraphic Judgment',
+    description: `Targeted ${ARMAMENT_TUNING.weapons.seraphim.tacticalRadiusPx}px AoE Holy Burst dealing immediate Faith-scaled Divine damage (no healing).`,
+    cooldownMs: ARMAMENT_TUNING.weapons.seraphim.tacticalCooldownMs,
+    accentColor: '#FDE047',
+    secondaryColor: '#F59E0B',
+    damageCategory: 'divine',
+  },
+};
+
+const CLASS_DEFAULT_TACTICAL_BY_CLASS: Record<HeroClassId, ActiveTacticalDef> = {
+  vanguard: {
+    id: 'bulwark_dash',
+    name: HERO_CLASSES.vanguard.tacticalName,
+    shortTitle: 'Bulwark Dash',
+    description: HERO_CLASSES.vanguard.tacticalDesc,
+    cooldownMs: HERO_CLASSES.vanguard.tacticalCooldownMs,
+    accentColor: '#F59E0B',
+    secondaryColor: '#93C5FD',
+    source: 'class',
+    damageCategory: 'physical',
+  },
+  ranger: {
+    id: 'frost_volley',
+    name: HERO_CLASSES.ranger.tacticalName,
+    shortTitle: 'Frost Volley',
+    description: HERO_CLASSES.ranger.tacticalDesc,
+    cooldownMs: HERO_CLASSES.ranger.tacticalCooldownMs,
+    accentColor: '#38BDF8',
+    secondaryColor: '#BAE6FD',
+    source: 'class',
+    damageCategory: 'frost',
+  },
+  arcanist: {
+    id: 'astral_nova',
+    name: HERO_CLASSES.arcanist.tacticalName,
+    shortTitle: 'Astral Nova',
+    description: HERO_CLASSES.arcanist.tacticalDesc,
+    cooldownMs: HERO_CLASSES.arcanist.tacticalCooldownMs,
+    accentColor: '#818CF8',
+    secondaryColor: '#38BDF8',
+    source: 'class',
+    damageCategory: 'arcane',
+  },
+  cleric: {
+    id: 'sanctified_pulse',
+    name: HERO_CLASSES.cleric.tacticalName,
+    shortTitle: 'Sanctified Pulse',
+    description: HERO_CLASSES.cleric.tacticalDesc,
+    cooldownMs: HERO_CLASSES.cleric.tacticalCooldownMs,
+    accentColor: '#34D399',
+    secondaryColor: '#FACC15',
+    source: 'class',
+    damageCategory: 'divine',
+  },
+};
+
+/**
+ * Shared Tactical System resolver:
+ * 1. Arcanist Scrolls remain a separate Tactical replacement system and take precedence for Arcanist.
+ * 2. Ascendant weapons with `modifiers.tacticalId` replace the class default Tactical.
+ * 3. Forged (or unequipped) weapons preserve the class default Tactical.
+ */
+export function resolveActiveTacticalDef(
+  heroClass: HeroClassId,
+  equippedWeaponId?: string | null,
+  equippedScrollId?: ArcanistScrollId | null
+): ActiveTacticalDef {
+  if (heroClass === 'arcanist' && equippedScrollId) {
+    const scroll = getArcanistScrollDef(equippedScrollId);
+    if (scroll) {
+      return {
+        id: scroll.id,
+        scrollId: scroll.id,
+        name: scroll.scrollName,
+        shortTitle: scroll.tacticalTitle,
+        description: scroll.summary,
+        cooldownMs: scroll.cooldownMs,
+        accentColor: scroll.accentColor,
+        secondaryColor: '#E9D5FF',
+        source: 'scroll',
+        damageCategory: scroll.damageCategory,
+      };
+    }
+  }
+
+  const equippedWeapon = resolveEquippedWeaponForClass(heroClass, equippedWeaponId);
+  const tacticalId =
+    equippedWeapon?.modifiers.tacticalId ??
+    (equippedWeapon?.modifiers.seraphimTacticalBurst ? 'seraphic_judgment' : undefined);
+
+  if (equippedWeapon && tacticalId && WEAPON_TACTICALS[tacticalId]) {
+    const def = WEAPON_TACTICALS[tacticalId];
+    return {
+      ...def,
+      source: 'weapon',
+      weaponId: equippedWeapon.id,
+      weaponName: equippedWeapon.name,
+    };
+  }
+
+  return {
+    ...CLASS_DEFAULT_TACTICAL_BY_CLASS[heroClass],
+    weaponId: equippedWeapon?.id ?? null,
+    weaponName: equippedWeapon?.name ?? null,
+  };
+}
+
+export function getWeaponTacticalDef(weapon?: WeaponDef | string | null): ActiveTacticalDef | null {
+  const def = typeof weapon === 'string' ? getWeaponDef(weapon) : weapon;
+  if (!def) return null;
+  const tacticalId =
+    def.modifiers.tacticalId ?? (def.modifiers.seraphimTacticalBurst ? 'seraphic_judgment' : undefined);
+  if (!tacticalId || !WEAPON_TACTICALS[tacticalId]) return null;
+  return {
+    ...WEAPON_TACTICALS[tacticalId],
+    source: 'weapon',
+    weaponId: def.id,
+    weaponName: def.name,
+  };
+}
 
 export const VESTMENT_CATALOG: readonly VestmentDef[] = [
   // ================= VANGUARD VESTMENTS =================
@@ -946,6 +1234,159 @@ export function resolveActiveVestmentPassive(
   if (equipped) return equipped.passiveId;
   const fallback = getVestmentDef(getDefaultVestmentIdForClass(heroClass));
   return fallback?.passiveId ?? 'iron_will';
+}
+
+export function getClassDefaultScalingAttribute(heroClass: HeroClassId): ScalingAttribute {
+  switch (heroClass) {
+    case 'ranger':
+      return 'dexterity';
+    case 'arcanist':
+      return 'intelligence';
+    case 'cleric':
+      return 'faith';
+    case 'vanguard':
+    default:
+      return 'strength';
+  }
+}
+
+export function getClassDefaultDamageCategory(heroClass: HeroClassId): DamageCategory {
+  if (heroClass === 'arcanist') return 'arcane';
+  if (heroClass === 'cleric') return 'divine';
+  return 'physical';
+}
+
+export function getAttributeLabel(
+  attr: ScalingAttribute
+): 'Strength' | 'Dexterity' | 'Intelligence' | 'Faith' {
+  switch (attr) {
+    case 'dexterity':
+      return 'Dexterity';
+    case 'intelligence':
+      return 'Intelligence';
+    case 'faith':
+      return 'Faith';
+    case 'strength':
+    default:
+      return 'Strength';
+  }
+}
+
+export function getAttributeShortLabel(attr: ScalingAttribute): 'STR' | 'DEX' | 'INT' | 'FTH' {
+  switch (attr) {
+    case 'dexterity':
+      return 'DEX';
+    case 'intelligence':
+      return 'INT';
+    case 'faith':
+      return 'FTH';
+    case 'strength':
+    default:
+      return 'STR';
+  }
+}
+
+export function getPlayerAttributeValue(
+  stats: {
+    strength?: number;
+    dexterity?: number;
+    intelligence?: number;
+    faith?: number;
+  },
+  attr: ScalingAttribute
+): number {
+  switch (attr) {
+    case 'dexterity':
+      return Math.max(0, stats.dexterity || 0);
+    case 'intelligence':
+      return Math.max(0, stats.intelligence || 0);
+    case 'faith':
+      return Math.max(0, stats.faith || 0);
+    case 'strength':
+    default:
+      return Math.max(0, stats.strength || 0);
+  }
+}
+
+export function resolveWeaponDamageCategory(
+  defaultCategory: DamageCategory,
+  mode: DamageTypeMode,
+  stats?: { strength?: number; intelligence?: number }
+): DamageCategory {
+  if (mode === 'adaptive') {
+    const str = Math.max(0, stats?.strength || 0);
+    const intStat = Math.max(0, stats?.intelligence || 0);
+    if (str > intStat) return 'physical';
+    if (intStat > str) return 'arcane';
+    return defaultCategory;
+  }
+  return defaultCategory;
+}
+
+export interface ResolvedWeaponCombatProfile {
+  weaponDef: WeaponDef | null;
+  modifiers: WeaponModifiers;
+  scalingAttribute: ScalingAttribute;
+  scalingAttributeLabel: 'Strength' | 'Dexterity' | 'Intelligence' | 'Faith';
+  scalingAttributeShort: 'STR' | 'DEX' | 'INT' | 'FTH';
+  defaultDamageCategory: DamageCategory;
+  damageTypeMode: DamageTypeMode;
+  damageCategory: DamageCategory;
+  isAdaptive: boolean;
+  rawAttributeValue: number;
+  attributeScalingMult: number;
+  effectiveAttributeValue: number;
+}
+
+/**
+ * Single source of truth for resolving a weapon's scaling attribute, damage category,
+ * and adaptive damage mode independently of class defaults.
+ */
+export function resolveWeaponCombatProfile(
+  heroClass: HeroClassId,
+  weaponInput?: string | WeaponDef | null,
+  stats?: {
+    strength?: number;
+    dexterity?: number;
+    intelligence?: number;
+    faith?: number;
+  }
+): ResolvedWeaponCombatProfile {
+  const weaponDef =
+    weaponInput && typeof weaponInput === 'object'
+      ? weaponInput.heroClass === heroClass
+        ? weaponInput
+        : null
+      : resolveEquippedWeaponForClass(heroClass, weaponInput);
+
+  const modifiers: WeaponModifiers = weaponDef?.modifiers || {};
+  const scalingAttribute: ScalingAttribute =
+    modifiers.scalingAttribute ??
+    (modifiers.usesIntScaling ? 'intelligence' : getClassDefaultScalingAttribute(heroClass));
+  const defaultDamageCategory: DamageCategory =
+    modifiers.damageCategory ?? getClassDefaultDamageCategory(heroClass);
+  const damageTypeMode: DamageTypeMode = modifiers.damageTypeMode ?? 'fixed';
+  const damageCategory = resolveWeaponDamageCategory(defaultDamageCategory, damageTypeMode, stats);
+  const rawAttributeValue = getPlayerAttributeValue(stats || {}, scalingAttribute);
+  const attributeScalingMult =
+    scalingAttribute === 'dexterity' && modifiers.dexScalingMult !== undefined
+      ? modifiers.dexScalingMult
+      : 1.0;
+
+  return {
+    weaponDef,
+    modifiers,
+    scalingAttribute,
+    scalingAttributeLabel: getAttributeLabel(scalingAttribute),
+    scalingAttributeShort: getAttributeShortLabel(scalingAttribute),
+    defaultDamageCategory,
+    damageTypeMode,
+    damageCategory,
+    isAdaptive: damageTypeMode === 'adaptive',
+    rawAttributeValue,
+    attributeScalingMult,
+    effectiveAttributeValue: rawAttributeValue * attributeScalingMult,
+  };
 }
 
 export function getClassWeapons(heroClass: HeroClassId): WeaponDef[] {

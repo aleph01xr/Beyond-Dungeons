@@ -2,20 +2,25 @@ import React, { useState } from 'react';
 import { HERO_CLASSES, RELIC_CATALOG, type HeroClassId, type PlayerState, type RelicDef } from '../shared/types.ts';
 import { calculatePlayerStatProjections, RELIC_SYNERGIES, type PlayerStatProjections } from '../shared/statUtils.ts';
 import {
+  ARMAMENT_TUNING,
   VESTMENT_CATALOG,
   WEAPON_CATALOG,
   getClassVestments,
   getClassWeapons,
   getDefaultVestmentIdForClass,
   getVestmentDef,
+  getWeaponTacticalDef,
+  resolveActiveTacticalDef,
   resolveEquippedVestmentForClass,
   resolveEquippedWeaponForClass,
   type ArmamentDef,
   type ArmamentSlot,
 } from '../shared/armaments.ts';
+import { isShieldGainLocked } from '../shared/combatMechanics.ts';
 import { sfx } from '../client/sound.ts';
 import { PixelHeroPreview } from './PixelHeroPreview.tsx';
 import { ArmamentIcon } from './ArmamentIcon.tsx';
+import { TacticalSkillIcon } from './TacticalSkillIcon.tsx';
 
 interface CharacterInventoryModalProps {
   player: PlayerState;
@@ -56,6 +61,12 @@ export const CharacterInventoryModal: React.FC<CharacterInventoryModalProps> = (
   const activeVestmentDef =
     equippedVestmentDef || getVestmentDef(getDefaultVestmentIdForClass(heroClass));
   const isNonDefaultVestment = Boolean(equippedVestmentDef && !equippedVestmentDef.isDefault);
+  const activeTactical = resolveActiveTacticalDef(
+    heroClass,
+    player.equippedWeapon,
+    player.equippedScrollId
+  );
+  const shieldGainLocked = isShieldGainLocked(player);
 
   const classWeapons = getClassWeapons(heroClass);
   const classVestments = getClassVestments(heroClass);
@@ -436,6 +447,38 @@ export const CharacterInventoryModal: React.FC<CharacterInventoryModalProps> = (
                     </div>
                   </div>
 
+                  {/* Active Tactical [Q] (Class Default, Ascendant Weapon Tactical, or Arcanist Scroll) */}
+                  <div className="stone-input p-3 flex items-center gap-3">
+                    <div
+                      className="w-10 h-10 bg-[#1B1A26] border flex items-center justify-center shrink-0"
+                      style={{ borderColor: activeTactical.accentColor }}
+                    >
+                      <TacticalSkillIcon tacticalId={activeTactical.id} color={activeTactical.accentColor} size={20} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-mono font-bold truncate" style={{ color: activeTactical.accentColor }}>
+                          {activeTactical.name}
+                        </span>
+                        <span className="text-[9px] font-mono text-[#CBD5E1] shrink-0 text-right tabular-nums">
+                          {activeTactical.source === 'scroll'
+                            ? 'ARCANIST SCROLL'
+                            : activeTactical.source === 'weapon'
+                              ? 'ASCENDANT TACTICAL'
+                              : 'CLASS TACTICAL'} · {(activeTactical.cooldownMs / 1000).toFixed(1)}s CD
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-[#A19FAF] leading-snug mt-0.5">
+                        {activeTactical.description}
+                      </p>
+                      {shieldGainLocked && (
+                        <p className="text-[10px] font-mono text-[#FCA5A5] mt-1">
+                          SHIELD LOCKED: Crimson War Axe blocks all Shield gain continuously.
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
                   {/* Potion Pouch */}
                   <div className="stone-input p-3 flex items-center justify-between gap-3">
                     <div className="flex items-center gap-2">
@@ -770,6 +813,24 @@ export const CharacterInventoryModal: React.FC<CharacterInventoryModalProps> = (
                     </button>
                   </div>
                   <p className="text-xs text-[#E2E8F0] font-mono leading-relaxed">{selectedArmament.summary}</p>
+                  {selectedArmament.slot === 'weapon' && (() => {
+                    const wTac = getWeaponTacticalDef(selectedArmament.id);
+                    return wTac ? (
+                      <div className="stone-input p-2.5 flex items-center gap-2.5 border border-[#FACC15]/40">
+                        <TacticalSkillIcon tacticalId={wTac.id} color={wTac.accentColor} size={18} />
+                        <div className="text-[11px] font-mono">
+                          <span className="font-bold" style={{ color: wTac.accentColor }}>
+                            Replaces Tactical [Q]: {wTac.name} ({(wTac.cooldownMs / 1000).toFixed(1)}s CD)
+                          </span>
+                          <span className="text-[#CBD5E1] block mt-0.5">{wTac.description}</span>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="stone-input px-2.5 py-1.5 text-[11px] font-mono text-[#7DD3FC]">
+                        Forged Weapon · Retains Class Default Tactical ({HERO_CLASSES[selectedArmament.heroClass].tacticalName})
+                      </div>
+                    );
+                  })()}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
                     {selectedArmament.effectLines.map((line, i) => (
                       <div key={i} className="stone-input px-2.5 py-1.5 text-[11px] font-mono text-[#34D399]">
@@ -1183,13 +1244,18 @@ export const CharacterInventoryModal: React.FC<CharacterInventoryModalProps> = (
                 <div className="stone-plaque p-4 space-y-3">
                   <h3 className="font-mono text-xs font-bold text-[#FCD34D] uppercase tracking-wider border-b border-[#353442] pb-2 flex items-center justify-between">
                     <span>[OFFENSE] Attack Cadence</span>
-                    <span className="font-mono text-[10px] text-[#34D399]">{stats.primaryCategory.toUpperCase()} DAMAGE</span>
+                    <span className="font-mono text-[10px] text-[#34D399]">
+                      {stats.primaryCategory.toUpperCase()} DAMAGE{stats.isAdaptiveDamage ? ' (ADAPTIVE)' : ''}
+                    </span>
                   </h3>
 
                   <div className="space-y-2 font-mono text-xs">
                     <div className="flex items-center justify-between p-2 stone-input">
                       <span className="text-[#A19FAF]">Primary Stat ({stats.primaryStatName})</span>
-                      <span className="font-bold text-white">{stats.primaryStatValue} Pts (+{(stats.primaryStatValue * 0.8).toFixed(1)}% Dmg)</span>
+                      <span className="font-bold text-white">
+                        {stats.primaryStatValue} Pts (+{stats.primaryStatDamageBonusPct}% Dmg
+                        {stats.dexScalingMult !== 1 ? ` · ${Math.round(stats.dexScalingMult * 100)}% Scale` : ''})
+                      </span>
                     </div>
 
                     {player.heroClass === 'cleric' && (
@@ -1199,17 +1265,21 @@ export const CharacterInventoryModal: React.FC<CharacterInventoryModalProps> = (
                       </div>
                     )}
 
-                    <div className="flex items-center justify-between p-2 stone-input">
-                      <span className="text-[#A19FAF]">Scaled Primary Hit</span>
-                      <span className="font-bold text-[#FCD34D]">
-                        {stats.scaledHitDamage} Dmg ({stats.directDps} DPS)
+                    <div className="flex items-center justify-between p-2 stone-input gap-2">
+                      <span className="text-[#A19FAF]">
+                        {stats.isChargedWeapon ? 'Full-Draw Primary Hit' : 'Scaled Primary Hit'}
+                      </span>
+                      <span className="font-bold text-[#FCD34D] text-right">
+                        {stats.isChargedWeapon
+                          ? `${stats.scaledHitDamage} Dmg (${stats.unchargedHitDamage}–${stats.scaledHitDamage} · ${stats.directDps} DPS)`
+                          : `${stats.scaledHitDamage} Dmg (${stats.directDps} DPS)`}
                       </span>
                     </div>
 
                     {stats.longshotHitDamage > stats.scaledHitDamage && (
                       <div className="flex items-center justify-between p-2 stone-input">
                         <span className="text-[#A19FAF]">Eagle Keenness (180u+ Longshot)</span>
-                        <span className="font-bold text-[#34D399]">{stats.longshotHitDamage} Dmg / Hit (+25%)</span>
+                        <span className="font-bold text-[#34D399]">{stats.longshotHitDamage} Dmg / Hit (+{stats.longshotBonusPct}%)</span>
                       </div>
                     )}
 
@@ -1248,8 +1318,14 @@ export const CharacterInventoryModal: React.FC<CharacterInventoryModalProps> = (
                     </div>
 
                     <div className="flex items-center justify-between p-2 stone-input">
-                      <span className="text-[#A19FAF]">Attack Cooldown & Frequency</span>
-                      <span className="font-bold text-[#34D399]">{stats.attackCooldownMs} ms ({stats.attacksPerSecond} atk/s)</span>
+                      <span className="text-[#A19FAF]">
+                        {stats.isChargedWeapon ? 'Draw + Recovery Cadence' : 'Attack Cooldown & Frequency'}
+                      </span>
+                      <span className="font-bold text-[#34D399]">
+                        {stats.isChargedWeapon
+                          ? `${stats.effectiveAttackCycleMs} ms (${stats.attacksPerSecond} atk/s)`
+                          : `${stats.attackCooldownMs} ms (${stats.attacksPerSecond} atk/s)`}
+                      </span>
                     </div>
 
                     <div className="flex items-center justify-between p-2 stone-input">
@@ -1296,12 +1372,17 @@ export const CharacterInventoryModal: React.FC<CharacterInventoryModalProps> = (
                       </span>
                     </div>
 
-                    {stats.selfShieldPerSec > 0 && (
+                    {shieldGainLocked ? (
+                      <div className="flex items-center justify-between p-2 stone-input border border-[#EF4444]/50">
+                        <span className="text-[#FCA5A5]">Shield Gain Status (Crimson War Axe)</span>
+                        <span className="font-bold text-[#EF4444]">PERMANENTLY LOCKED (0 Shield/s)</span>
+                      </div>
+                    ) : stats.selfShieldPerSec > 0 ? (
                       <div className="flex items-center justify-between p-2 stone-input">
                         <span className="text-[#A19FAF]">Bulwark &amp; Iron Will Shielding</span>
                         <span className="font-bold text-[#93C5FD]">+{stats.selfShieldPerSec} Shield/s</span>
                       </div>
-                    )}
+                    ) : null}
 
                     <div className="flex items-center justify-between p-2 stone-input">
                       <span className="text-[#A19FAF]">Physical Damage Mitigation</span>
@@ -1342,9 +1423,14 @@ export const CharacterInventoryModal: React.FC<CharacterInventoryModalProps> = (
                     </div>
 
                     <div className="p-3 stone-input space-y-1">
-                      <div className="text-[#A19FAF] text-[10px] uppercase">{stats.activeTacticalLabel}</div>
-                      <div className="text-sm font-bold text-[#FCD34D]">{stats.tacticalCooldownSec} seconds</div>
-                      <div className="text-[10px] text-[#A19FAF]">Base: {(stats.tacticalBaseCooldownMs / 1000).toFixed(1)}s</div>
+                      <div className="text-[#A19FAF] text-[10px] uppercase">Tactical [Q] · {stats.activeTacticalLabel}</div>
+                      <div className="text-sm font-bold text-[#FCD34D] tabular-nums">{stats.tacticalCooldownSec} seconds</div>
+                      <div className="text-[10px] text-[#A19FAF] tabular-nums">
+                        Base: {(stats.tacticalBaseCooldownMs / 1000).toFixed(1)}s
+                        {activeTactical.id === 'crimson_frenzy'
+                          ? ` · +${Math.round(ARMAMENT_TUNING.weapons.crimson.frenzyDamageBonusPct * 100)}% DMG / ${Math.round(ARMAMENT_TUNING.weapons.crimson.frenzyLifestealPct * 100)}% LS / +${Math.round(ARMAMENT_TUNING.weapons.crimson.frenzyAttackSpeedBonusPct * 100)}% SPD`
+                          : ''}
+                      </div>
                     </div>
 
                     <div className="p-3 stone-input space-y-1">

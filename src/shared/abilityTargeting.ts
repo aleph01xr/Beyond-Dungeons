@@ -1,4 +1,5 @@
 import type { ArcanistScrollId } from './arcanist.ts';
+import { ARMAMENT_TUNING, resolveActiveTacticalDef, type WeaponTacticalId } from './armaments.ts';
 import { hasLineOfSight, moveWithCollision } from './playerMovement.ts';
 import type { DungeonMap, HeroClassId, PropState } from './types.ts';
 
@@ -236,6 +237,60 @@ const ARCANIST_SCROLL_TARGET_SPECS: Record<ArcanistScrollId, AbilityTargetSpec> 
   },
 };
 
+const WEAPON_TACTICAL_TARGET_SPECS: Record<WeaponTacticalId, AbilityTargetSpec> = {
+  bastion_counter: {
+    action: 'tactical',
+    label: 'Bastion Counter',
+    kind: 'cone',
+    range: ARMAMENT_TUNING.weapons.sunforged.bastionCleaveRadiusPx,
+    aoeRadius: ARMAMENT_TUNING.weapons.sunforged.bastionCleaveRadiusPx,
+    coneHalfAngleRad: ARMAMENT_TUNING.weapons.sunforged.bastionCleaveHalfAngleRad,
+    defaultDist: ARMAMENT_TUNING.weapons.sunforged.bastionCleaveRadiusPx,
+    accentColor: '#FBBF24',
+    secondaryColor: '#FEF08A',
+  },
+  crimson_frenzy: {
+    action: 'tactical',
+    label: 'Crimson Frenzy',
+    kind: 'self_aoe',
+    range: 0,
+    aoeRadius: 56,
+    defaultDist: 0,
+    accentColor: '#EF4444',
+    secondaryColor: '#FCA5A5',
+  },
+  cyclone_break: {
+    action: 'tactical',
+    label: 'Cyclone Break',
+    kind: 'ground_aoe',
+    range: ARMAMENT_TUNING.weapons.galewind.cycloneRangePx,
+    aoeRadius: ARMAMENT_TUNING.weapons.galewind.cycloneRadiusPx,
+    defaultDist: 145,
+    accentColor: '#38BDF8',
+    secondaryColor: '#6EE7B7',
+  },
+  black_sun: {
+    action: 'tactical',
+    label: 'Black Sun',
+    kind: 'ground_aoe',
+    range: ARMAMENT_TUNING.weapons.eclipse.blackSunRangePx,
+    aoeRadius: ARMAMENT_TUNING.weapons.eclipse.blackSunRadiusPx,
+    defaultDist: 155,
+    accentColor: '#A855F7',
+    secondaryColor: '#FBBF24',
+  },
+  seraphic_judgment: {
+    action: 'tactical',
+    label: 'Seraphic Judgment',
+    kind: 'ground_aoe',
+    range: ARMAMENT_TUNING.weapons.seraphim.tacticalRangePx,
+    aoeRadius: ARMAMENT_TUNING.weapons.seraphim.tacticalRadiusPx,
+    defaultDist: 120,
+    accentColor: '#FDE047',
+    secondaryColor: '#F59E0B',
+  },
+};
+
 export function getAbilityTargetSpec(
   heroClass: HeroClassId,
   action: AimableAction,
@@ -243,25 +298,15 @@ export function getAbilityTargetSpec(
   equippedWeaponId?: string | null
 ): AbilityTargetSpec {
   if (action === 'dash') return DASH_TARGET_SPEC;
-  if (heroClass === 'arcanist' && action === 'tactical' && equippedScrollId) {
-    const scrollSpec = ARCANIST_SCROLL_TARGET_SPECS[equippedScrollId];
-    if (scrollSpec) return scrollSpec;
-  }
-  if (
-    heroClass === 'cleric' &&
-    action === 'tactical' &&
-    equippedWeaponId === 'cleric_seraphim_crozier'
-  ) {
-    return {
-      action: 'tactical',
-      label: 'Seraphic Judgment',
-      kind: 'ground_aoe',
-      range: 210,
-      aoeRadius: 110,
-      defaultDist: 120,
-      accentColor: '#FDE047',
-      secondaryColor: '#F59E0B',
-    };
+  if (action === 'tactical') {
+    const active = resolveActiveTacticalDef(heroClass, equippedWeaponId, equippedScrollId);
+    if (active.source === 'scroll' && active.scrollId) {
+      const scrollSpec = ARCANIST_SCROLL_TARGET_SPECS[active.scrollId];
+      if (scrollSpec) return scrollSpec;
+    }
+    if (active.source === 'weapon' && active.weaponTacticalId) {
+      return WEAPON_TACTICAL_TARGET_SPECS[active.weaponTacticalId];
+    }
   }
   return CLASS_ABILITY_SPECS[heroClass][action];
 }

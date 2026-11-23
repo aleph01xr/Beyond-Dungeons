@@ -17,6 +17,8 @@ import type {
 } from '../shared/types.ts';
 import { HERO_CLASSES, MAX_LEVEL } from '../shared/types.ts';
 import { getArcanistScrollDef } from '../shared/arcanist.ts';
+import { resolveActiveTacticalDef } from '../shared/armaments.ts';
+import { TacticalSkillIcon } from './TacticalSkillIcon.tsx';
 
 export type JoystickSizeOption = 'small' | 'medium' | 'large' | 'huge';
 export type JoystickModeOption = 'fixed' | 'floating';
@@ -166,13 +168,12 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
   const heroDef = HERO_CLASSES[player.heroClass] || HERO_CLASSES.vanguard;
   const equippedScroll =
     player.heroClass === 'arcanist' ? getArcanistScrollDef(player.equippedScrollId) : null;
-  const isSeraphimTactical =
-    player.heroClass === 'cleric' && player.equippedWeapon === 'cleric_seraphim_crozier';
-  const tacticalLabel = equippedScroll
-    ? equippedScroll.tacticalTitle
-    : isSeraphimTactical
-    ? 'Seraphic Judgment'
-    : heroDef.tacticalName;
+  const activeTactical = resolveActiveTacticalDef(
+    player.heroClass,
+    player.equippedWeapon,
+    player.equippedScrollId
+  );
+  const tacticalLabel = activeTactical.shortTitle;
   const isChronoSuspended = (player.chronoSuspendedMs || 0) > 0;
   const isChanneling = Boolean(player.disintegrationState?.active);
   const tacSec = Math.ceil(player.skillCooldownMs / 1000);
@@ -924,6 +925,10 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
             style={{
               width: `${btnSpec.skill}px`,
               height: `${btnSpec.skill}px`,
+              borderColor:
+                skillWheelUi?.action === 'tactical' || isSilenced || tacSec > 0
+                  ? undefined
+                  : activeTactical.accentColor,
             }}
             className={`absolute top-0 left-0 rounded-full border-2 flex flex-col items-center justify-center transition-transform shadow-lg cursor-pointer ${
               skillWheelUi?.action === 'tactical'
@@ -936,9 +941,13 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
             }`}
             aria-label={tacticalLabel}
           >
-            <span className="text-xs font-mono font-bold leading-none">
-              {isSilenced ? 'SIL' : isChanneling ? 'CHAN' : tacSec > 0 ? `${tacSec}s` : 'Q'}
-            </span>
+            {isSilenced || isChanneling || tacSec > 0 ? (
+              <span className="text-xs font-mono font-bold leading-none tabular-nums">
+                {isSilenced ? 'SIL' : isChanneling ? 'CHAN' : `${tacSec}s`}
+              </span>
+            ) : (
+              <TacticalSkillIcon tacticalId={activeTactical.id} color={activeTactical.accentColor} size={15} />
+            )}
             <span className="text-[7.5px] font-display truncate max-w-[42px] mt-0.5">
               {isSilenced
                 ? 'Sealed'

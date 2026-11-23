@@ -270,17 +270,19 @@ export function drawFallenAndGhostPlayer(
       ctx.fillRect(hx - 5, hy + 3, 7, 2);
     }
     if (droppedWeaponId === 'vanguard_crimson_halberd') {
-      // Dropped Crimson Halberd beside body
+      // Dropped Crimson War Axe beside body
       ctx.strokeStyle = '#991B1B';
-      ctx.lineWidth = 1.6;
+      ctx.lineWidth = 1.8;
       ctx.beginPath();
       ctx.moveTo(hx - 6, hy + 8);
-      ctx.lineTo(hx + 15, hy + 7);
+      ctx.lineTo(hx + 13, hy + 7);
       ctx.stroke();
-      ctx.fillStyle = '#E2E8F0';
-      ctx.fillRect(hx + 11, hy + 5, 4, 4);
+      ctx.fillStyle = '#334155';
+      ctx.fillRect(hx + 9, hy + 4, 5, 6);
       ctx.fillStyle = '#EF4444';
-      ctx.fillRect(hx + 11, hy + 7, 2, 2);
+      ctx.fillRect(hx + 10, hy + 5, 2, 4);
+      ctx.fillStyle = '#F8FAFC';
+      ctx.fillRect(hx + 13, hy + 4, 1.5, 6);
     } else if (droppedWeaponId === 'vanguard_stormbreaker_flail') {
       // Dropped Stormbreaker Flail beside body
       ctx.strokeStyle = '#475569';
