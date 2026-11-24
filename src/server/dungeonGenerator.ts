@@ -1061,7 +1061,7 @@ export function generateTavernFloor(): {
       name: 'Barkeep Lena',
       x: 16.5 * TILE_SIZE,
       y: 6.2 * TILE_SIZE,
-      dialogue: 'Welcome to the Rusty Tankard! Care for a glass of honeyed mead?',
+      dialogue: 'Honeyed mead or spiced cider? Take a seat.',
       spriteKind: 'barkeep',
     },
     {
@@ -1069,7 +1069,7 @@ export function generateTavernFloor(): {
       name: 'Innkeeper Bram',
       x: 8.5 * TILE_SIZE,
       y: 13.5 * TILE_SIZE,
-      dialogue: 'Greetings, adventurer! Rest by our warm hearth fireplace.',
+      dialogue: 'Warm your hands by the hearth, hero.',
       spriteKind: 'innkeeper',
     },
     {
@@ -1077,7 +1077,7 @@ export function generateTavernFloor(): {
       name: 'Veteran Jorah',
       x: 31 * TILE_SIZE,
       y: 18.5 * TILE_SIZE,
-      dialogue: 'Test your steel against the training dummies in my arena!',
+      dialogue: 'Test your steel on my dummies.',
       spriteKind: 'veteran',
     },
     {
@@ -1085,10 +1085,10 @@ export function generateTavernFloor(): {
       name: 'Aleph',
       x: 18 * TILE_SIZE,
       y: 28 * TILE_SIZE,
-      dialogue: 'The paths you walk are many, but your soul remains constant. Do you seek a different focus?',
+      dialogue: 'Your path shifts. Seek a new focus?',
       spriteKind: 'mysterious_cloak',
       options: [
-        { id: 'reset_stats', label: 'I wish to reset my attributes.' },
+        { id: 'reset_stats', label: 'Reset Stats' },
         { id: 'lore', label: 'Who are you?' }
       ]
     },

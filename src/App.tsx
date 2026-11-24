@@ -23,6 +23,7 @@ import type {
   GameSnapshot,
   HeroClassId,
   PlayerInputState,
+  PlayerNpcDialogueState,
   RoomSummary,
   ServerMessage,
   UserProfile,
@@ -86,6 +87,7 @@ export function App() {
   const activeRoomIdRef = useRef<string | null>(loadSavedActiveRoomId());
   const activePlayerIdRef = useRef<string>('');
   const dungeonMapRef = useRef<DungeonMap | null>(null);
+  const privateNpcDialogueRef = useRef<PlayerNpcDialogueState | null>(null);
   const lastHudKeyRef = useRef<string>('');
   const lastHudSyncAtRef = useRef<number>(0);
   const lastLobbyKeyRef = useRef<string>('');
@@ -200,13 +202,25 @@ export function App() {
           return;
         }
 
-        const applyIncomingSnapshot = (nextSnap: GameSnapshot) => {
+        const applyIncomingSnapshot = (nextSnapRaw: GameSnapshot) => {
+          const privateDlg = privateNpcDialogueRef.current;
+          const pid = activePlayerIdRef.current;
+          const nextSnap =
+            privateDlg && pid
+              ? {
+                  ...nextSnapRaw,
+                  players: nextSnapRaw.players.map((p) =>
+                    p.id === pid ? { ...p, npcDialogue: privateDlg } : p
+                  ),
+                }
+              : nextSnapRaw;
+
           // Canvas always consumes latest 40Hz snapshot via ref with zero React re-render overhead
           latestSnapshotRef.current = nextSnap;
           const now = performance.now();
           const nextHudKey = buildSnapshotHudKey(
             nextSnap,
-            activePlayerIdRef.current,
+            pid,
             dungeonMapRef.current
           );
           if (
@@ -231,6 +245,7 @@ export function App() {
           saveActiveRoomId(msg.roomId);
           activePlayerIdRef.current = msg.playerId;
           dungeonMapRef.current = msg.map;
+          privateNpcDialogueRef.current = null;
           snapshotSeqRef.current = 0;
           lastResyncRequestAtRef.current = 0;
           lastHudKeyRef.current = buildSnapshotHudKey(msg.snapshot, msg.playerId, msg.map);
@@ -281,6 +296,15 @@ export function App() {
               }
             }
           }
+        } else if (msg.type === 'npc:dialogue') {
+          privateNpcDialogueRef.current = msg.dialogue ?? null;
+          const curSnap = latestSnapshotRef.current;
+          if (curSnap) {
+            applyIncomingSnapshot(curSnap);
+            if (latestSnapshotRef.current) {
+              setSnapshot({ ...latestSnapshotRef.current });
+            }
+          }
         } else if (msg.type === 'chat:message') {
           setChatMessages((prev) => {
             if (prev.some((m) => m.id === msg.message.id)) return prev;
@@ -291,6 +315,7 @@ export function App() {
           saveActiveRoomId(null);
           activePlayerIdRef.current = '';
           dungeonMapRef.current = null;
+          privateNpcDialogueRef.current = null;
           snapshotSeqRef.current = 0;
           lastResyncRequestAtRef.current = 0;
           lastHudKeyRef.current = '';

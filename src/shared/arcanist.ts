@@ -89,8 +89,8 @@ export const ARCANIST_SPELLS: Record<ArcanistSpellId, ArcanistSpellDef> = {
     projectileSpeed: 380,
     damageCategory: 'fire',
     accentColor: '#F97316',
-    summary: 'Replaces Astral Nova [Q]. 0.35s cast; hurls a large fireball that explodes on hit (105u AoE) and leaves a 3.5s burning ground zone.',
-    chronoInteraction: 'Fireball projectile and lingering burn zone freeze inside ANY Chrono Well (including caster zones) until time resumes.',
+    summary: '0.35s cast; explodes (105u AoE) and leaves a 3.5s burn zone.',
+    chronoInteraction: 'Projectile & burn zone freeze inside any Chrono Well.',
   },
   disintegration: {
     id: 'disintegration',
@@ -110,8 +110,8 @@ export const ARCANIST_SPELLS: Record<ArcanistSpellId, ArcanistSpellDef> = {
     isChannel: true,
     damageCategory: 'arcane',
     accentColor: '#A855F7',
-    summary: 'Replaces Astral Nova [Q]. Hold [Q / RMB] to channel a 450u violet beam (5 ticks/s, stationary, 180°/s turn cap; 12s CD starts on end).',
-    chronoInteraction: 'Interrupted if caster is suspended by another Chrono Well; own Chrono Well lets caster channel freely.',
+    summary: 'Hold [Q / RMB] to channel a 450u beam (5 ticks/s, 180°/s turn cap).',
+    chronoInteraction: 'Blocked by enemy Chrono Wells; own Chrono Well allows free cast.',
   },
   frost_lance: {
     id: 'frost_lance',
@@ -128,8 +128,8 @@ export const ARCANIST_SPELLS: Record<ArcanistSpellId, ArcanistSpellDef> = {
     projectileSpeed: 480,
     damageCategory: 'frost',
     accentColor: '#38BDF8',
-    summary: 'Replaces Astral Nova [Q]. 0.2s cast; fires a straight crystalline ice lance piercing up to 3 enemies (no homing/freeze).',
-    chronoInteraction: 'Ice lance projectile suspends mid-air inside ANY Chrono Well until the field ends.',
+    summary: '0.2s cast; fires a straight lance piercing up to 3 foes.',
+    chronoInteraction: 'Projectile suspends mid-air inside any Chrono Well.',
   },
   chain_lightning: {
     id: 'chain_lightning',
@@ -145,8 +145,8 @@ export const ARCANIST_SPELLS: Record<ArcanistSpellId, ArcanistSpellDef> = {
     coneHalfAngleRad: 0.56, // ~±32 deg (64 deg total cone)
     damageCategory: 'lightning',
     accentColor: '#FACC15',
-    summary: 'Replaces Astral Nova [Q]. Unleashes a 340u cone-shaped lightning blast (64° arc) shocking all foes inside.',
-    chronoInteraction: 'Instant lightning cone hits suspended foes inside Chrono Well; blocked while caster is Chrono-suspended.',
+    summary: 'Instant 340u lightning cone (64° arc) shocking all foes inside.',
+    chronoInteraction: 'Hits suspended foes inside Chrono Well unless caster is frozen.',
   },
   arcane_meteor: {
     id: 'arcane_meteor',
@@ -163,8 +163,8 @@ export const ARCANIST_SPELLS: Record<ArcanistSpellId, ArcanistSpellDef> = {
     maxRange: 280,
     damageCategory: 'arcane',
     accentColor: '#E879F9',
-    summary: 'Replaces Astral Nova [Q]. 0.5s cast + 1.0s warning delay; drops an arcane meteor for heavy 125u AoE damage (no burn).',
-    chronoInteraction: 'Marked meteor impact timer freezes while covered by ANY Chrono Well and detonates once time resumes.',
+    summary: '0.5s cast + 1.0s delay; strikes a 125u zone for heavy AoE burst.',
+    chronoInteraction: 'Impact timer pauses inside any Chrono Well until time resumes.',
   },
   arcane_orb: {
     id: 'arcane_orb',
@@ -182,8 +182,8 @@ export const ARCANIST_SPELLS: Record<ArcanistSpellId, ArcanistSpellDef> = {
     projectileSpeed: 115,
     damageCategory: 'arcane',
     accentColor: '#818CF8',
-    summary: 'Replaces Astral Nova [Q]. 4s slow sphere damaging enemies every 0.5s (max 2 hits/enemy) without vanishing on hit.',
-    chronoInteraction: 'Orb movement and lifetime freeze completely inside ANY Chrono Well without losing hit cooldown timing.',
+    summary: '4s drifting orb hitting foes every 0.5s (max 2 hits/enemy).',
+    chronoInteraction: 'Freezes motion & timer completely inside any Chrono Well.',
   },
   arcane_barrage: {
     id: 'arcane_barrage',
@@ -202,8 +202,8 @@ export const ARCANIST_SPELLS: Record<ArcanistSpellId, ArcanistSpellDef> = {
     maxRange: 450,
     damageCategory: 'arcane',
     accentColor: '#60A5FA',
-    summary: 'Replaces Astral Nova [Q]. Launches a 4-wave rapid arcane barrage (8 bolts) that streams forward and strikes targets 3-4+ times.',
-    chronoInteraction: 'Barrage projectiles suspend inside ANY Chrono Well (including the caster’s own) and burst forward together on resume.',
+    summary: '4 rapid waves of arcane bolts (8 bolts total) piercing forward.',
+    chronoInteraction: 'Bolts suspend in any Chrono Well and release together on resume.',
   },
 };
 

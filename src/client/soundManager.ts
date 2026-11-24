@@ -49,6 +49,13 @@ export interface SoundInstanceHandle {
   setPosition: (x: number, y: number) => void;
 }
 
+export interface SpatialRouteHandle {
+  destination: AudioNode;
+  distanceVolume: number;
+  pan: number;
+  release: () => void;
+}
+
 export interface SoundManagerMetrics {
   activeVoices: number;
   maxVoices: number;
@@ -62,6 +69,8 @@ export interface SoundManagerMetrics {
   isSfxMuted: boolean;
   isMusicMuted: boolean;
   listenerPosition: { x: number; y: number };
+  activeProceduralVoices?: number;
+  hasLimiter?: boolean;
 }
 
 interface PooledVoiceNode {
@@ -89,6 +98,7 @@ interface ActiveInstance {
 export class SoundManager {
   private ctx: AudioContext | null = null;
   private masterGain: GainNode | null = null;
+  private masterLimiter: DynamicsCompressorNode | null = null;
   private sfxGain: GainNode | null = null;
   private musicGain: GainNode | null = null;
 
@@ -121,6 +131,11 @@ export class SoundManager {
   private voiceNodePool: PooledVoiceNode[] = [];
   private activeInstances = new Map<number, ActiveInstance>();
   private instancesBySoundId = new Map<string, Set<number>>();
+
+  // Procedural voice overload budget
+  private activeProceduralVoices = 0;
+  private readonly softMaxProceduralVoices = 26;
+  private readonly hardMaxProceduralVoices = 38;
 
   // Listener change listeners for reactive UI/diagnostics
   private stateChangeListeners = new Set<() => void>();
@@ -213,10 +228,29 @@ export class SoundManager {
         this.ctx = new AudioCtx();
         const now = this.ctx.currentTime;
 
-        // Master Bus
+        // Master Bus + Transparent Anti-Clipping Limiter
         this.masterGain = this.ctx.createGain();
         this.masterGain.gain.setValueAtTime(this.masterMuted ? 0 : this.masterVolume, now);
-        this.masterGain.connect(this.ctx.destination);
+
+        if (typeof this.ctx.createDynamicsCompressor === 'function') {
+          try {
+            const limiter = this.ctx.createDynamicsCompressor();
+            limiter.threshold.setValueAtTime(-8, now);
+            limiter.knee.setValueAtTime(12, now);
+            limiter.ratio.setValueAtTime(8, now);
+            limiter.attack.setValueAtTime(0.003, now);
+            limiter.release.setValueAtTime(0.14, now);
+            this.masterGain.connect(limiter);
+            limiter.connect(this.ctx.destination);
+            this.masterLimiter = limiter;
+          } catch {
+            this.masterLimiter = null;
+            this.masterGain.connect(this.ctx.destination);
+          }
+        } else {
+          this.masterLimiter = null;
+          this.masterGain.connect(this.ctx.destination);
+        }
 
         // SFX Sub-bus
         this.sfxGain = this.ctx.createGain();
@@ -643,14 +677,128 @@ export class SoundManager {
   private releaseVoiceNode(voice: PooledVoiceNode): void {
     voice.inUse = false;
     try {
+      voice.gainNode.disconnect();
+    } catch {
+      // ignore
+    }
+    try {
       if (voice.pannerNode) {
         voice.pannerNode.disconnect();
-      } else {
-        voice.gainNode.disconnect();
+        voice.gainNode.connect(voice.pannerNode);
       }
     } catch {
       // ignore
     }
+  }
+
+  /**
+   * Acquires a pooled spatial destination node for procedural SFX.
+   * Returns null immediately if the sound is silenced/culled by distance (saving AudioNode allocation).
+   */
+  public acquireSpatialDestination(
+    worldPos?: { x: number; y: number } | null,
+    config: SpatialConfig = {},
+    category: SoundCategory = 'sfx'
+  ): SpatialRouteHandle | null {
+    const ctx = this.ensureContext();
+    if (!ctx) return null;
+    if (this.masterMuted) return null;
+    if (category === 'sfx' && this.sfxMuted) return null;
+    if (category === 'music' && this.musicMuted) return null;
+
+    const busDest = category === 'music' ? this.musicGain : this.sfxGain;
+    if (!busDest) return null;
+
+    if (!worldPos) {
+      return {
+        destination: busDest,
+        distanceVolume: 1,
+        pan: 0,
+        release: () => {},
+      };
+    }
+
+    const spatial = this.calculateSpatialParameters(worldPos, {
+      minDistance: config.minDistance ?? 130,
+      maxDistance: config.maxDistance ?? 1050,
+      panSpread: config.panSpread ?? 540,
+      attenuation: config.attenuation ?? 'logarithmic',
+    });
+
+    if (spatial.inAudible || spatial.volume <= 0.004) {
+      return null;
+    }
+
+    const voice = this.acquireVoiceNode(category);
+    if (!voice) {
+      return {
+        destination: busDest,
+        distanceVolume: spatial.volume,
+        pan: spatial.pan,
+        release: () => {},
+      };
+    }
+
+    const now = ctx.currentTime;
+    try {
+      voice.gainNode.gain.setValueAtTime(Math.max(0.001, Math.min(1, spatial.volume)), now);
+      if (voice.pannerNode) {
+        voice.pannerNode.pan.setValueAtTime(Math.max(-1, Math.min(1, spatial.pan)), now);
+      }
+    } catch {
+      // ignore on minimal mock nodes
+    }
+
+    let released = false;
+    return {
+      destination: voice.gainNode,
+      distanceVolume: spatial.volume,
+      pan: spatial.pan,
+      release: () => {
+        if (released) return;
+        released = true;
+        this.releaseVoiceNode(voice);
+      },
+    };
+  }
+
+  /**
+   * Checks whether a procedural voice should be admitted given active concurrency & priority.
+   */
+  public canPlayProceduralVoice(priority = 50): boolean {
+    if (this.activeProceduralVoices >= this.hardMaxProceduralVoices) {
+      return false;
+    }
+    if (this.activeProceduralVoices >= this.softMaxProceduralVoices && priority < 65) {
+      return false;
+    }
+    return true;
+  }
+
+  /**
+   * Tracks an active procedural SFX burst and automatically decrements on release or timeout.
+   */
+  public trackProceduralVoice(durationSec = 0.25): () => void {
+    this.activeProceduralVoices++;
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      this.activeProceduralVoices = Math.max(0, this.activeProceduralVoices - 1);
+    };
+    const timeoutMs = Math.max(30, Math.min(4000, Math.ceil(durationSec * 1000) + 40));
+    const timer = setTimeout(finish, timeoutMs);
+    if (typeof (timer as unknown as { unref?: () => void }).unref === 'function') {
+      (timer as unknown as { unref: () => void }).unref();
+    }
+    return () => {
+      clearTimeout(timer);
+      finish();
+    };
+  }
+
+  public hasLimiter(): boolean {
+    return this.masterLimiter !== null;
   }
 
   // ==========================================
@@ -948,6 +1096,7 @@ export class SoundManager {
     for (const id of Array.from(this.activeInstances.keys())) {
       this.stopInstance(id, fadeDurationMs);
     }
+    this.activeProceduralVoices = 0;
   }
 
   // ==========================================
@@ -968,6 +1117,8 @@ export class SoundManager {
       isSfxMuted: this.sfxMuted,
       isMusicMuted: this.musicMuted,
       listenerPosition: { x: this.listenerX, y: this.listenerY },
+      activeProceduralVoices: this.activeProceduralVoices,
+      hasLimiter: this.masterLimiter !== null,
     };
   }
 

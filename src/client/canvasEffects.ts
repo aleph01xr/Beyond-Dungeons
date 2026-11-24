@@ -25,7 +25,15 @@ export type ParticleShape =
   | 'bolt'
   | 'feather'
   | 'crystal'
-  | 'dust';
+  | 'dust'
+  | 'petal'
+  | 'lightning_fork'
+  | 'smoke_puff'
+  | 'arc_slash'
+  | 'glyph_ring'
+  | 'splatter';
+
+export type ParticleSubEmitKind = 'spark' | 'droplet' | 'shard' | 'ember' | 'smoke';
 
 export interface CombatParticle {
   x: number;
@@ -56,6 +64,8 @@ export interface CombatParticle {
   drag?: number;
   curveDrift?: number;
   wander?: number;
+  turbulence?: number;
+  turbulenceFreq?: number;
 
   // Wave, Orbit & Inward Attraction
   waveAmplitude?: number;
@@ -83,6 +93,7 @@ export interface CombatParticle {
   ringLineWidth?: number;
 
   // Visual Styling & Lifetimes
+  colorMid?: string;
   colorEnd?: string;
   alphaStart?: number;
   alphaEnd?: number;
@@ -97,6 +108,17 @@ export interface CombatParticle {
   flutterAmplitude?: number;
   flutterFrequency?: number;
   bounceY?: number;
+  squashOnBounce?: boolean;
+  squashUntil?: number;
+
+  // Motion Ribbon Trails & Sub-Emitters
+  trailLength?: number;
+  trailWidth?: number;
+  trailColor?: string;
+  trailPts?: number[];
+  subEmitOnBounce?: ParticleSubEmitKind;
+  subEmitOnDeath?: ParticleSubEmitKind;
+  subEmitCount?: number;
 }
 
 export interface ScreenShakeState {
@@ -111,9 +133,9 @@ export interface ParticleBudgetConfig {
 }
 
 export const DEFAULT_PARTICLE_BUDGET: ParticleBudgetConfig = {
-  maxParticles: 650,
-  reserveForCritical: 160,
-  reserveForHigh: 100,
+  maxParticles: 950,
+  reserveForCritical: 240,
+  reserveForHigh: 150,
 };
 
 // Fast hex/color parsing & interpolation helper without per-frame allocations
@@ -709,6 +731,135 @@ export function drawDustShape(ctx: CanvasRenderingContext2D, curSize: number): v
   ctx.fill();
 }
 
+export function drawPetalShape(
+  ctx: CanvasRenderingContext2D,
+  s: number,
+  secondaryColor?: string
+): void {
+  const l = Math.max(2, s * 1.25);
+  const w = Math.max(1.2, s * 0.75);
+  ctx.beginPath();
+  ctx.moveTo(0, -l);
+  ctx.quadraticCurveTo(w * 1.15, -l * 0.15, 0, l * 0.75);
+  ctx.quadraticCurveTo(-w * 1.15, -l * 0.15, 0, -l);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = secondaryColor || 'rgba(255,255,255,0.65)';
+  ctx.beginPath();
+  ctx.moveTo(0, -l * 0.8);
+  ctx.quadraticCurveTo(w * 0.45, -l * 0.2, 0, l * 0.2);
+  ctx.quadraticCurveTo(-w * 0.45, -l * 0.2, 0, -l * 0.8);
+  ctx.closePath();
+  ctx.fill();
+}
+
+export function drawLightningForkShape(
+  ctx: CanvasRenderingContext2D,
+  s: number,
+  drawColor: string,
+  secondaryColor?: string
+): void {
+  const h = Math.max(3, s * 1.7);
+  const w = Math.max(1.8, s * 0.95);
+  ctx.strokeStyle = drawColor;
+  ctx.lineWidth = Math.max(1.5, s * 0.48);
+  ctx.beginPath();
+  ctx.moveTo(-w * 0.35, -h);
+  ctx.lineTo(w * 0.55, -h * 0.25);
+  ctx.lineTo(-w * 0.45, h * 0.1);
+  ctx.lineTo(w * 0.4, h);
+  // Fork branch
+  ctx.moveTo(w * 0.55, -h * 0.25);
+  ctx.lineTo(w * 1.15, h * 0.18);
+  ctx.stroke();
+
+  ctx.strokeStyle = secondaryColor || '#FFFFFF';
+  ctx.lineWidth = 0.9;
+  ctx.beginPath();
+  ctx.moveTo(-w * 0.35, -h);
+  ctx.lineTo(w * 0.55, -h * 0.25);
+  ctx.lineTo(-w * 0.45, h * 0.1);
+  ctx.lineTo(w * 0.4, h);
+  ctx.stroke();
+}
+
+export function drawSmokePuffShape(
+  ctx: CanvasRenderingContext2D,
+  curSize: number,
+  secondaryColor?: string
+): void {
+  const r = Math.max(1.4, curSize * 0.78);
+  ctx.beginPath();
+  ctx.arc(0, 0, r, 0, Math.PI * 2);
+  ctx.arc(-r * 0.55, r * 0.18, r * 0.72, 0, Math.PI * 2);
+  ctx.arc(r * 0.58, r * 0.12, r * 0.68, 0, Math.PI * 2);
+  ctx.arc(0, -r * 0.45, r * 0.74, 0, Math.PI * 2);
+  ctx.fill();
+  if (secondaryColor) {
+    ctx.fillStyle = secondaryColor;
+    ctx.beginPath();
+    ctx.arc(-r * 0.18, -r * 0.48, r * 0.42, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+export function drawArcSlashShape(
+  ctx: CanvasRenderingContext2D,
+  s: number,
+  secondaryColor?: string
+): void {
+  const r = Math.max(3, s * 1.6);
+  ctx.beginPath();
+  ctx.moveTo(-r * 0.85, -r * 0.55);
+  ctx.quadraticCurveTo(r * 0.65, -r * 0.15, r * 0.9, r * 0.55);
+  ctx.quadraticCurveTo(r * 0.18, -r * 0.05, -r * 0.85, -r * 0.55);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = secondaryColor || '#FFFFFF';
+  ctx.lineWidth = 0.9;
+  ctx.beginPath();
+  ctx.moveTo(-r * 0.65, -r * 0.42);
+  ctx.quadraticCurveTo(r * 0.45, -r * 0.1, r * 0.75, r * 0.42);
+  ctx.stroke();
+}
+
+export function drawGlyphRingShape(
+  ctx: CanvasRenderingContext2D,
+  s: number,
+  drawColor: string,
+  secondaryColor?: string
+): void {
+  const r = Math.max(2.5, s * 1.3);
+  ctx.strokeStyle = drawColor;
+  ctx.lineWidth = 1.3;
+  ctx.beginPath();
+  ctx.arc(0, 0, r, 0.2, Math.PI * 0.88);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(0, 0, r, Math.PI + 0.2, Math.PI * 1.88);
+  ctx.stroke();
+  ctx.fillStyle = secondaryColor || '#FFFFFF';
+  ctx.fillRect(-1, -r - 1, 2, 2);
+  ctx.fillRect(-1, r - 1, 2, 2);
+}
+
+export function drawSplatterShape(
+  ctx: CanvasRenderingContext2D,
+  s: number,
+  secondaryColor?: string
+): void {
+  const r = Math.max(1.2, s * 0.65);
+  ctx.beginPath();
+  ctx.arc(0, 0, r, 0, Math.PI * 2);
+  ctx.arc(r * 1.1, -r * 0.4, r * 0.48, 0, Math.PI * 2);
+  ctx.arc(-r * 0.95, r * 0.65, r * 0.42, 0, Math.PI * 2);
+  ctx.fill();
+  if (secondaryColor) {
+    ctx.fillStyle = secondaryColor;
+    ctx.fillRect(-0.5, -0.5, 1.2, 1.2);
+  }
+}
+
 /**
  * Procedurally draws pixel-art shapes on Canvas with sub-pixel precision,
  * custom strokes, secondary accents, and life-cycle scaling.
@@ -798,6 +949,24 @@ export function drawParticleShape(
     case 'dust':
       drawDustShape(ctx, curSize);
       break;
+    case 'petal':
+      drawPetalShape(ctx, s, p.secondaryColor);
+      break;
+    case 'lightning_fork':
+      drawLightningForkShape(ctx, s, drawColor, p.secondaryColor);
+      break;
+    case 'smoke_puff':
+      drawSmokePuffShape(ctx, curSize, p.secondaryColor);
+      break;
+    case 'arc_slash':
+      drawArcSlashShape(ctx, s, p.secondaryColor);
+      break;
+    case 'glyph_ring':
+      drawGlyphRingShape(ctx, s, drawColor, p.secondaryColor);
+      break;
+    case 'splatter':
+      drawSplatterShape(ctx, s, p.secondaryColor);
+      break;
     default:
       ctx.fillRect(-Math.floor(s / 2), -Math.floor(s / 2), s, s);
       break;
@@ -852,7 +1021,14 @@ export class ParticleManager {
   }
 
   private recycleParticle(p: CombatParticle): void {
-    if (this.pool.length < this.budget.maxParticles + 100) {
+    if (p.trailPts) {
+      p.trailPts.length = 0;
+    }
+    p.subEmitOnBounce = undefined;
+    p.subEmitOnDeath = undefined;
+    p.subEmitCount = undefined;
+    p.squashUntil = undefined;
+    if (this.pool.length < this.budget.maxParticles + 120) {
       this.pool.push(p);
     }
   }
@@ -949,6 +1125,8 @@ export class ParticleManager {
       p.drag = props.drag;
       p.curveDrift = props.curveDrift;
       p.wander = props.wander;
+      p.turbulence = props.turbulence;
+      p.turbulenceFreq = props.turbulenceFreq;
 
       p.waveAmplitude = props.waveAmplitude;
       p.waveFrequency = props.waveFrequency;
@@ -973,6 +1151,7 @@ export class ParticleManager {
       p.ringMaxRadius = props.ringMaxRadius;
       p.ringLineWidth = props.ringLineWidth;
 
+      p.colorMid = props.colorMid;
       p.colorEnd = props.colorEnd;
       p.alphaStart = props.alphaStart;
       p.alphaEnd = props.alphaEnd;
@@ -987,6 +1166,16 @@ export class ParticleManager {
       p.flutterAmplitude = props.flutterAmplitude;
       p.flutterFrequency = props.flutterFrequency;
       p.bounceY = props.bounceY;
+      p.squashOnBounce = props.squashOnBounce;
+      p.squashUntil = undefined;
+
+      p.trailLength = props.trailLength;
+      p.trailWidth = props.trailWidth;
+      p.trailColor = props.trailColor;
+      if (p.trailPts) p.trailPts.length = 0;
+      p.subEmitOnBounce = props.subEmitOnBounce;
+      p.subEmitOnDeath = props.subEmitOnDeath;
+      p.subEmitCount = props.subEmitCount;
     }
 
     this.particles.push(p);
@@ -2190,7 +2379,8 @@ export class ParticleManager {
 
   /**
    * Emits weapon- and damage-category-specific impact bursts so Physical, Bleed,
-   * Arcane, Fire, Frost, Lightning, Poison, Void, and Divine strikes each look distinct.
+   * Arcane, Fire, Frost, Lightning, Poison, Void, and Divine strikes each look distinct,
+   * scaling in intensity, ribbon trails, and secondary sub-bursts on combo finishers and crits.
    */
   public spawnCategorizedHitImpact(
     x: number,
@@ -2208,34 +2398,27 @@ export class ParticleManager {
     const { damageCategory, weaponId, comboStep = 0, angle = Math.random() * Math.PI * 2, isCrit = false } = opts;
     const isFinisher = comboStep === 2;
     const priority: ParticlePriority = isCrit || isFinisher ? 'critical' : 'high';
-    const baseCount = isCrit ? 8 : isFinisher ? 7 : 5;
+    const baseCount = isCrit ? 9 : isFinisher ? 8 : 5;
 
-    // Weapon-tailored accent bursts first
+    // Weapon-tailored & elemental impact choreography
     if (weaponId === 'vanguard_crimson_halberd' || damageCategory === 'bleed') {
-      for (let i = 0; i < baseCount; i++) {
-        const a = angle + (Math.random() - 0.5) * 1.4;
-        const sp = 75 + Math.random() * 115;
+      if (isFinisher || isCrit) {
         this.acquireParticle({
           x,
           y,
-          vx: Math.cos(a) * sp,
-          vy: Math.sin(a) * sp - 20,
-          color: i % 2 === 0 ? '#DC2626' : '#FCA5A5',
-          secondaryColor: '#FFFFFF',
-          colorEnd: '#7F1D1D',
-          size: isCrit ? 2.8 : 2.1,
+          vx: Math.cos(angle) * 28,
+          vy: Math.sin(angle) * 28,
+          color: '#EF4444',
+          secondaryColor: '#FECACA',
+          size: isCrit ? 6.2 : 5.0,
           bornAt: now,
-          maxAgeMs: 320 + Math.random() * 140,
-          gravity: 190,
-          bounceY: y + 14,
-          friction: 0.92,
-          rotation: a,
-          shape: i % 3 === 0 ? 'crescent' : 'droplet',
-          glow: isCrit,
+          maxAgeMs: 185,
+          rotation: angle,
+          shape: 'arc_slash',
+          blendMode: 'lighter',
+          glow: true,
           priority,
         });
-      }
-      if (isFinisher || isCrit) {
         this.acquireParticle({
           x,
           y,
@@ -2244,12 +2427,41 @@ export class ParticleManager {
           color: '#EF4444',
           size: 3,
           ringRadius: 3,
-          ringMaxRadius: isCrit ? 28 : 22,
+          ringMaxRadius: isCrit ? 30 : 24,
           ringLineWidth: 2,
           bornAt: now,
-          maxAgeMs: 200,
+          maxAgeMs: 210,
           shape: 'ring',
           glow: true,
+          priority,
+        });
+      }
+      for (let i = 0; i < baseCount; i++) {
+        const a = angle + (Math.random() - 0.5) * 1.45;
+        const sp = 75 + Math.random() * 125;
+        this.acquireParticle({
+          x,
+          y,
+          vx: Math.cos(a) * sp,
+          vy: Math.sin(a) * sp - 22,
+          color: i % 2 === 0 ? '#DC2626' : '#FCA5A5',
+          secondaryColor: '#FFFFFF',
+          colorMid: '#B91C1C',
+          colorEnd: '#450A0A',
+          size: isCrit ? 2.8 : 2.1,
+          bornAt: now,
+          maxAgeMs: 320 + Math.random() * 150,
+          gravity: 195,
+          bounceY: y + 14,
+          squashOnBounce: true,
+          subEmitOnBounce: isCrit || i === 0 ? 'droplet' : undefined,
+          subEmitCount: 2,
+          friction: 0.92,
+          rotation: a,
+          trailLength: isCrit || isFinisher ? 4 : 0,
+          trailWidth: 1.5,
+          shape: i % 3 === 0 ? 'splatter' : i % 3 === 1 ? 'crescent' : 'droplet',
+          glow: isCrit,
           priority,
         });
       }
@@ -2257,9 +2469,28 @@ export class ParticleManager {
     }
 
     if (weaponId === 'vanguard_stormbreaker_flail' || damageCategory === 'lightning') {
+      if (isCrit || isFinisher) {
+        this.acquireParticle({
+          x,
+          y,
+          vx: 0,
+          vy: 0,
+          color: '#38BDF8',
+          secondaryColor: '#FEF08A',
+          size: isCrit ? 5.2 : 4.2,
+          bornAt: now,
+          maxAgeMs: 175,
+          rotation: angle,
+          angularVelocity: 8,
+          shape: 'starburst',
+          blendMode: 'lighter',
+          glow: true,
+          priority,
+        });
+      }
       for (let i = 0; i < baseCount; i++) {
         const a = Math.random() * Math.PI * 2;
-        const sp = 95 + Math.random() * 130;
+        const sp = 95 + Math.random() * 145;
         this.acquireParticle({
           x,
           y,
@@ -2267,12 +2498,17 @@ export class ParticleManager {
           vy: Math.sin(a) * sp,
           color: i % 2 === 0 ? '#38BDF8' : '#FDE047',
           secondaryColor: '#FFFFFF',
-          size: isCrit ? 2.8 : 2.2,
+          colorMid: '#60A5FA',
+          colorEnd: '#1E3A8A',
+          size: isCrit ? 2.9 : 2.2,
           bornAt: now,
-          maxAgeMs: 200 + Math.random() * 100,
+          maxAgeMs: 200 + Math.random() * 110,
           drag: 0.12,
           rotation: a,
-          shape: i % 2 === 0 ? 'bolt' : 'spark',
+          trailLength: 4,
+          trailWidth: 1.4,
+          blendMode: 'lighter',
+          shape: i % 3 === 0 ? 'lightning_fork' : i % 3 === 1 ? 'bolt' : 'spark',
           glow: true,
           priority,
         });
@@ -2283,22 +2519,30 @@ export class ParticleManager {
     if (weaponId === 'arcanist_cinderflare_rod' || damageCategory === 'fire') {
       for (let i = 0; i < baseCount; i++) {
         const a = Math.random() * Math.PI * 2;
-        const sp = 50 + Math.random() * 90;
+        const sp = 50 + Math.random() * 95;
+        const isSmoke = i % 4 === 0;
         this.acquireParticle({
           x,
           y,
           vx: Math.cos(a) * sp,
-          vy: Math.sin(a) * sp - 25,
-          color: i % 2 === 0 ? '#F97316' : '#FDE047',
-          secondaryColor: '#FEF08A',
-          colorEnd: '#7F1D1D',
-          size: isCrit ? 2.8 : 2.1,
+          vy: Math.sin(a) * sp - 26,
+          color: isSmoke ? '#6B7280' : i % 2 === 0 ? '#FEF08A' : '#F97316',
+          secondaryColor: isSmoke ? '#9CA3AF' : '#FFFFFF',
+          colorMid: isSmoke ? '#374151' : '#EF4444',
+          colorEnd: isSmoke ? '#111827' : '#7F1D1D',
+          size: isSmoke ? 3.4 : isCrit ? 2.8 : 2.1,
           bornAt: now,
-          maxAgeMs: 320 + Math.random() * 160,
-          gravity: -25,
+          maxAgeMs: (isSmoke ? 420 : 320) + Math.random() * 160,
+          gravity: -28,
+          turbulence: 45,
           drag: 0.08,
-          shape: i % 3 === 0 ? 'smoke' : i % 2 === 0 ? 'ember' : 'flame',
-          glow: true,
+          trailLength: !isSmoke && (isCrit || isFinisher) ? 4 : 0,
+          trailWidth: 1.4,
+          blendMode: isSmoke ? undefined : 'lighter',
+          subEmitOnDeath: !isSmoke && isCrit && i === 1 ? 'ember' : undefined,
+          subEmitCount: 2,
+          shape: isSmoke ? 'smoke_puff' : i % 2 === 0 ? 'ember' : 'flame',
+          glow: !isSmoke,
           priority,
         });
       }
@@ -2306,23 +2550,48 @@ export class ParticleManager {
     }
 
     if (damageCategory === 'frost') {
+      if (isCrit || isFinisher) {
+        this.acquireParticle({
+          x,
+          y,
+          vx: 0,
+          vy: 0,
+          color: '#7DD3FC',
+          size: 3,
+          ringRadius: 3,
+          ringMaxRadius: isCrit ? 28 : 22,
+          ringLineWidth: 1.8,
+          bornAt: now,
+          maxAgeMs: 240,
+          shape: 'ring',
+          glow: true,
+          priority,
+        });
+      }
       for (let i = 0; i < baseCount; i++) {
         const a = Math.random() * Math.PI * 2;
-        const sp = 65 + Math.random() * 95;
+        const sp = 65 + Math.random() * 105;
         this.acquireParticle({
           x,
           y,
           vx: Math.cos(a) * sp,
           vy: Math.sin(a) * sp,
-          color: i % 2 === 0 ? '#38BDF8' : '#BAE6FD',
+          color: i % 2 === 0 ? '#E0F2FE' : '#38BDF8',
           secondaryColor: '#FFFFFF',
+          colorMid: '#7DD3FC',
+          colorEnd: '#0369A1',
           size: isCrit ? 2.7 : 2.1,
           bornAt: now,
-          maxAgeMs: 300 + Math.random() * 140,
+          maxAgeMs: 300 + Math.random() * 150,
           friction: 0.92,
+          bounceY: y + 12,
+          squashOnBounce: true,
+          subEmitOnBounce: isCrit && i === 0 ? 'shard' : undefined,
+          subEmitCount: 2,
           rotation: a,
-          angularVelocity: (Math.random() - 0.5) * 12,
-          shape: i % 2 === 0 ? 'crystal' : 'shard',
+          angularVelocity: (Math.random() - 0.5) * 14,
+          trailLength: isCrit ? 3 : 0,
+          shape: i % 3 === 0 ? 'crystal' : i % 3 === 1 ? 'shard' : 'diamond',
           glow: true,
           priority,
         });
@@ -2333,7 +2602,8 @@ export class ParticleManager {
     if (damageCategory === 'poison') {
       for (let i = 0; i < baseCount; i++) {
         const a = Math.random() * Math.PI * 2;
-        const sp = 40 + Math.random() * 75;
+        const sp = 42 + Math.random() * 78;
+        const isMist = i % 3 === 0;
         this.acquireParticle({
           x,
           y,
@@ -2341,13 +2611,16 @@ export class ParticleManager {
           vy: Math.sin(a) * sp - 15,
           color: i % 2 === 0 ? '#22C55E' : '#86EFAC',
           secondaryColor: '#ECFDF5',
+          colorMid: '#15803D',
           colorEnd: '#064E3B',
-          size: isCrit ? 2.6 : 2.0,
+          size: isMist ? 3.2 : isCrit ? 2.6 : 2.0,
           bornAt: now,
           maxAgeMs: 360 + Math.random() * 150,
-          gravity: 90,
-          bounceY: y + 12,
-          shape: i % 3 === 0 ? 'smoke' : 'droplet',
+          gravity: isMist ? -12 : 95,
+          turbulence: isMist ? 36 : 0,
+          bounceY: isMist ? undefined : y + 12,
+          squashOnBounce: !isMist,
+          shape: isMist ? 'smoke_puff' : i % 2 === 0 ? 'splatter' : 'droplet',
           glow: false,
           priority,
         });
@@ -2358,7 +2631,7 @@ export class ParticleManager {
     if (weaponId === 'ranger_galewind_twinbow') {
       for (let i = 0; i < baseCount; i++) {
         const a = angle + (Math.random() - 0.5) * 1.5;
-        const sp = 70 + Math.random() * 95;
+        const sp = 75 + Math.random() * 105;
         this.acquireParticle({
           x,
           y,
@@ -2366,6 +2639,7 @@ export class ParticleManager {
           vy: Math.sin(a) * sp - 12,
           color: i % 2 === 0 ? '#22D3EE' : '#A7F3D0',
           secondaryColor: '#FFFFFF',
+          colorEnd: '#0E7490',
           size: 2.3,
           bornAt: now,
           maxAgeMs: 360 + Math.random() * 140,
@@ -2373,7 +2647,10 @@ export class ParticleManager {
           flutterFrequency: 2.8,
           rotation: a,
           angularVelocity: (Math.random() - 0.5) * 8,
-          shape: i % 2 === 0 ? 'feather' : 'crescent',
+          trailLength: 4,
+          trailWidth: 1.3,
+          blendMode: 'lighter',
+          shape: i % 3 === 0 ? 'feather' : i % 3 === 1 ? 'arc_slash' : 'crescent',
           glow: true,
           priority,
         });
@@ -2382,16 +2659,38 @@ export class ParticleManager {
     }
 
     if (weaponId === 'cleric_seraphim_crozier' || weaponId === 'cleric_solaris_censer' || damageCategory === 'divine') {
+      const isCenser = weaponId === 'cleric_solaris_censer';
+      if (isCrit || isFinisher) {
+        this.acquireParticle({
+          x,
+          y,
+          vx: 0,
+          vy: 0,
+          color: isCenser ? '#34D399' : '#FEF08A',
+          secondaryColor: '#FFFFFF',
+          size: 4.5,
+          bornAt: now,
+          maxAgeMs: 220,
+          rotation: angle,
+          angularVelocity: 4,
+          shape: 'glyph_ring',
+          blendMode: 'lighter',
+          glow: true,
+          priority,
+        });
+      }
       for (let i = 0; i < baseCount; i++) {
         const a = Math.random() * Math.PI * 2;
-        const sp = 55 + Math.random() * 85;
+        const sp = 55 + Math.random() * 88;
         this.acquireParticle({
           x,
           y,
           vx: Math.cos(a) * sp,
           vy: Math.sin(a) * sp - 18,
-          color: weaponId === 'cleric_solaris_censer' && i % 2 === 0 ? '#34D399' : '#FDE047',
+          color: isCenser && i % 2 === 0 ? '#34D399' : '#FDE047',
           secondaryColor: '#FFFFFF',
+          colorMid: '#FEF08A',
+          colorEnd: isCenser ? '#065F46' : '#B45309',
           size: isCrit ? 2.7 : 2.1,
           bornAt: now,
           maxAgeMs: 360 + Math.random() * 150,
@@ -2399,7 +2698,8 @@ export class ParticleManager {
           flutterFrequency: 2.2,
           gravity: -14,
           rotation: a,
-          shape: i % 3 === 0 ? 'feather' : i % 3 === 1 ? 'cross' : 'starburst',
+          blendMode: 'lighter',
+          shape: i % 4 === 0 ? 'petal' : i % 4 === 1 ? 'feather' : i % 4 === 2 ? 'cross' : 'starburst',
           glow: true,
           priority,
         });
@@ -2407,23 +2707,50 @@ export class ParticleManager {
       return;
     }
 
-    if (weaponId === 'ranger_eclipse_longbow' || damageCategory === 'arcane' || damageCategory === 'elemental') {
+    if (weaponId === 'ranger_eclipse_longbow' || weaponId === 'arcanist_chronostar_scepter' || damageCategory === 'arcane' || damageCategory === 'elemental') {
+      const isEclipse = weaponId === 'ranger_eclipse_longbow';
+      const isChrono = weaponId === 'arcanist_chronostar_scepter';
+      if (isCrit || isFinisher || isChrono) {
+        this.acquireParticle({
+          x,
+          y,
+          vx: 0,
+          vy: 0,
+          color: isChrono || isEclipse ? '#FDE047' : '#C084FC',
+          secondaryColor: '#38BDF8',
+          size: isCrit ? 5.2 : 4.0,
+          bornAt: now,
+          maxAgeMs: 240,
+          rotation: angle,
+          angularVelocity: 7,
+          shape: 'glyph_ring',
+          blendMode: 'lighter',
+          glow: true,
+          priority,
+        });
+      }
       for (let i = 0; i < baseCount; i++) {
         const a = Math.random() * Math.PI * 2;
-        const sp = 60 + Math.random() * 90;
+        const sp = 60 + Math.random() * 95;
         this.acquireParticle({
           x,
           y,
           vx: Math.cos(a) * sp,
           vy: Math.sin(a) * sp,
-          color: weaponId === 'ranger_eclipse_longbow' && i % 2 === 0 ? '#FBBF24' : i % 2 === 0 ? '#C084FC' : '#38BDF8',
+          color: isEclipse && i % 2 === 0 ? '#FBBF24' : isChrono && i % 2 === 0 ? '#FDE047' : i % 2 === 0 ? '#C084FC' : '#38BDF8',
           secondaryColor: '#FFFFFF',
+          colorMid: '#818CF8',
+          colorEnd: '#312E81',
           size: isCrit ? 2.7 : 2.2,
           bornAt: now,
           maxAgeMs: 340 + Math.random() * 140,
-          curveDrift: (Math.random() - 0.5) * 45,
+          curveDrift: (Math.random() - 0.5) * 48,
+          turbulence: 28,
           rotation: a,
           angularVelocity: 6,
+          trailLength: isCrit || isFinisher ? 4 : 0,
+          trailWidth: 1.3,
+          blendMode: 'lighter',
           shape: i % 3 === 0 ? 'crystal' : i % 3 === 1 ? 'rune' : 'diamond',
           glow: true,
           priority,
@@ -2432,11 +2759,29 @@ export class ParticleManager {
       return;
     }
 
-    // Physical default (with weapon-specific dust/shrapnel/ember flavor)
+    // Physical default (with weapon-specific dust/shrapnel/ember/slash flavor)
     const isSunforged = weaponId === 'vanguard_sunforged_claymore';
+    if (isFinisher || isCrit) {
+      this.acquireParticle({
+        x,
+        y,
+        vx: Math.cos(angle) * 24,
+        vy: Math.sin(angle) * 24,
+        color: isSunforged ? '#F59E0B' : '#E2E8F0',
+        secondaryColor: '#FFFFFF',
+        size: isCrit ? 5.5 : 4.4,
+        bornAt: now,
+        maxAgeMs: 175,
+        rotation: angle,
+        shape: 'arc_slash',
+        blendMode: 'lighter',
+        glow: true,
+        priority,
+      });
+    }
     for (let i = 0; i < baseCount; i++) {
       const a = angle + (Math.random() - 0.5) * 1.4;
-      const sp = 80 + Math.random() * 110;
+      const sp = 80 + Math.random() * 115;
       this.acquireParticle({
         x,
         y,
@@ -2444,14 +2789,20 @@ export class ParticleManager {
         vy: Math.sin(a) * sp,
         color: isSunforged ? (i % 2 === 0 ? '#F59E0B' : '#FEF08A') : (opts.color || (i % 2 === 0 ? '#F1F5F9' : '#CBD5E1')),
         secondaryColor: '#FFFFFF',
+        colorEnd: isSunforged ? '#9A3412' : '#475569',
         size: isCrit ? 2.5 : 1.9,
         bornAt: now,
         maxAgeMs: 260 + Math.random() * 120,
         gravity: 140,
         bounceY: y + 12,
+        squashOnBounce: true,
+        subEmitOnBounce: isCrit && i === 0 ? 'spark' : undefined,
+        subEmitCount: 2,
         friction: 0.91,
         rotation: a,
         angularVelocity: (Math.random() - 0.5) * 12,
+        trailLength: isCrit || isFinisher ? 3 : 0,
+        trailWidth: 1.2,
         shape: isSunforged && i % 2 === 0 ? 'ember' : i % 3 === 0 ? 'dust' : i % 3 === 1 ? 'shard' : 'triangle',
         glow: isCrit || isSunforged,
         priority,
@@ -2460,14 +2811,195 @@ export class ParticleManager {
   }
 
   /**
-   * Emits subtle viewport-wide ambient atmospheric particles tailored to the active dungeon biome.
+   * Emits weapon-style and combo-beat-specific swing particles along the hero's attack arc.
+   */
+  public spawnWeaponComboSwingParticles(
+    x: number,
+    y: number,
+    opts: {
+      heroClass: HeroClassId;
+      weaponId?: string | null;
+      aimAngle: number;
+      comboStep: number;
+    },
+    now: number = performance.now()
+  ): void {
+    const { heroClass, weaponId, aimAngle, comboStep } = opts;
+    const isFinisher = comboStep === 2;
+    const stepDir = comboStep === 1 ? -1 : 1;
+    const count = isFinisher ? 7 : 4;
+
+    if (heroClass === 'vanguard') {
+      const isHalberd = weaponId === 'vanguard_crimson_halberd';
+      const isFlail = weaponId === 'vanguard_stormbreaker_flail';
+      const isSunforged = weaponId === 'vanguard_sunforged_claymore';
+
+      for (let i = 0; i < count; i++) {
+        const arcOffset = ((i / Math.max(1, count - 1)) - 0.5) * 1.65 * stepDir;
+        const a = aimAngle + arcOffset;
+        const dist = 16 + Math.random() * 12;
+        const spd = (isFinisher ? 95 : 55) + Math.random() * 45;
+        this.acquireParticle({
+          x: x + Math.cos(a) * dist,
+          y: y + Math.sin(a) * dist,
+          vx: Math.cos(a + stepDir * 0.65) * spd,
+          vy: Math.sin(a + stepDir * 0.65) * spd,
+          color: isHalberd ? '#EF4444' : isFlail ? '#38BDF8' : isSunforged ? '#F59E0B' : '#E2E8F0',
+          secondaryColor: isHalberd ? '#FCA5A5' : isFlail ? '#FEF08A' : '#FFFFFF',
+          colorEnd: isHalberd ? '#7F1D1D' : isFlail ? '#1D4ED8' : '#64748B',
+          size: isFinisher ? 2.8 : 2.1,
+          bornAt: now,
+          maxAgeMs: isFinisher ? 230 : 170,
+          friction: 0.9,
+          rotation: a + stepDir * 0.8,
+          trailLength: isFinisher ? 4 : 3,
+          trailWidth: 1.4,
+          blendMode: 'lighter',
+          shape: isFlail
+            ? i % 2 === 0
+              ? 'lightning_fork'
+              : 'spark'
+            : isHalberd
+              ? i % 2 === 0
+                ? 'arc_slash'
+                : 'splatter'
+              : i === 0 && isFinisher
+                ? 'arc_slash'
+                : isSunforged
+                  ? 'ember'
+                  : 'streak',
+          glow: true,
+          priority: isFinisher ? 'high' : 'normal',
+        });
+      }
+      return;
+    }
+
+    if (heroClass === 'ranger') {
+      const isTwin = weaponId === 'ranger_galewind_twinbow';
+      const isEclipse = weaponId === 'ranger_eclipse_longbow';
+      const muzzleX = x + Math.cos(aimAngle) * 14;
+      const muzzleY = y + Math.sin(aimAngle) * 14;
+      for (let i = 0; i < count; i++) {
+        const a = aimAngle + (Math.random() - 0.5) * (isFinisher ? 0.9 : 0.55);
+        const spd = 70 + Math.random() * 65;
+        this.acquireParticle({
+          x: muzzleX,
+          y: muzzleY,
+          vx: Math.cos(a) * spd,
+          vy: Math.sin(a) * spd,
+          color: isTwin ? '#22D3EE' : isEclipse ? '#A855F7' : '#34D399',
+          secondaryColor: isEclipse ? '#FDE047' : '#FFFFFF',
+          size: isFinisher ? 2.4 : 1.8,
+          bornAt: now,
+          maxAgeMs: 210,
+          friction: 0.9,
+          rotation: a,
+          trailLength: 3,
+          blendMode: 'lighter',
+          shape: isTwin ? 'feather' : isEclipse ? 'crystal' : i % 2 === 0 ? 'streak' : 'leaf',
+          glow: true,
+          priority: 'normal',
+        });
+      }
+      return;
+    }
+
+    if (heroClass === 'arcanist') {
+      const isCinder = weaponId === 'arcanist_cinderflare_rod';
+      const isChrono = weaponId === 'arcanist_chronostar_scepter';
+      const tipX = x + Math.cos(aimAngle) * 16;
+      const tipY = y + Math.sin(aimAngle) * 16 - 4;
+      if (isFinisher) {
+        this.acquireParticle({
+          x: tipX,
+          y: tipY,
+          vx: Math.cos(aimAngle) * 18,
+          vy: Math.sin(aimAngle) * 18,
+          color: isCinder ? '#F97316' : isChrono ? '#FDE047' : '#818CF8',
+          secondaryColor: '#FFFFFF',
+          size: 4.2,
+          bornAt: now,
+          maxAgeMs: 220,
+          rotation: aimAngle,
+          angularVelocity: 8,
+          shape: 'glyph_ring',
+          blendMode: 'lighter',
+          glow: true,
+          priority: 'high',
+        });
+      }
+      for (let i = 0; i < count; i++) {
+        const a = aimAngle + (Math.random() - 0.5) * 1.1;
+        const spd = 45 + Math.random() * 55;
+        this.acquireParticle({
+          x: tipX,
+          y: tipY,
+          vx: Math.cos(a) * spd,
+          vy: Math.sin(a) * spd,
+          color: isCinder ? '#F97316' : isChrono ? '#FDE047' : '#38BDF8',
+          secondaryColor: '#FFFFFF',
+          size: 2.1,
+          bornAt: now,
+          maxAgeMs: 240,
+          turbulence: 32,
+          rotation: a,
+          angularVelocity: 6,
+          blendMode: 'lighter',
+          shape: isCinder ? 'flame' : isChrono ? 'starburst' : 'rune',
+          glow: true,
+          priority: 'normal',
+        });
+      }
+      return;
+    }
+
+    // Cleric
+    const isCenser = weaponId === 'cleric_solaris_censer';
+    const isCrozier = weaponId === 'cleric_seraphim_crozier';
+    const arcX = x + Math.cos(aimAngle) * 14;
+    const arcY = y + Math.sin(aimAngle) * 14;
+    for (let i = 0; i < count; i++) {
+      const a = aimAngle + ((i / Math.max(1, count - 1)) - 0.5) * 1.3 * stepDir;
+      const spd = 45 + Math.random() * 50;
+      this.acquireParticle({
+        x: arcX,
+        y: arcY,
+        vx: Math.cos(a) * spd,
+        vy: Math.sin(a) * spd - 12,
+        color: isCenser ? '#34D399' : '#FDE047',
+        secondaryColor: '#FFFFFF',
+        size: isFinisher ? 2.5 : 2.0,
+        bornAt: now,
+        maxAgeMs: 260,
+        flutterAmplitude: 3,
+        flutterFrequency: 2.2,
+        blendMode: 'lighter',
+        shape: isCenser
+          ? i % 2 === 0
+            ? 'smoke_puff'
+            : 'petal'
+          : isCrozier
+            ? i % 2 === 0
+              ? 'feather'
+              : 'cross'
+            : 'starburst',
+        glow: true,
+        priority: 'normal',
+      });
+    }
+  }
+
+  /**
+   * Emits subtle viewport-wide ambient atmospheric particles tailored to the active dungeon biome
+   * with organic curl turbulence and layered depth.
    */
   public spawnBiomeAmbientMotes(
     biome: BiomeId,
     bounds: { left: number; right: number; top: number; bottom: number },
     now: number = performance.now()
   ): void {
-    if (now - this.biomeLastSpawn < 95) return;
+    if (now - this.biomeLastSpawn < 85) return;
     this.biomeLastSpawn = now;
 
     const w = Math.max(120, bounds.right - bounds.left);
@@ -2476,71 +3008,82 @@ export class ParticleManager {
     const ry = bounds.top + Math.random() * h;
 
     if (biome === 'ember') {
-      const isAsh = Math.random() > 0.55;
+      const roll = Math.random();
+      const isAsh = roll > 0.6;
+      const isHaze = roll > 0.84;
       this.acquireParticle({
         x: rx,
         y: ry,
         vx: (Math.random() - 0.3) * 16,
-        vy: isAsh ? 14 + Math.random() * 12 : -22 - Math.random() * 20,
-        color: isAsh ? '#6B7280' : Math.random() > 0.4 ? '#F97316' : '#FDE047',
+        vy: isAsh ? 12 + Math.random() * 12 : -22 - Math.random() * 20,
+        color: isHaze ? '#4B5563' : isAsh ? '#6B7280' : roll > 0.3 ? '#F97316' : '#FDE047',
         secondaryColor: isAsh ? '#9CA3AF' : '#FFFFFF',
-        colorEnd: isAsh ? '#1F2937' : '#7F1D1D',
-        size: isAsh ? 2.2 : 1.7 + Math.random() * 1.1,
+        colorMid: isAsh || isHaze ? undefined : '#EF4444',
+        colorEnd: isAsh || isHaze ? '#1F2937' : '#7F1D1D',
+        size: isHaze ? 3.5 : isAsh ? 2.1 : 1.7 + Math.random() * 1.1,
         bornAt: now,
-        maxAgeMs: 1400 + Math.random() * 600,
+        maxAgeMs: 1450 + Math.random() * 650,
         fadeInRatio: 0.2,
-        flutterAmplitude: isAsh ? 7 : 3,
+        turbulence: 28,
+        flutterAmplitude: isAsh ? 6 : 2.5,
         flutterFrequency: isAsh ? 1.8 : 2.6,
-        alphaStart: isAsh ? 0.55 : 0.8,
+        alphaStart: isHaze ? 0.28 : isAsh ? 0.55 : 0.85,
         alphaEnd: 0,
-        shape: isAsh ? 'leaf' : 'ember',
-        glow: !isAsh,
+        blendMode: !isAsh && !isHaze ? 'lighter' : undefined,
+        shape: isHaze ? 'smoke_puff' : isAsh ? 'leaf' : 'ember',
+        glow: !isAsh && !isHaze,
         priority: 'low',
       });
     } else if (biome === 'catacombs') {
+      const isFrostMist = Math.random() > 0.72;
       this.acquireParticle({
         x: rx,
         y: ry,
         vx: -8 + (Math.random() - 0.5) * 12,
-        vy: 14 + Math.random() * 16,
-        color: Math.random() > 0.4 ? '#BAE6FD' : '#E0F2FE',
+        vy: isFrostMist ? -4 - Math.random() * 6 : 14 + Math.random() * 16,
+        color: isFrostMist ? '#7DD3FC' : Math.random() > 0.4 ? '#BAE6FD' : '#E0F2FE',
         secondaryColor: '#FFFFFF',
-        size: 1.6 + Math.random() * 1.2,
+        size: isFrostMist ? 3.8 : 1.6 + Math.random() * 1.2,
         bornAt: now,
-        maxAgeMs: 1600 + Math.random() * 600,
+        maxAgeMs: 1650 + Math.random() * 600,
         fadeInRatio: 0.22,
-        flutterAmplitude: 6,
+        turbulence: 22,
+        flutterAmplitude: isFrostMist ? 2 : 6,
         flutterFrequency: 1.7,
-        alphaStart: 0.72,
+        alphaStart: isFrostMist ? 0.24 : 0.72,
         alphaEnd: 0,
         rotation: Math.random() * Math.PI,
         angularVelocity: 1.5,
-        shape: Math.random() > 0.4 ? 'crystal' : 'diamond',
-        glow: true,
+        shape: isFrostMist ? 'smoke_puff' : Math.random() > 0.4 ? 'crystal' : 'diamond',
+        glow: !isFrostMist,
         priority: 'low',
       });
     } else if (biome === 'void') {
+      const roll = Math.random();
+      const isFork = roll > 0.88;
       this.acquireParticle({
         x: rx,
         y: ry,
         vx: (Math.random() - 0.5) * 10,
         vy: -10 - Math.random() * 14,
-        color: Math.random() > 0.45 ? '#A855F7' : '#E879F9',
-        secondaryColor: '#3B0764',
-        size: 1.8 + Math.random() * 1.3,
+        color: isFork ? '#E879F9' : roll > 0.45 ? '#A855F7' : '#C084FC',
+        secondaryColor: isFork ? '#FFFFFF' : '#3B0764',
+        size: isFork ? 2.4 : 1.8 + Math.random() * 1.3,
         bornAt: now,
-        maxAgeMs: 1400 + Math.random() * 500,
-        fadeInRatio: 0.25,
-        wander: 10,
-        alphaStart: 0.65,
+        maxAgeMs: isFork ? 340 : 1400 + Math.random() * 500,
+        fadeInRatio: 0.22,
+        turbulence: 26,
+        alphaStart: 0.68,
         alphaEnd: 0,
         rotation: Math.random() * Math.PI * 2,
         angularVelocity: 2.5,
-        shape: Math.random() > 0.5 ? 'crescent' : 'rune',
+        blendMode: isFork ? 'lighter' : undefined,
+        shape: isFork ? 'lightning_fork' : roll > 0.55 ? 'glyph_ring' : roll > 0.25 ? 'crescent' : 'rune',
         glow: true,
         priority: 'low',
       });
     } else if (biome === 'astral') {
+      const isGlyph = Math.random() > 0.68;
       this.acquireParticle({
         x: rx,
         y: ry,
@@ -2548,96 +3091,133 @@ export class ParticleManager {
         vy: -6 - Math.random() * 10,
         color: Math.random() > 0.5 ? '#38BDF8' : '#FDE047',
         secondaryColor: '#FFFFFF',
-        size: 1.7 + Math.random() * 1.2,
+        size: isGlyph ? 2.4 : 1.7 + Math.random() * 1.2,
         bornAt: now,
-        maxAgeMs: 1300 + Math.random() * 600,
+        maxAgeMs: 1350 + Math.random() * 600,
         fadeInRatio: 0.3,
+        turbulence: 18,
         pulseRate: 0.012,
         alphaStart: 0.75,
         alphaEnd: 0,
-        shape: Math.random() > 0.45 ? 'starburst' : 'crystal',
+        rotation: Math.random() * Math.PI * 2,
+        angularVelocity: isGlyph ? 3.2 : 1.2,
+        blendMode: 'lighter',
+        shape: isGlyph ? 'glyph_ring' : Math.random() > 0.45 ? 'starburst' : 'crystal',
         glow: true,
         priority: 'low',
       });
     } else if (biome === 'hymns' || biome === 'reliquary' || biome === 'scripture' || biome === 'nave' || biome === 'wardengate') {
       const isFeather = biome === 'hymns' || biome === 'nave';
+      const isPetal = (biome === 'hymns' || biome === 'wardengate') && Math.random() > 0.5;
       this.acquireParticle({
         x: rx,
         y: ry,
         vx: (Math.random() - 0.5) * 10,
-        vy: isFeather ? 10 + Math.random() * 10 : -12 - Math.random() * 10,
-        color: biome === 'scripture' ? '#C084FC' : '#FDE68A',
+        vy: isFeather || isPetal ? 10 + Math.random() * 10 : -12 - Math.random() * 10,
+        color: biome === 'scripture' ? '#C084FC' : isPetal ? '#FEF08A' : '#FDE68A',
         secondaryColor: '#FFFFFF',
         size: 1.8 + Math.random() * 1.1,
         bornAt: now,
         maxAgeMs: 1500 + Math.random() * 500,
         fadeInRatio: 0.25,
-        flutterAmplitude: isFeather ? 6 : 3,
+        turbulence: 20,
+        flutterAmplitude: isFeather || isPetal ? 6 : 3,
         flutterFrequency: 1.6,
         alphaStart: 0.65,
         alphaEnd: 0,
-        shape: isFeather ? 'feather' : biome === 'scripture' ? 'rune' : 'dust',
+        shape: isPetal ? 'petal' : isFeather ? 'feather' : biome === 'scripture' ? 'rune' : 'dust',
         glow: biome !== 'reliquary',
         priority: 'low',
       });
     } else {
-      // 'courtyard' (Tavern / Floor 1 Sunken Courtyard): drifting green leaves & sunlit dust motes
-      const isLeaf = Math.random() > 0.65;
+      // 'courtyard' (Tavern / Floor 1 Sunken Courtyard): drifting green leaves, sunlit petals & dust motes
+      const roll = Math.random();
+      const isLeaf = roll > 0.68;
+      const isPetal = !isLeaf && roll > 0.48;
       this.acquireParticle({
         x: rx,
         y: ry,
-        vx: isLeaf ? 14 + Math.random() * 10 : (Math.random() - 0.5) * 8,
-        vy: isLeaf ? 12 + Math.random() * 10 : -7 - Math.random() * 8,
-        color: isLeaf ? '#4ADE80' : '#FDE68A',
+        vx: isLeaf || isPetal ? 14 + Math.random() * 10 : (Math.random() - 0.5) * 8,
+        vy: isLeaf || isPetal ? 11 + Math.random() * 10 : -7 - Math.random() * 8,
+        color: isLeaf ? '#4ADE80' : isPetal ? '#FDE68A' : '#FEF3C7',
         secondaryColor: isLeaf ? '#BBF7D0' : '#FFFFFF',
-        size: isLeaf ? 2.1 : 1.5 + Math.random(),
+        size: isLeaf ? 2.1 : isPetal ? 1.9 : 1.5 + Math.random(),
         bornAt: now,
-        maxAgeMs: 1500 + Math.random() * 500,
+        maxAgeMs: 1550 + Math.random() * 500,
         fadeInRatio: 0.25,
-        flutterAmplitude: isLeaf ? 6 : 2.5,
+        turbulence: 18,
+        flutterAmplitude: isLeaf || isPetal ? 6 : 2.5,
         flutterFrequency: 1.8,
-        alphaStart: isLeaf ? 0.68 : 0.5,
+        alphaStart: isLeaf || isPetal ? 0.68 : 0.5,
         alphaEnd: 0,
-        shape: isLeaf ? 'leaf' : 'dust',
-        glow: !isLeaf,
+        shape: isLeaf ? 'leaf' : isPetal ? 'petal' : 'dust',
+        glow: !isLeaf && !isPetal,
         priority: 'low',
       });
     }
   }
 
   /**
-   * Emits rising embers & thin smoke wisps above visible dungeon wall torches.
+   * Emits biome-themed rising embers & curling smoke wisps above visible dungeon wall torches.
    */
-  public spawnTorchEmbers(tx: number, ty: number, now: number = performance.now()): void {
+  public spawnTorchEmbers(
+    tx: number,
+    ty: number,
+    now: number = performance.now(),
+    biome: BiomeId = 'courtyard'
+  ): void {
     const key = `${Math.round(tx)}_${Math.round(ty)}`;
     const last = this.torchLastSpawn.get(key) || 0;
-    if (now - last < 220) return;
+    if (now - last < 200) return;
     this.torchLastSpawn.set(key, now);
     if (this.torchLastSpawn.size > 160) this.torchLastSpawn.clear();
 
-    const isSmoke = Math.random() > 0.68;
+    const isSmoke = Math.random() > 0.62;
+    const isColdSoul = biome === 'catacombs';
+    const isVoidTorch = biome === 'void';
+    const isHolyTorch = biome === 'hymns' || biome === 'nave' || biome === 'wardengate';
+
+    const emberColor = isColdSoul
+      ? '#7DD3FC'
+      : isVoidTorch
+        ? '#C084FC'
+        : isHolyTorch
+          ? '#FEF08A'
+          : Math.random() > 0.4
+            ? '#F97316'
+            : '#FDE047';
+    const emberEnd = isColdSoul
+      ? '#0369A1'
+      : isVoidTorch
+        ? '#4C1D95'
+        : isHolyTorch
+          ? '#B45309'
+          : '#991B1B';
+
     this.acquireParticle({
       x: tx + (Math.random() - 0.5) * 4,
       y: ty - 7,
       vx: (Math.random() - 0.5) * 10,
-      vy: isSmoke ? -16 - Math.random() * 10 : -24 - Math.random() * 14,
-      color: isSmoke ? '#64748B' : Math.random() > 0.4 ? '#F97316' : '#FDE047',
-      secondaryColor: '#FFFFFF',
-      colorEnd: isSmoke ? '#1E293B' : '#991B1B',
-      size: isSmoke ? 2.3 : 1.5,
+      vy: isSmoke ? -16 - Math.random() * 10 : -24 - Math.random() * 15,
+      color: isSmoke ? '#64748B' : emberColor,
+      secondaryColor: isSmoke ? '#94A3B8' : '#FFFFFF',
+      colorEnd: isSmoke ? '#1E293B' : emberEnd,
+      size: isSmoke ? 2.4 : 1.5,
       bornAt: now,
-      maxAgeMs: isSmoke ? 520 : 420,
-      wander: 8,
-      alphaStart: isSmoke ? 0.42 : 0.85,
+      maxAgeMs: isSmoke ? 540 : 420,
+      turbulence: 28,
+      alphaStart: isSmoke ? 0.38 : 0.88,
       alphaEnd: 0,
-      shape: isSmoke ? 'smoke' : 'ember',
+      blendMode: isSmoke ? undefined : 'lighter',
+      trailLength: !isSmoke && Math.random() > 0.5 ? 3 : 0,
+      shape: isSmoke ? 'smoke_puff' : 'ember',
       glow: !isSmoke,
       priority: 'low',
     });
   }
 
   /**
-   * Emits biome-themed ground dust/crystals behind moving players' boots.
+   * Emits biome-themed ground dust, crystals, petals, or crimson/haste sparks behind moving players.
    */
   public spawnFootstepDust(
     playerId: string,
@@ -2645,42 +3225,69 @@ export class ParticleManager {
     y: number,
     moveAngle: number,
     biome: BiomeId,
-    now: number = performance.now()
+    now: number = performance.now(),
+    opts?: { crimsonFrenzy?: boolean; hasted?: boolean }
   ): void {
     const last = this.footstepLastSpawn.get(playerId) || 0;
-    if (now - last < 165) return;
+    const interval = opts?.crimsonFrenzy || opts?.hasted ? 110 : 165;
+    if (now - last < interval) return;
     this.footstepLastSpawn.set(playerId, now);
 
-    const color =
-      biome === 'catacombs'
-        ? '#BAE6FD'
-        : biome === 'ember'
-          ? '#FB923C'
-          : biome === 'void'
-            ? '#A855F7'
-            : biome === 'astral'
-              ? '#60A5FA'
-              : '#94A3B8';
-    const shape: ParticleShape =
-      biome === 'catacombs' ? 'crystal' : biome === 'ember' && Math.random() > 0.6 ? 'ember' : 'dust';
+    const isCrimson = Boolean(opts?.crimsonFrenzy);
+    const isHasted = Boolean(opts?.hasted);
+
+    const color = isCrimson
+      ? Math.random() > 0.4
+        ? '#EF4444'
+        : '#FEF08A'
+      : isHasted
+        ? '#38BDF8'
+        : biome === 'catacombs'
+          ? '#BAE6FD'
+          : biome === 'ember'
+            ? '#FB923C'
+            : biome === 'void'
+              ? '#A855F7'
+              : biome === 'astral'
+                ? '#60A5FA'
+                : biome === 'hymns' || biome === 'nave'
+                  ? '#FDE68A'
+                  : '#94A3B8';
+    const shape: ParticleShape = isCrimson
+      ? 'ember'
+      : isHasted
+        ? 'streak'
+        : biome === 'catacombs'
+          ? 'crystal'
+          : biome === 'ember' && Math.random() > 0.5
+            ? 'ember'
+            : biome === 'void' && Math.random() > 0.55
+              ? 'rune'
+              : biome === 'courtyard' && Math.random() > 0.65
+                ? 'leaf'
+                : 'dust';
 
     this.acquireParticle({
       x: x - Math.cos(moveAngle) * 5 + (Math.random() - 0.5) * 4,
       y: y + 10 + (Math.random() - 0.5) * 2,
-      vx: -Math.cos(moveAngle) * 14 + (Math.random() - 0.5) * 10,
+      vx: -Math.cos(moveAngle) * (isCrimson || isHasted ? 28 : 14) + (Math.random() - 0.5) * 10,
       vy: -6 - Math.random() * 8,
       color,
-      colorEnd: '#334155',
-      size: 2.2 + Math.random() * 0.8,
-      startScale: 0.7,
-      endScale: 1.3,
+      secondaryColor: '#FFFFFF',
+      colorEnd: isCrimson ? '#7F1D1D' : '#334155',
+      size: isCrimson ? 2.3 : 2.1 + Math.random() * 0.8,
+      startScale: 0.75,
+      endScale: 1.25,
       bornAt: now,
-      maxAgeMs: 280,
+      maxAgeMs: isCrimson ? 320 : 280,
       friction: 0.9,
-      alphaStart: 0.45,
+      turbulence: isCrimson ? 24 : 0,
+      alphaStart: isCrimson || isHasted ? 0.72 : 0.45,
       alphaEnd: 0,
+      blendMode: isCrimson || isHasted ? 'lighter' : undefined,
+      trailLength: isCrimson ? 3 : 0,
       shape,
-      glow: shape !== 'dust',
+      glow: shape !== 'dust' && shape !== 'leaf',
       priority: 'low',
     });
   }
@@ -2693,12 +3300,12 @@ export class ParticleManager {
     x: number,
     y: number,
     radius: number,
-    status: 'burned' | 'frozen' | 'shocked' | 'poisoned' | 'bleeding',
+    status: 'burned' | 'frozen' | 'shocked' | 'poisoned' | 'bleeding' | 'stunned' | 'chrono',
     now: number = performance.now()
   ): void {
     const key = `${enemyId}_${status}`;
     const last = this.statusMoteLastSpawn.get(key) || 0;
-    if (now - last < 210) return;
+    if (now - last < 200) return;
     this.statusMoteLastSpawn.set(key, now);
     if (this.statusMoteLastSpawn.size > 300) this.statusMoteLastSpawn.clear();
 
@@ -2706,18 +3313,22 @@ export class ParticleManager {
     const oy = y + (Math.random() - 0.5) * radius * 0.8;
 
     if (status === 'burned') {
+      const isSmoke = Math.random() > 0.55;
       this.acquireParticle({
         x: ox,
         y: oy,
         vx: (Math.random() - 0.5) * 14,
         vy: -26 - Math.random() * 18,
-        color: Math.random() > 0.4 ? '#F97316' : '#EF4444',
-        secondaryColor: '#FEF08A',
-        size: 2.0,
+        color: isSmoke ? '#6B7280' : Math.random() > 0.4 ? '#F97316' : '#EF4444',
+        secondaryColor: isSmoke ? '#9CA3AF' : '#FEF08A',
+        colorEnd: isSmoke ? '#1F2937' : '#7F1D1D',
+        size: isSmoke ? 2.4 : 2.0,
         bornAt: now,
         maxAgeMs: 360,
-        shape: Math.random() > 0.45 ? 'ember' : 'smoke',
-        glow: true,
+        turbulence: 34,
+        blendMode: isSmoke ? undefined : 'lighter',
+        shape: isSmoke ? 'smoke_puff' : 'ember',
+        glow: !isSmoke,
         priority: 'normal',
       });
     } else if (status === 'frozen') {
@@ -2728,12 +3339,12 @@ export class ParticleManager {
         vy: 12 + Math.random() * 10,
         color: '#BAE6FD',
         secondaryColor: '#FFFFFF',
-        size: 1.8,
+        size: 1.9,
         bornAt: now,
         maxAgeMs: 420,
         flutterAmplitude: 4,
         flutterFrequency: 2.2,
-        shape: 'crystal',
+        shape: Math.random() > 0.4 ? 'crystal' : 'diamond',
         glow: true,
         priority: 'normal',
       });
@@ -2741,19 +3352,21 @@ export class ParticleManager {
       this.acquireParticle({
         x: ox,
         y: oy,
-        vx: (Math.random() - 0.5) * 35,
-        vy: (Math.random() - 0.5) * 35,
+        vx: (Math.random() - 0.5) * 38,
+        vy: (Math.random() - 0.5) * 38,
         color: Math.random() > 0.5 ? '#FDE047' : '#38BDF8',
         secondaryColor: '#FFFFFF',
         size: 2.1,
         bornAt: now,
         maxAgeMs: 170,
         rotation: Math.random() * Math.PI * 2,
-        shape: 'bolt',
+        blendMode: 'lighter',
+        shape: Math.random() > 0.45 ? 'lightning_fork' : 'bolt',
         glow: true,
         priority: 'normal',
       });
     } else if (status === 'poisoned') {
+      const isMist = Math.random() > 0.5;
       this.acquireParticle({
         x: ox,
         y: oy,
@@ -2761,12 +3374,51 @@ export class ParticleManager {
         vy: -18 - Math.random() * 14,
         color: '#4ADE80',
         secondaryColor: '#BBF7D0',
-        size: 2.0,
+        colorEnd: '#064E3B',
+        size: isMist ? 2.4 : 2.0,
         bornAt: now,
         maxAgeMs: 400,
-        wander: 8,
-        shape: Math.random() > 0.5 ? 'droplet' : 'smoke',
+        turbulence: 26,
+        shape: isMist ? 'smoke_puff' : 'splatter',
         glow: false,
+        priority: 'normal',
+      });
+    } else if (status === 'stunned') {
+      this.acquireParticle({
+        x,
+        y: y - radius - 6,
+        vx: 0,
+        vy: 0,
+        color: '#FBBF24',
+        secondaryColor: '#FFFFFF',
+        size: 1.9,
+        bornAt: now,
+        maxAgeMs: 360,
+        orbitCenterX: x,
+        orbitCenterY: y - radius - 6,
+        orbitRadius: 10,
+        orbitSpeed: 6.5,
+        orbitAngle: Math.random() * Math.PI * 2,
+        orbitEccentricity: 0.45,
+        shape: 'starburst',
+        glow: true,
+        priority: 'normal',
+      });
+    } else if (status === 'chrono') {
+      this.acquireParticle({
+        x,
+        y,
+        vx: (Math.random() - 0.5) * 10,
+        vy: -12,
+        color: '#38BDF8',
+        secondaryColor: '#FDE047',
+        size: 2.4,
+        bornAt: now,
+        maxAgeMs: 380,
+        rotation: Math.random() * Math.PI * 2,
+        angularVelocity: 5,
+        shape: 'glyph_ring',
+        glow: true,
         priority: 'normal',
       });
     } else {
@@ -2781,9 +3433,47 @@ export class ParticleManager {
         size: 1.9,
         bornAt: now,
         maxAgeMs: 360,
-        gravity: 160,
+        gravity: 165,
         bounceY: y + radius * 0.8,
-        shape: 'droplet',
+        squashOnBounce: true,
+        shape: Math.random() > 0.5 ? 'splatter' : 'droplet',
+        glow: false,
+        priority: 'normal',
+      });
+    }
+  }
+
+  /**
+   * Emits wood/stone splinters and dust clouds when destructible crates or barrels break.
+   */
+  public spawnPropBreakBurst(
+    x: number,
+    y: number,
+    _kind: string = 'crate',
+    now: number = performance.now()
+  ): void {
+    for (let i = 0; i < 8; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const sp = 40 + Math.random() * 75;
+      const isDust = i % 3 === 0;
+      this.acquireParticle({
+        x: x + (Math.random() - 0.5) * 10,
+        y: y + (Math.random() - 0.5) * 10,
+        vx: Math.cos(a) * sp,
+        vy: Math.sin(a) * sp - 28,
+        color: isDust ? '#94A3B8' : i % 2 === 0 ? '#B45309' : '#D97706',
+        secondaryColor: '#FDE68A',
+        colorEnd: '#451A03',
+        size: isDust ? 3.2 : 2.1,
+        bornAt: now,
+        maxAgeMs: isDust ? 380 : 420,
+        gravity: isDust ? -10 : 185,
+        bounceY: isDust ? undefined : y + 10,
+        squashOnBounce: !isDust,
+        friction: 0.91,
+        rotation: a,
+        angularVelocity: (Math.random() - 0.5) * 12,
+        shape: isDust ? 'smoke_puff' : 'shard',
         glow: false,
         priority: 'normal',
       });
@@ -2794,22 +3484,26 @@ export class ParticleManager {
    * Emits sparkling bouncing gold glints when collecting coins.
    */
   public spawnGoldPickupBurst(x: number, y: number, now: number = performance.now()): void {
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < 7; i++) {
       const a = Math.random() * Math.PI * 2;
-      const sp = 28 + Math.random() * 44;
+      const sp = 28 + Math.random() * 48;
       this.acquireParticle({
         x,
         y,
         vx: Math.cos(a) * sp,
-        vy: Math.sin(a) * sp - 38,
+        vy: Math.sin(a) * sp - 40,
         color: i % 2 === 0 ? '#FDE047' : '#F59E0B',
         secondaryColor: '#FFFFFF',
         size: 2.0 + Math.random() * 0.8,
         bornAt: now,
-        maxAgeMs: 420 + Math.random() * 160,
-        gravity: 170,
+        maxAgeMs: 440 + Math.random() * 160,
+        gravity: 175,
         bounceY: y + 10,
+        squashOnBounce: true,
+        subEmitOnBounce: i === 0 ? 'spark' : undefined,
+        subEmitCount: 2,
         friction: 0.94,
+        blendMode: 'lighter',
         shape: i % 2 === 0 ? 'diamond' : 'starburst',
         glow: true,
         priority: 'high',
@@ -2842,7 +3536,7 @@ export class ParticleManager {
       glow: true,
       priority: 'critical',
     });
-    const shapes: ParticleShape[] = ['crystal', 'starburst', 'feather', 'rune'];
+    const shapes: ParticleShape[] = ['crystal', 'starburst', 'petal', 'glyph_ring'];
     for (let i = 0; i < 10; i++) {
       const a = (i * Math.PI * 2) / 10;
       this.acquireParticle({
@@ -2857,8 +3551,10 @@ export class ParticleManager {
         maxAgeMs: 520 + Math.random() * 180,
         flutterAmplitude: 4,
         flutterFrequency: 2.0,
+        turbulence: 18,
         rotation: a,
         angularVelocity: 4,
+        blendMode: 'lighter',
         shape: shapes[i % shapes.length],
         glow: true,
         priority: 'high',
@@ -3019,7 +3715,8 @@ export class ParticleManager {
   }
 
   /**
-   * Emits a lingering class-appropriate dash step behind a dashing hero during active dash duration.
+   * Emits subtle kinetic wake particles (sparks, dust, wind motes) that complement
+   * the hero-silhouette afterimages along an active dash trajectory.
    */
   public spawnClassDashTrailStep(
     heroClass: HeroClassId,
@@ -3028,46 +3725,50 @@ export class ParticleManager {
     angle: number,
     now: number = performance.now()
   ): void {
+    const backX = -Math.cos(angle);
+    const backY = -Math.sin(angle);
+    const perpX = -Math.sin(angle);
+    const perpY = Math.cos(angle);
+    const lat = (Math.random() - 0.5) * 14;
+
     if (heroClass === 'vanguard') {
-      // Heavy armored knight: kicked-up stone dust at boots & crisp steel/crimson motion streaks (no floating hexagons)
       this.acquireParticle({
-        x: x - Math.cos(angle) * 6 + (Math.random() - 0.5) * 6,
+        x: x + backX * 6 + perpX * lat * 0.5,
         y: y + 8 + (Math.random() - 0.5) * 3,
-        vx: -Math.cos(angle) * 18 + (Math.random() - 0.5) * 10,
-        vy: -Math.sin(angle) * 14 - 4,
-        color: '#64748B',
+        vx: backX * 26 + (Math.random() - 0.5) * 14,
+        vy: backY * 20 - 6,
+        color: '#94A3B8',
         colorEnd: '#334155',
-        size: 3.0,
-        startScale: 0.75,
-        endScale: 1.35,
+        size: 3.1,
+        startScale: 0.7,
+        endScale: 1.5,
         bornAt: now,
-        maxAgeMs: 240,
-        friction: 0.9,
+        maxAgeMs: 250,
+        friction: 0.89,
         shape: 'smoke',
-        alphaStart: 0.48,
+        alphaStart: 0.45,
         alphaEnd: 0,
         alphaCurve: 'easeOut',
-        glow: false,
         priority: 'normal',
       });
       this.acquireParticle({
-        x: x - Math.cos(angle) * 5 + (Math.random() - 0.5) * 8,
-        y: y - Math.sin(angle) * 5 + (Math.random() - 0.5) * 8,
-        vx: -Math.cos(angle) * 42,
-        vy: -Math.sin(angle) * 42,
-        color: Math.random() > 0.3 ? '#CBD5E1' : '#DC2626',
-        colorEnd: '#475569',
-        size: 1.7,
+        x: x + backX * 4 + perpX * lat,
+        y: y + backY * 4 + perpY * lat,
+        vx: backX * (55 + Math.random() * 30),
+        vy: backY * (55 + Math.random() * 30),
+        color: Math.random() > 0.35 ? '#FDE047' : '#EF4444',
+        colorEnd: '#CBD5E1',
+        size: 1.8,
         bornAt: now,
-        maxAgeMs: 180,
-        friction: 0.89,
+        maxAgeMs: 185,
+        friction: 0.88,
         rotation: angle,
         stretchWithVelocity: true,
-        stretchFactor: 0.008,
+        stretchFactor: 0.009,
         shape: 'streak',
-        alphaStart: 0.65,
+        alphaStart: 0.8,
         alphaEnd: 0,
-        glow: false,
+        glow: true,
         priority: 'normal',
       });
       return;
@@ -3077,79 +3778,63 @@ export class ParticleManager {
       heroClass === 'ranger'
         ? '#34D399'
         : heroClass === 'arcanist'
-          ? '#A855F7'
-          : '#FDE047';
+          ? '#C084FC'
+          : '#FACC15';
     const secondary =
       heroClass === 'ranger'
-        ? '#A7F3D0'
+        ? '#ECFDF5'
         : heroClass === 'arcanist'
           ? '#38BDF8'
           : '#FEF9C3';
-    const fadeEnd =
-      heroClass === 'ranger'
-        ? '#065F46'
-        : heroClass === 'arcanist'
-          ? '#312E81'
-          : '#B45309';
-    const bodyShape: ParticleShape =
-      heroClass === 'ranger'
-        ? 'triangle'
-        : heroClass === 'arcanist'
-          ? 'rune'
-          : 'cross';
 
-    // Lingering spectral body echo
     this.acquireParticle({
-      x: x + (Math.random() - 0.5) * 4,
-      y: y - 2 + (Math.random() - 0.5) * 4,
-      vx: -Math.cos(angle) * 16,
-      vy: -Math.sin(angle) * 16,
-      color: primary,
-      colorEnd: fadeEnd,
-      secondaryColor: secondary,
-      size: 4.2,
-      startScale: 1.15,
-      endScale: 0.5,
+      x: x + backX * 6 + perpX * lat,
+      y: y + backY * 6 + perpY * lat,
+      vx: backX * (38 + Math.random() * 24),
+      vy: backY * (38 + Math.random() * 24),
+      color: secondary,
+      colorEnd: primary,
+      size: 2.0,
       bornAt: now,
-      maxAgeMs: 420,
-      drag: 0.08,
-      rotation: heroClass === 'ranger' ? angle : 0,
-      angularVelocity: heroClass === 'arcanist' ? 4 : 0,
-      shape: bodyShape,
-      alphaStart: 0.55,
+      maxAgeMs: 240,
+      friction: 0.9,
+      stretchWithVelocity: true,
+      stretchFactor: 0.008,
+      shape: 'streak',
+      alphaStart: 0.78,
       alphaEnd: 0,
-      alphaCurve: 'easeOut',
-      glow: false,
+      glow: true,
       priority: 'normal',
     });
 
-    // Trailing slipstream spark
     this.acquireParticle({
-      x: x - Math.cos(angle) * 6 + (Math.random() - 0.5) * 10,
-      y: y - Math.sin(angle) * 6 + (Math.random() - 0.5) * 10,
-      vx: -Math.cos(angle) * (28 + Math.random() * 18),
-      vy: -Math.sin(angle) * (28 + Math.random() * 18),
-      color: secondary,
-      colorEnd: primary,
-      size: 1.9,
+      x: x + perpX * lat * 0.8,
+      y: y + perpY * lat * 0.8,
+      vx: backX * 14 + (Math.random() - 0.5) * 18,
+      vy: backY * 14 - (heroClass === 'cleric' ? 12 : 4),
+      color: primary,
+      colorEnd: secondary,
+      size: 1.8,
+      startScale: 1.0,
+      endScale: 0.25,
       bornAt: now,
-      maxAgeMs: 360,
-      friction: 0.91,
-      stretchWithVelocity: true,
-      stretchFactor: 0.007,
-      shape: 'streak',
-      alphaStart: 0.72,
+      maxAgeMs: 280,
+      drag: 0.07,
+      rotation: Math.random() * Math.PI * 2,
+      angularVelocity: (Math.random() - 0.5) * 7,
+      shape: heroClass === 'arcanist' ? 'rune' : heroClass === 'cleric' ? 'spark' : 'diamond',
+      alphaStart: 0.65,
       alphaEnd: 0,
-      glow: false,
+      glow: true,
       priority: 'normal',
     });
   }
 
   /**
-   * Universal class-themed procedural dash burst:
-   * 1) Inward-attracting suction vortex at starting position.
-   * 2) Class-authentic wake along the dash path (heavy steel dust/slipstream for Vanguard;
-   *    spectral afterimages/runes for Ranger, Arcanist, Cleric).
+   * Universal class-themed procedural dash burst paired with sprite afterimages:
+   * 1) Inward suction vortex & takeoff dust/sparks at starting point.
+   * 2) Kinetic slipstream sparks & wind-slices along the dash trajectory.
+   * 3) Snappy arrival shock-ring & skid burst synchronized with landing at (toX, toY).
    */
   public spawnClassDashEffect(
     heroClass: HeroClassId,
@@ -3160,240 +3845,243 @@ export class ParticleManager {
     angle: number,
     now: number = performance.now()
   ): void {
-    // 1. Starting-position inward-attracting suction vortex for all classes
+    // 1. Takeoff inward suction vortex
     this.spawnDashInwardSuction(heroClass, fromX, fromY, now);
 
-    if (heroClass === 'vanguard') {
-      // Heavy steel rush: kicked-up ground dust + crisp kinetic steel/crimson blade-wind streaks
-      for (let i = 0; i < 5; i++) {
-        const t = i / 4;
-        const gx = fromX + (toX - fromX) * t;
-        const gy = fromY + (toY - fromY) * t;
-        const delay = Math.round(t * 45);
-        this.acquireParticle({
-          x: gx + (Math.random() - 0.5) * 6,
-          y: gy + 8 + (Math.random() - 0.5) * 3,
-          vx: -Math.cos(angle) * 22 + (Math.random() - 0.5) * 10,
-          vy: -Math.sin(angle) * 18 - 6,
-          color: '#64748B',
-          colorEnd: '#1E293B',
-          size: 3.4,
-          startScale: 0.8,
-          endScale: 1.45,
-          bornAt: now + delay,
-          maxAgeMs: 250,
-          friction: 0.9,
-          shape: 'smoke',
-          alphaStart: 0.45,
-          alphaEnd: 0,
-          priority: 'normal',
-        });
-      }
-      for (let i = 0; i < 6; i++) {
-        const t = i / 5;
-        this.acquireParticle({
-          x: fromX + (toX - fromX) * t + (Math.random() - 0.5) * 5,
-          y: fromY + (toY - fromY) * t + (Math.random() - 0.5) * 5,
-          vx: -Math.cos(angle) * (46 + i * 6),
-          vy: -Math.sin(angle) * (46 + i * 6),
-          color: i % 3 === 0 ? '#DC2626' : '#CBD5E1',
-          colorEnd: '#475569',
-          size: 1.8,
-          bornAt: now,
-          maxAgeMs: 200,
-          friction: 0.89,
-          rotation: angle,
-          stretchWithVelocity: true,
-          stretchFactor: 0.009,
-          shape: 'streak',
-          alphaStart: 0.72,
-          alphaEnd: 0,
-          glow: false,
-          priority: 'high',
-        });
-      }
-      return;
-    }
-
-    // 2. Lingering staggered spectral afterimage ghosts along the dash trajectory
-    const ghostSteps = 7;
     const primary =
-      heroClass === 'ranger'
-        ? '#34D399'
-        : heroClass === 'arcanist'
-          ? '#A855F7'
-          : '#FDE047';
+      heroClass === 'vanguard'
+        ? '#CBD5E1'
+        : heroClass === 'ranger'
+          ? '#34D399'
+          : heroClass === 'arcanist'
+            ? '#A855F7'
+            : '#FACC15';
     const accent =
-      heroClass === 'ranger'
-        ? '#86EFAC'
-        : heroClass === 'arcanist'
-          ? '#38BDF8'
-          : '#FEF9C3';
-    const ghostEnd =
-      heroClass === 'ranger'
-        ? '#065F46'
-        : heroClass === 'arcanist'
-          ? '#312E81'
-          : '#B45309';
+      heroClass === 'vanguard'
+        ? '#F59E0B'
+        : heroClass === 'ranger'
+          ? '#A7F3D0'
+          : heroClass === 'arcanist'
+            ? '#38BDF8'
+            : '#FEF9C3';
+    const fadeEnd =
+      heroClass === 'vanguard'
+        ? '#334155'
+        : heroClass === 'ranger'
+          ? '#065F46'
+          : heroClass === 'arcanist'
+            ? '#312E81'
+            : '#B45309';
 
-    for (let i = 0; i < ghostSteps; i++) {
-      const t = 0.08 + (i / (ghostSteps - 1)) * 0.84;
-      const gx = fromX + (toX - fromX) * t;
-      const gy = fromY + (toY - fromY) * t;
-      const spawnDelay = Math.round(t * 75);
-      const fadeAlpha = 0.48 + t * 0.32;
-
-      // Spectral silhouette core node (torso/cloak/robe echo)
+    // Takeoff kickback dust / wind puff opposite dash direction
+    for (let i = 0; i < 4; i++) {
+      const kickAngle = angle + Math.PI + (Math.random() - 0.5) * 0.95;
+      const spd = 28 + Math.random() * 28;
       this.acquireParticle({
-        x: gx,
-        y: gy - 1,
-        vx: -Math.cos(angle) * 12,
-        vy: -Math.sin(angle) * 12,
-        color: i % 2 === 0 ? primary : accent,
-        colorEnd: ghostEnd,
-        secondaryColor: '#FFFFFF',
-        size: 5.2,
-        startScale: 1.2,
-        endScale: 0.45,
-        bornAt: now + spawnDelay,
-        maxAgeMs: 460 + Math.round(t * 140),
-        drag: 0.09,
-        rotation: heroClass === 'ranger' ? angle : 0,
-        angularVelocity: heroClass === 'arcanist' ? 3.5 : 0,
-        shape:
-          heroClass === 'ranger'
-            ? 'triangle'
-            : heroClass === 'arcanist'
-              ? 'rune'
-              : 'cross',
-        alphaStart: fadeAlpha,
-        alphaEnd: 0,
-        alphaCurve: 'easeOut',
-        glow: i === 0 || i === ghostSteps - 1,
-        priority: 'high',
-      });
-
-      // Head/crest spectral afterimage crown hovering above core
-      this.acquireParticle({
-        x: gx,
-        y: gy - 9,
-        vx: -Math.cos(angle) * 10,
-        vy: -Math.sin(angle) * 10 - (heroClass === 'cleric' ? 8 : 0),
-        color: accent,
-        colorEnd: ghostEnd,
-        size: 2.8,
-        startScale: 1.0,
-        endScale: 0.35,
-        bornAt: now + spawnDelay,
-        maxAgeMs: 430 + Math.round(t * 120),
-        drag: 0.08,
-        rotation: Math.PI / 4,
-        shape: 'diamond',
-        alphaStart: fadeAlpha * 0.85,
-        alphaEnd: 0,
-        alphaCurve: 'easeOut',
-        priority: 'normal',
-      });
-
-      // Lingering mist/smoke/drift halo around each ghost step
-      this.acquireParticle({
-        x: gx + (Math.random() - 0.5) * 6,
-        y: gy + 4 + (Math.random() - 0.5) * 4,
-        vx: -Math.cos(angle) * 20 + (Math.random() - 0.5) * 10,
-        vy: -Math.sin(angle) * 20 - 6,
-        color: primary,
-        colorEnd: ghostEnd,
-        size: 3.4,
-        startScale: 0.8,
-        endScale: 1.5,
-        bornAt: now + spawnDelay,
-        maxAgeMs: 390,
-        friction: 0.9,
+        x: fromX + (Math.random() - 0.5) * 8,
+        y: fromY + 6 + (Math.random() - 0.5) * 4,
+        vx: Math.cos(kickAngle) * spd,
+        vy: Math.sin(kickAngle) * spd - 5,
+        color: heroClass === 'vanguard' ? '#94A3B8' : primary,
+        colorEnd: fadeEnd,
+        size: heroClass === 'vanguard' ? 3.6 : 2.8,
+        startScale: 0.75,
+        endScale: 1.55,
+        bornAt: now,
+        maxAgeMs: 250,
+        friction: 0.89,
         shape: 'smoke',
-        alphaStart: 0.38,
+        alphaStart: 0.52,
         alphaEnd: 0,
+        alphaCurve: 'easeOut',
         priority: 'normal',
       });
     }
 
-    // 3. Class-specific motion streaks & arrival snap
-    if (heroClass === 'ranger') {
-      for (let i = 0; i < 7; i++) {
-        const t = i / 6;
-        const spread = angle + (Math.random() - 0.5) * 0.7;
-        this.acquireParticle({
-          x: fromX + (toX - fromX) * t + (Math.random() - 0.5) * 10,
-          y: fromY + (toY - fromY) * t + (Math.random() - 0.5) * 10,
-          vx: -Math.cos(spread) * (48 + Math.random() * 35),
-          vy: -Math.sin(spread) * (48 + Math.random() * 35),
-          color: i % 2 === 0 ? '#34D399' : '#86EFAC',
-          colorEnd: '#059669',
-          size: 2.1,
-          bornAt: now,
-          maxAgeMs: 320,
-          friction: 0.91,
-          curveDrift: (i % 2 === 0 ? 1 : -1) * 35,
-          wander: 10,
-          stretchWithVelocity: true,
-          stretchFactor: 0.008,
-          shape: i % 2 === 0 ? 'diamond' : 'streak',
-          glow: true,
-          priority: 'high',
-        });
-      }
-    } else if (heroClass === 'arcanist') {
+    // 2. Kinetic speed streaks & sparkling motes staggered along dash path
+    const streakCount = heroClass === 'vanguard' ? 8 : 9;
+    const perpX = -Math.sin(angle);
+    const perpY = Math.cos(angle);
+    for (let i = 0; i < streakCount; i++) {
+      const t = i / (streakCount - 1);
+      const lat = (Math.random() - 0.5) * 18;
+      const px = fromX + (toX - fromX) * t + perpX * lat;
+      const py = fromY + (toY - fromY) * t + perpY * lat;
+      const spd = 55 + Math.random() * 48;
       this.acquireParticle({
-        x: toX,
-        y: toY,
-        vx: 0,
-        vy: 0,
-        color: '#38BDF8',
+        x: px,
+        y: py,
+        vx: -Math.cos(angle) * spd,
+        vy: -Math.sin(angle) * spd,
+        color: i % 2 === 0 ? accent : primary,
+        colorEnd: fadeEnd,
         secondaryColor: '#FFFFFF',
-        size: 4.2,
-        bornAt: now + 45,
-        maxAgeMs: 240,
-        rotation: 0,
-        angularVelocity: 10,
-        shape: 'starburst',
+        size: heroClass === 'vanguard' ? 2.1 : 1.9,
+        bornAt: now + Math.round(t * 50),
+        maxAgeMs: 220 + Math.round(t * 60),
+        friction: 0.89,
+        rotation: angle,
+        stretchWithVelocity: true,
+        stretchFactor: 0.01,
+        shape: 'streak',
+        alphaStart: 0.85,
+        alphaEnd: 0,
         glow: true,
         priority: 'high',
       });
-      for (let i = 0; i < 4; i++) {
-        const a = (i * Math.PI) / 2;
+    }
+
+    // 3. Arrival shockwave ring + crisp landing brake burst (synced with ~75ms visual landing)
+    const arrivalAt = now + 72;
+    this.acquireParticle({
+      x: toX,
+      y: heroClass === 'vanguard' ? toY + 6 : toY,
+      vx: 0,
+      vy: 0,
+      color: accent,
+      colorEnd: primary,
+      secondaryColor: '#FFFFFF',
+      size: 2.5,
+      ringRadius: 5,
+      ringMaxRadius: heroClass === 'vanguard' ? 24 : 28,
+      ringLineWidth: heroClass === 'vanguard' ? 2.2 : 1.8,
+      bornAt: arrivalAt,
+      maxAgeMs: 210,
+      shape: 'ring',
+      alphaStart: 0.85,
+      alphaEnd: 0,
+      alphaCurve: 'easeOut',
+      glow: true,
+      priority: 'high',
+    });
+
+    // Forward crescent / blink snap right at arrival
+    if (heroClass === 'arcanist') {
+      this.acquireParticle({
+        x: toX,
+        y: toY - 2,
+        vx: 0,
+        vy: 0,
+        color: '#38BDF8',
+        colorEnd: '#A855F7',
+        secondaryColor: '#FFFFFF',
+        size: 4.5,
+        startScale: 1.15,
+        endScale: 0.3,
+        bornAt: arrivalAt,
+        maxAgeMs: 220,
+        rotation: 0,
+        angularVelocity: 11,
+        shape: 'starburst',
+        alphaStart: 0.92,
+        alphaEnd: 0,
+        glow: true,
+        priority: 'high',
+      });
+      for (let i = 0; i < 5; i++) {
+        const a = (i * Math.PI * 2) / 5 + 0.3;
         this.acquireParticle({
-          x: toX + Math.cos(a) * 18,
-          y: toY + Math.sin(a) * 18,
-          vx: -Math.cos(a) * 30,
-          vy: -Math.sin(a) * 30,
-          color: '#C084FC',
-          size: 2.2,
-          bornAt: now + 35,
-          maxAgeMs: 260,
-          attractX: toX,
-          attractY: toY,
-          attractStrength: 170,
-          attractSpiralBias: 0.55,
+          x: toX + Math.cos(a) * 14,
+          y: toY + Math.sin(a) * 14,
+          vx: Math.cos(a) * 26,
+          vy: Math.sin(a) * 26,
+          color: i % 2 === 0 ? '#C084FC' : '#38BDF8',
+          colorEnd: '#312E81',
+          size: 2.1,
+          bornAt: arrivalAt,
+          maxAgeMs: 250,
+          friction: 0.9,
           shape: 'rune',
           glow: true,
           priority: 'normal',
         });
       }
-    } else {
-      for (let i = 0; i < 6; i++) {
-        const t = i / 5;
+    } else if (heroClass === 'ranger') {
+      // Twin flanking wind crescents on landing
+      for (const side of [-1, 1]) {
+        const sAng = angle + side * 0.65;
         this.acquireParticle({
-          x: fromX + (toX - fromX) * t + (Math.random() - 0.5) * 8,
-          y: fromY + (toY - fromY) * t + (Math.random() - 0.5) * 8,
-          vx: -Math.cos(angle) * 22,
-          vy: -Math.sin(angle) * 22 - 14,
-          color: i % 2 === 0 ? '#FACC15' : '#FEF08A',
+          x: toX + Math.cos(sAng) * 8,
+          y: toY + Math.sin(sAng) * 8,
+          vx: Math.cos(sAng) * 58,
+          vy: Math.sin(sAng) * 58,
+          color: '#A7F3D0',
+          colorEnd: '#059669',
+          size: 2.8,
+          bornAt: arrivalAt,
+          maxAgeMs: 210,
+          friction: 0.88,
+          rotation: sAng,
+          shape: 'crescent',
+          alphaStart: 0.85,
+          alphaEnd: 0,
+          glow: true,
+          priority: 'high',
+        });
+      }
+    } else if (heroClass === 'cleric') {
+      // Radiant golden landing halo motes
+      for (let i = 0; i < 6; i++) {
+        const a = (i * Math.PI * 2) / 6;
+        this.acquireParticle({
+          x: toX + Math.cos(a) * 8,
+          y: toY + Math.sin(a) * 8,
+          vx: Math.cos(a) * 34,
+          vy: Math.sin(a) * 24 - 16,
+          color: i % 2 === 0 ? '#FEF08A' : '#FACC15',
+          colorEnd: '#D97706',
           secondaryColor: '#FFFFFF',
-          size: 2.2,
-          bornAt: now,
-          maxAgeMs: 360,
-          gravity: -18,
-          friction: 0.92,
-          shape: i % 2 === 0 ? 'cross' : 'starburst',
+          size: 2.3,
+          bornAt: arrivalAt,
+          maxAgeMs: 280,
+          gravity: -16,
+          friction: 0.91,
+          shape: i % 2 === 0 ? 'cross' : 'spark',
+          glow: true,
+          priority: 'high',
+        });
+      }
+    } else {
+      // Vanguard heavy boot skid dust + golden/steel impact sparks on arrival
+      for (let i = 0; i < 5; i++) {
+        const skidAng = angle + (Math.random() - 0.5) * 1.3;
+        const spd = 24 + Math.random() * 34;
+        this.acquireParticle({
+          x: toX + (Math.random() - 0.5) * 8,
+          y: toY + 8,
+          vx: Math.cos(skidAng) * spd,
+          vy: Math.sin(skidAng) * spd - 4,
+          color: i % 2 === 0 ? '#CBD5E1' : '#64748B',
+          colorEnd: '#1E293B',
+          size: 3.4,
+          startScale: 0.8,
+          endScale: 1.55,
+          bornAt: arrivalAt,
+          maxAgeMs: 250,
+          friction: 0.88,
+          shape: 'smoke',
+          alphaStart: 0.55,
+          alphaEnd: 0,
+          priority: 'normal',
+        });
+      }
+      for (let i = 0; i < 4; i++) {
+        const spAng = angle + (Math.random() - 0.5) * 1.1;
+        this.acquireParticle({
+          x: toX,
+          y: toY + 2,
+          vx: Math.cos(spAng) * (65 + Math.random() * 35),
+          vy: Math.sin(spAng) * (65 + Math.random() * 35),
+          color: i % 2 === 0 ? '#FDE047' : '#F87171',
+          colorEnd: '#991B1B',
+          size: 2.0,
+          bornAt: arrivalAt,
+          maxAgeMs: 185,
+          friction: 0.87,
+          rotation: spAng,
+          stretchWithVelocity: true,
+          stretchFactor: 0.008,
+          shape: 'spark',
           glow: true,
           priority: 'high',
         });
@@ -8988,6 +9676,50 @@ export class ParticleManager {
   // CORE PARTICLE SIMULATION & PROCEDURAL RENDERING ENGINE
   // =========================================================================
 
+  private spawnSubBurst(
+    kind: ParticleSubEmitKind,
+    x: number,
+    y: number,
+    baseColor: string,
+    secondaryColor: string | undefined,
+    count: number,
+    now: number
+  ): void {
+    const safeCount = Math.min(4, Math.max(1, count));
+    for (let k = 0; k < safeCount; k++) {
+      const ang = -Math.PI * 0.15 - Math.random() * Math.PI * 0.7;
+      const spd = 28 + Math.random() * 52;
+      const shape: ParticleShape =
+        kind === 'droplet'
+          ? 'droplet'
+          : kind === 'shard'
+            ? 'shard'
+            : kind === 'ember'
+              ? 'ember'
+              : kind === 'smoke'
+                ? 'smoke_puff'
+                : 'spark';
+      this.acquireParticle({
+        x,
+        y,
+        vx: Math.cos(ang) * spd * (Math.random() > 0.5 ? 1 : -1),
+        vy: Math.sin(ang) * spd,
+        color: baseColor,
+        secondaryColor: secondaryColor || '#FFFFFF',
+        size: kind === 'smoke' ? 2.4 : 1.4,
+        bornAt: now,
+        maxAgeMs: kind === 'smoke' ? 260 : 180 + Math.random() * 90,
+        gravity: kind === 'smoke' ? -18 : 180,
+        friction: 0.9,
+        alphaStart: 0.8,
+        alphaEnd: 0,
+        shape,
+        glow: kind === 'spark' || kind === 'ember',
+        priority: 'normal',
+      });
+    }
+  }
+
   public updateAndDraw(
     ctx: CanvasRenderingContext2D,
     now: number,
@@ -9009,6 +9741,17 @@ export class ParticleManager {
         continue;
       }
       if (age >= p.maxAgeMs) {
+        if (p.subEmitOnDeath) {
+          this.spawnSubBurst(
+            p.subEmitOnDeath,
+            p.x,
+            p.y,
+            p.colorEnd || p.color,
+            p.secondaryColor,
+            p.subEmitCount ?? 2,
+            now
+          );
+        }
         this.recycleParticle(p);
         continue;
       }
@@ -9042,10 +9785,19 @@ export class ParticleManager {
         applySpiralMovement(p, dtSec, age);
       }
 
-      // 5. Gentle Wandering / Floating Drift
+      // 5. Gentle Wandering / Floating Drift & Multi-Octave Curl Turbulence
       if (p.wander) {
         p.vx += (Math.sin(age * 0.009 + p.bornAt * 0.01) - 0.1) * p.wander * dtSec;
         p.vy += (Math.cos(age * 0.008 + p.bornAt * 0.01) - 0.4) * p.wander * dtSec;
+      }
+      if (p.turbulence) {
+        const tf = p.turbulenceFreq || 0.045;
+        const phaseA = p.x * tf + p.y * (tf * 0.7) + now * 0.0035;
+        const phaseB = p.y * tf - p.x * (tf * 0.65) + now * 0.0029 + (p.bornAt % 97);
+        const curlX = Math.sin(phaseA) + 0.5 * Math.cos(phaseB * 1.9);
+        const curlY = Math.cos(phaseA * 1.1) - 0.5 * Math.sin(phaseB * 1.7);
+        p.vx += curlX * p.turbulence * dtSec;
+        p.vy += curlY * p.turbulence * dtSec;
       }
 
       // 6. Drag & Friction
@@ -9072,11 +9824,27 @@ export class ParticleManager {
         p.y += p.vy * dtSec;
       }
 
-      // 8b. Floor Bounce Plane
+      // 8b. Floor Bounce Plane + Squash & Sub-Emit
       if (p.bounceY !== undefined && p.y > p.bounceY && p.vy > 0) {
+        const impactVy = p.vy;
         p.y = p.bounceY;
         p.vy = -p.vy * 0.44;
         p.vx *= 0.72;
+        if (p.squashOnBounce && impactVy > 32) {
+          p.squashUntil = now + 75;
+        }
+        if (p.subEmitOnBounce && impactVy > 40) {
+          this.spawnSubBurst(
+            p.subEmitOnBounce,
+            p.x,
+            p.y,
+            p.color,
+            p.secondaryColor,
+            p.subEmitCount ?? 2,
+            now
+          );
+          p.subEmitOnBounce = undefined; // single bounce sub-burst
+        }
       }
 
       // 9. Expanding / Contracting Ring Radius
@@ -9109,6 +9877,31 @@ export class ParticleManager {
           renderY += (p.vx / sp) * wVal;
         } else {
           renderX += wVal;
+        }
+      }
+
+      // 11. Motion Ribbon Trail History (zero-alloc in-place sliding buffer)
+      if (p.trailLength && p.trailLength > 1) {
+        if (!p.trailPts) {
+          p.trailPts = [renderX, renderY];
+        } else {
+          const pts = p.trailPts;
+          const lastIdx = pts.length - 2;
+          if (
+            lastIdx < 0 ||
+            Math.abs(pts[lastIdx] - renderX) + Math.abs(pts[lastIdx + 1] - renderY) >= 1.2
+          ) {
+            const maxEntries = p.trailLength * 2;
+            if (pts.length >= maxEntries) {
+              for (let ti = 0; ti < pts.length - 2; ti++) {
+                pts[ti] = pts[ti + 2];
+              }
+              pts[pts.length - 2] = renderX;
+              pts[pts.length - 1] = renderY;
+            } else {
+              pts.push(renderX, renderY);
+            }
+          }
         }
       }
 
@@ -9175,12 +9968,34 @@ export class ParticleManager {
       }
       const curSize = Math.max(0.5, p.size * scaleMultiplier);
 
-      // Color Transition Over Lifetime
+      // 2- or 3-Stop Color Transition Over Lifetime
       let drawColor = p.color;
       let glowR_ch = -1;
       let glowG_ch = 0;
       let glowB_ch = 0;
-      if (p.colorEnd) {
+      if (p.colorMid && p.colorEnd) {
+        const c1 = parseRgb(p.color);
+        const c2 = parseRgb(p.colorMid);
+        const c3 = parseRgb(p.colorEnd);
+        let cr: number;
+        let cg: number;
+        let cb: number;
+        if (progress < 0.5) {
+          const lt = progress * 2;
+          cr = Math.round(c1.r + (c2.r - c1.r) * lt);
+          cg = Math.round(c1.g + (c2.g - c1.g) * lt);
+          cb = Math.round(c1.b + (c2.b - c1.b) * lt);
+        } else {
+          const lt = (progress - 0.5) * 2;
+          cr = Math.round(c2.r + (c3.r - c2.r) * lt);
+          cg = Math.round(c2.g + (c3.g - c2.g) * lt);
+          cb = Math.round(c2.b + (c3.b - c2.b) * lt);
+        }
+        drawColor = `rgb(${cr & 0xfc},${cg & 0xfc},${cb & 0xfc})`;
+        glowR_ch = cr;
+        glowG_ch = cg;
+        glowB_ch = cb;
+      } else if (p.colorEnd) {
         const c1 = parseRgb(p.color);
         const c2 = parseRgb(p.colorEnd);
         const cr = Math.round(c1.r + (c2.r - c1.r) * progress);
@@ -9196,13 +10011,18 @@ export class ParticleManager {
         glowB_ch = cb;
       }
 
-      // Velocity Stretch & Orientation
+      // Velocity Stretch & Squash-on-Bounce
       let rot = p.rotation || 0;
       let stretchX = 1.0;
+      let stretchY = 1.0;
       if (p.stretchWithVelocity) {
         rot = Math.atan2(p.vy, p.vx);
         const sp = cachedSpeed >= 0 ? cachedSpeed : Math.hypot(p.vx, p.vy);
         stretchX = 1 + sp * (p.stretchFactor || 0.006);
+      }
+      if (p.squashUntil && now < p.squashUntil) {
+        stretchX = Math.max(stretchX, 1.45);
+        stretchY = 0.65;
       }
 
       // --- Context Setup ---
@@ -9211,6 +10031,24 @@ export class ParticleManager {
 
       if (p.blendMode) {
         ctx.globalCompositeOperation = p.blendMode;
+      }
+
+      // Tapered Motion Ribbon Trail in world space
+      if (p.trailPts && p.trailPts.length >= 4) {
+        const pts = p.trailPts;
+        const segCount = (pts.length >> 1) - 1;
+        const baseW = p.trailWidth || Math.max(1, curSize * 0.72);
+        ctx.strokeStyle = p.trailColor || drawColor;
+        for (let si = 0; si < segCount; si++) {
+          const segRatio = (si + 1) / segCount;
+          ctx.globalAlpha = alpha * segRatio * 0.65;
+          ctx.lineWidth = Math.max(0.6, baseW * segRatio);
+          ctx.beginPath();
+          ctx.moveTo(pts[si * 2], pts[si * 2 + 1]);
+          ctx.lineTo(pts[si * 2 + 2], pts[si * 2 + 3]);
+          ctx.stroke();
+        }
+        ctx.globalAlpha = alpha;
       }
 
       const px = Math.round(renderX);
@@ -9235,7 +10073,7 @@ export class ParticleManager {
       ctx.lineWidth = 1;
 
       if (rot !== 0) ctx.rotate(rot);
-      if (stretchX !== 1) ctx.scale(stretchX, 1);
+      if (stretchX !== 1 || stretchY !== 1) ctx.scale(stretchX, stretchY);
 
       // --- Procedural Pixel-Art Shape Drawing ---
       const shape = p.shape || 'square';
@@ -9247,6 +10085,12 @@ export class ParticleManager {
       list[writeIdx++] = p;
     }
 
+    const totalAfterSpawn = list.length;
+    if (totalAfterSpawn > len) {
+      for (let i = len; i < totalAfterSpawn; i++) {
+        list[writeIdx++] = list[i];
+      }
+    }
     list.length = writeIdx;
   }
 }

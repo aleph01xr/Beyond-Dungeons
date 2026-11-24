@@ -72,6 +72,11 @@ import {
   isEditableEventTarget,
 } from '../client/desktopInput.ts';
 import type { PingDiagnostics } from '../client/networkStats.ts';
+import {
+  COMBAT_STAT_COLORS,
+  PRIMARY_STAT_ORDER,
+  PRIMARY_STAT_THEME,
+} from '../shared/statTheme.ts';
 
 interface DungeonRunViewProps {
   authToken: string;
@@ -153,6 +158,11 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
   const [adminPanelOpen, setAdminPanelOpen] = useState(false);
   const [expandedMapOpen, setExpandedMapOpen] = useState(false);
   const [partyOpen, setPartyOpen] = useState(false);
+  const [npcDialogueAnchor, setNpcDialogueAnchor] = useState<{
+    npcId: string;
+    screenX: number;
+    screenY: number;
+  } | null>(null);
   const [isMuted, setIsMuted] = useState(() => sfx.isMuted());
   const [isFullscreen, toggleFullscreen] = useFullscreenState();
   const [partyNotice, setPartyNotice] = useState<string | null>(null);
@@ -275,6 +285,22 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
   const handleCloseLootChestRef = useRef(handleCloseLootChest);
   handleCloseLootChestRef.current = handleCloseLootChest;
 
+  const optimisticCloseDialogue = () => {
+    const curSnap = latestSnapshotRef.current;
+    if (curSnap) {
+      const updatedPlayers = curSnap.players.map((p) =>
+        p.id === playerId ? { ...p, npcDialogue: null } : p
+      );
+      latestSnapshotRef.current = { ...curSnap, players: updatedPlayers };
+    }
+  };
+
+  const hasNpcDialogueOpen = Boolean(me?.npcDialogue);
+  const npcDialogueOptionsRef = useRef(me?.npcDialogue?.options);
+  npcDialogueOptionsRef.current = me?.npcDialogue?.options;
+  const onSendAdminCommandRef = useRef(onSendAdminCommand);
+  onSendAdminCommandRef.current = onSendAdminCommand;
+
   const modalStateRef = useRef({
     adminPanelOpen,
     touchSettingsOpen,
@@ -285,6 +311,7 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
     chatOpen,
     pauseOpen,
     hasLootModalOpen,
+    hasNpcDialogueOpen,
     hasCinematic: Boolean(cinematicIntro),
     status: snapshot.status,
   });
@@ -298,11 +325,12 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
     chatOpen,
     pauseOpen,
     hasLootModalOpen,
+    hasNpcDialogueOpen,
     hasCinematic: Boolean(cinematicIntro),
     status: snapshot.status,
   };
 
-  // Hotkeys [I] Inventory, [M] Map, [P] Attributes, [Esc] Cancel Aim / Close Modal / Menu
+  // Hotkeys [I] Inventory, [M] Map, [P] Attributes, [Esc] Cancel Aim / Close Modal / Dialogue / Menu
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
@@ -333,9 +361,30 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
         else if (st.attributesModalOpen) setAttributesModalOpen(false);
         else if (st.expandedMapOpen) setExpandedMapOpen(false);
         else if (st.chatOpen) setChatOpen(false);
+        else if (st.hasNpcDialogueOpen) {
+          optimisticCloseDialogue();
+          onSendAdminCommandRef.current?.({ type: 'player:dialogue_close' });
+        }
         else if (st.pauseOpen) setPauseOpen(false);
         else if (st.status === 'playing' && !st.hasCinematic) setPauseOpen(true);
         return;
+      }
+
+      const dlgOpts = npcDialogueOptionsRef.current;
+      if (dlgOpts && dlgOpts.length > 0 && (k === '1' || k === '2')) {
+        const opt = dlgOpts[k === '1' ? 0 : 1];
+        if (opt) {
+          e.preventDefault();
+          sfx.playUiClick('confirm');
+          if (opt.id === 'reset_stats') {
+            onSendAdminCommandRef.current?.({ type: 'player:reset_attributes' });
+          } else if (opt.id === 'goodbye') {
+            onSendAdminCommandRef.current?.({ type: 'player:dialogue_close' });
+          } else {
+            onSendAdminCommandRef.current?.({ type: 'player:dialogue_pick', optionId: opt.id });
+          }
+          return;
+        }
       }
 
       if (k === 'i') {
@@ -369,29 +418,26 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
     return () => window.removeEventListener('touchstart', checkTouch);
   }, []);
 
-  // Tavern Ambience & Medieval Music when playing inside Floor 0 (Tavern Hub)
+  // Floor-specific Procedural Ambience (Floor 0 Tavern Hearth + Lute, Floors 1–10 Dungeon Biomes)
   useEffect(() => {
-    const isTavernFloor = map.floor === 0 || snapshot.floor === 0;
-    if (isTavernFloor) {
+    const activeFloor = snapshot.floor ?? map.floor;
+    const activeBiome = map.biome;
+    sfx.unlockAudio();
+    sfx.startFloorAmbience(activeFloor, activeBiome);
+
+    const handleInteraction = () => {
       sfx.unlockAudio();
-      sfx.startTavernAmbience();
+      sfx.startFloorAmbience(activeFloor, activeBiome);
+    };
+    window.addEventListener('pointerdown', handleInteraction, { once: true });
+    window.addEventListener('keydown', handleInteraction, { once: true });
 
-      const handleTavernClick = () => {
-        sfx.unlockAudio();
-        sfx.startTavernAmbience();
-      };
-      window.addEventListener('pointerdown', handleTavernClick, { once: true });
-      window.addEventListener('keydown', handleTavernClick, { once: true });
-
-      return () => {
-        window.removeEventListener('pointerdown', handleTavernClick);
-        window.removeEventListener('keydown', handleTavernClick);
-        sfx.stopTavernAmbience();
-      };
-    } else {
-      sfx.stopTavernAmbience();
-    }
-  }, [map.floor, snapshot.floor]);
+    return () => {
+      window.removeEventListener('pointerdown', handleInteraction);
+      window.removeEventListener('keydown', handleInteraction);
+      sfx.stopFloorAmbience();
+    };
+  }, [map.floor, map.biome, snapshot.floor]);
 
   const handleUpdateTouchSettings = (newSettings: TouchSettings) => {
     setTouchSettings(newSettings);
@@ -651,6 +697,7 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
         onTriggerAction={handleTriggerActionWithPortal}
         onSendPing={onSendPing}
         onSendCommand={onSendAdminCommand}
+        onNpcDialogueAnchor={setNpcDialogueAnchor}
         chatFocused={chatFocused}
         controlsBlocked={controlsBlocked}
       />
@@ -742,7 +789,7 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
                 setExpeditionGateOpen(true);
               }}
               className="stone-button stone-button-gold text-[9px] sm:text-xs py-0.5 px-1.5 sm:py-1 sm:px-2.5 animate-pulse"
-              title="Open Expedition Gate (Embark or Join Party)"
+              title="Open Expedition Gate"
             >
               <span className="hidden sm:inline">Expedition Gate</span>
               <span className="sm:hidden">Gate</span>
@@ -758,7 +805,7 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
                 setExpandedMapOpen(true);
               }}
               className="stone-button stone-button-gold text-[9px] sm:text-xs py-0.5 px-1.5 sm:py-1 sm:px-2.5"
-              title="Open Expanded Tactical Map [M]"
+              title="Map [M]"
             >
               <span className="hidden sm:inline">[M] Map</span>
               <span className="sm:hidden">Map</span>
@@ -773,7 +820,7 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
                     setInventoryModalOpen(true);
                   }}
                   className="stone-button stone-button-dark text-[9px] sm:text-xs relative flex items-center gap-1 py-0.5 px-1.5 sm:py-1 sm:px-2.5"
-                  title="Open Advanced Inventory & Character Sheet [I]"
+                  title="Inventory & Loadout [I]"
                 >
                   <span className="hidden sm:inline">[I] Inventory</span>
                   <span className="sm:hidden">Inv</span>
@@ -791,7 +838,7 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
                     setAttributesModalOpen(true);
                   }}
                   className="stone-button stone-button-gold text-[9px] sm:text-xs relative py-0.5 px-1.5 sm:py-1 sm:px-2.5"
-                  title="Open Stat Allocation Panel"
+                  title="Attributes [P]"
                 >
                   <span className="hidden sm:inline">[P] Attributes</span>
                   <span className="sm:hidden">Stats</span>
@@ -1251,7 +1298,7 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
               <div className="flex flex-wrap gap-1">
                 {myShieldLocked && (
                   <div
-                    title="Permanent Shield Lock (Crimson War Axe): Shield gain from all sources is blocked while equipped. Existing Shield is preserved."
+                    title="Shield gain blocked while Crimson War Axe is equipped."
                     className="px-1.5 py-0.5 rounded-sm border border-[#EF4444]/75 bg-[#450A0A]/75 text-[#FCA5A5] text-[9px] font-mono font-bold tracking-wide"
                   >
                     SHIELD LOCKED
@@ -1591,8 +1638,8 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
             }}
             title={
               isSilenced
-                ? 'Silenced: Tactical ability sealed'
-                : `${activeTactical.name}${activeTactical.source === 'weapon' && activeTactical.weaponName ? ` (${activeTactical.weaponName})` : ''}: ${activeTactical.description} (${(activeTactical.cooldownMs / 1000).toFixed(1)}s CD · Hold & drag to aim, release to cast)`
+                ? 'Silenced: Tactical sealed'
+                : `${activeTactical.name}: ${activeTactical.description} (${(activeTactical.cooldownMs / 1000).toFixed(1)}s CD)`
             }
             style={
               !isSilenced && tacSec === 0 && activeTactical.source !== 'class'
@@ -1638,7 +1685,7 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
                 startDesktopButtonAim('ult', e.clientX, e.clientY);
               }
             }}
-            title={isSilenced ? 'Silenced: Ultimate ability sealed' : `${myDef.ultName} (Hold & drag to aim, release to cast)`}
+            title={isSilenced ? 'Silenced: Ultimate sealed' : `${myDef.ultName}: ${myDef.ultDesc}`}
             className={`stone-button flex-col items-start min-w-[120px] h-auto py-1.5 ${
               activeAimUi?.action === 'ult'
                 ? 'stone-button-gold ring-2 ring-[#FEF08A]'
@@ -1668,7 +1715,7 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
                 startDesktopButtonAim('dash', e.clientX, e.clientY);
               }
             }}
-            title="Evasion Dash (Hold & drag to aim, release to dash)"
+            title="Dash (hold to aim, release to dash)"
             className={`stone-button flex-col items-start min-w-[110px] h-auto py-1.5 ${
               activeAimUi?.action === 'dash'
                 ? 'stone-button-gold ring-2 ring-[#FDE68A]'
@@ -1843,21 +1890,21 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
             <div className="flex items-start justify-between gap-3">
               <div className="space-y-1 flex-1 text-center sm:text-left">
                 <h2 className="font-display text-xl sm:text-2xl text-white">
-                  Choose an Ancient Relic
+                  Choose Relic
                 </h2>
-                <p className="text-xs sm:text-sm text-[#D0CEDB]">
+                <p className="text-xs text-[#D0CEDB]">
                   {me.activeChestPropId
-                    ? 'Take a relic now, or close the chest to leave it inside and decide later.'
-                    : 'Select one permanent boon for your party expedition.'}
+                    ? 'Claim one relic, or close to leave it inside.'
+                    : 'Pick one permanent boon.'}
                 </p>
               </div>
               <button
                 type="button"
                 onClick={handleCloseLootChest}
                 className="stone-button stone-button-dark px-3 py-1.5 text-xs font-mono text-[#E5E3F0] hover:text-white border border-[#4A4766] shrink-0"
-                title="Close chest without taking a relic [Esc]"
+                title="Close [Esc]"
               >
-                {me.activeChestPropId ? 'Close Chest [Esc]' : 'Close [Esc]'}
+                {me.activeChestPropId ? 'Close [Esc]' : 'Close [Esc]'}
               </button>
             </div>
 
@@ -1899,7 +1946,7 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
 
             {(me.pendingScrollChoices?.length ?? 0) > 0 && me.activeChestPropId && (
               <div className="text-center text-[11px] font-mono text-[#A5B4FC]">
-                This chest also holds Ancient Scroll inscriptions — you can inspect them next or close the chest anytime.
+                Chest also contains Ancient Scrolls.
               </div>
             )}
           </div>
@@ -1916,24 +1963,24 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
               <div className="flex items-start justify-between gap-3">
                 <div className="space-y-1 flex-1 text-center sm:text-left">
                   <div className="text-[11px] font-mono uppercase tracking-widest text-[#A5B4FC]">
-                    Arcanist Inscription · Tactical Override
+                    Arcanist Scroll · [Q] Override
                   </div>
                   <h2 className="font-display text-xl sm:text-2xl text-white">
-                    Choose an Ancient Scroll
+                    Choose Ancient Scroll
                   </h2>
-                  <p className="text-xs sm:text-sm text-[#D0CEDB]">
+                  <p className="text-xs text-[#D0CEDB]">
                     {me.activeChestPropId
-                      ? 'Inscribe a Scroll to reshape your [Q] Tactical Skill, or close the chest to leave them inside.'
-                      : 'Inscribe one Scroll to reshape your [Q] Tactical Skill, or dismiss to keep your current skill.'}
+                      ? 'Replaces your [Q] skill. Close to leave in chest.'
+                      : 'Replaces your [Q] skill, or dismiss to keep current.'}
                   </p>
                 </div>
                 <button
                   type="button"
                   onClick={handleCloseLootChest}
                   className="stone-button stone-button-dark px-3 py-1.5 text-xs font-mono text-[#E5E3F0] hover:text-white border border-[#4A4766] shrink-0"
-                  title={me.activeChestPropId ? 'Close chest and keep scrolls inside [Esc]' : 'Keep current tactical skill [Esc]'}
+                  title="Close [Esc]"
                 >
-                  {me.activeChestPropId ? 'Close Chest [Esc]' : 'Keep Current [Esc]'}
+                  {me.activeChestPropId ? 'Close [Esc]' : 'Keep [Esc]'}
                 </button>
               </div>
 
@@ -2025,27 +2072,14 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
         />
       )}
 
-      {/* Animated CSS Sprite NPC Dialogue Banner */}
-      {(() => {
-        const speakingNpc = snapshot.npcs?.find((n) => (n.speakingMs ?? 0) > 0);
-        if (!speakingNpc) return null;
-        const isBram = speakingNpc.id === 'npc_bram';
-        const isLena = speakingNpc.id === 'npc_lena';
-        const isAleph = speakingNpc.id === 'npc_aleph';
-        const isGate = speakingNpc.id === 'npc_warden_gate' || speakingNpc.name.includes('Gate');
-        const avatarTag = isBram ? '[HOST]' : isLena ? '[BREWER]' : isAleph ? '[MYSTIC]' : isGate ? '[GATE]' : '[NPC]';
-        const roleLabel = isBram
-          ? 'Innkeeper & Host'
-          : isLena
-            ? 'Meadmaster & Strategist'
-            : isAleph
-              ? 'Mysterious Cloaked Figure'
-              : isGate
-                ? 'Sanctuary Monument'
-                : 'Mercenary Commander';
-
+      {/* Compact Floating Option Buttons Anchored Below World Typewriter Bubble (Local Player Only) */}
+      {me?.npcDialogue && (() => {
+        const dlg = me.npcDialogue!;
         const handlePickOption = (optionId: string) => {
           sfx.playUiClick('confirm');
+          if (optionId === 'goodbye' || optionId === 'reset_stats') {
+            optimisticCloseDialogue();
+          }
           if (optionId === 'reset_stats') {
             onSendAdminCommand?.({ type: 'player:reset_attributes' });
           } else if (optionId === 'goodbye') {
@@ -2054,69 +2088,49 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
             onSendAdminCommand?.({ type: 'player:dialogue_pick', optionId });
           }
         };
+        const anchored = npcDialogueAnchor && npcDialogueAnchor.npcId === dlg.npcId;
+        const clampedLeft =
+          anchored && typeof window !== 'undefined'
+            ? Math.max(130, Math.min(window.innerWidth - 130, npcDialogueAnchor.screenX))
+            : undefined;
+        const clampedTop =
+          anchored && typeof window !== 'undefined'
+            ? Math.max(88, Math.min(window.innerHeight - 64, npcDialogueAnchor.screenY))
+            : undefined;
 
         return (
-          <div className="fixed bottom-24 sm:bottom-20 left-1/2 -translate-x-1/2 z-40 max-w-xl w-[92vw] sm:w-full pointer-events-auto">
-            <div className="stone-panel p-4 sm:p-5 flex items-start gap-4 transition-all animate-in slide-in-from-bottom-4 duration-300 shadow-2xl border-2 border-[#D9AA52]">
-              <div className="stone-plaque w-12 h-12 sm:w-14 sm:h-14 shrink-0 flex items-center justify-center font-mono font-bold text-xs text-[#FCD34D] relative overflow-hidden shadow-inner">
-                <span className="animate-pulse">{avatarTag}</span>
-                <span className="absolute bottom-0 inset-x-0 h-1.5 bg-[#FCD34D] animate-ping" />
-              </div>
-              <div className="flex-1 space-y-2">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="font-display font-bold text-sm sm:text-base text-[#FCD34D] flex items-center gap-1.5">
-                    {speakingNpc.name}
-                    <span className="text-xs font-mono text-[#BDBACF] font-normal">
-                      · {roleLabel}
-                    </span>
-                  </span>
-                  <div className="flex items-center gap-2">
-                    <span className="text-[10px] font-mono px-2 py-0.5 bg-[#D9AA52]/20 text-[#FDE68A] border border-[#D9AA52]/40">
-                      {speakingNpc.speakingMs && speakingNpc.speakingMs > 6000 ? 'INTERACTIVE' : 'SPEAKING'}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        sfx.playUiClick();
-                        onSendAdminCommand?.({ type: 'player:dialogue_close' });
-                      }}
-                      className="stone-button stone-button-dark w-6 h-6 p-0 text-xs font-bold text-white flex items-center justify-center shrink-0"
-                      title="Close Dialogue"
-                    >
-                      ✕
-                    </button>
-                  </div>
-                </div>
-                <p className="text-xs sm:text-sm text-[#F1F5F9] font-sans leading-relaxed italic">
-                  "{speakingNpc.dialogue}"
-                </p>
-
-                {speakingNpc.options && speakingNpc.options.length > 0 && (
-                  <div className="flex flex-wrap gap-2 pt-2 border-t border-white/10 mt-2">
-                    {speakingNpc.options.map((opt) => (
-                      <button
-                        key={opt.id}
-                        type="button"
-                        onClick={() => handlePickOption(opt.id)}
-                        className="stone-button stone-button-gold text-[10px] sm:text-xs py-1.5 px-3 min-h-0"
-                      >
-                        {opt.label}
-                      </button>
-                    ))}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        sfx.playUiClick();
-                        onSendAdminCommand?.({ type: 'player:dialogue_close' });
-                      }}
-                      className="stone-button stone-button-dark text-[10px] sm:text-xs py-1.5 px-3 min-h-0"
-                    >
-                      Goodbye
-                    </button>
-                  </div>
-                )}
-              </div>
-            </div>
+          <div
+            style={
+              anchored && clampedLeft !== undefined && clampedTop !== undefined
+                ? { left: `${clampedLeft}px`, top: `${clampedTop}px`, transform: 'translateX(-50%)' }
+                : undefined
+            }
+            className={`fixed z-40 pointer-events-auto flex flex-wrap items-center justify-center gap-1.5 px-2 py-1.5 bg-[#191824]/95 border-2 border-[#D9AA52] shadow-2xl ${
+              anchored ? '' : 'bottom-24 left-1/2 -translate-x-1/2'
+            }`}
+          >
+            {dlg.options && dlg.options.map((opt, idx) => (
+              <button
+                key={opt.id}
+                type="button"
+                onClick={() => handlePickOption(opt.id)}
+                className="stone-button stone-button-gold text-[10px] sm:text-[11px] font-mono py-1 px-2.5 min-h-0"
+              >
+                [{idx + 1}] {opt.label}
+              </button>
+            ))}
+            <button
+              type="button"
+              onClick={() => {
+                sfx.playUiClick();
+                optimisticCloseDialogue();
+                onSendAdminCommand?.({ type: 'player:dialogue_close' });
+              }}
+              className="stone-button stone-button-dark text-[10px] sm:text-[11px] font-mono py-1 px-2 min-h-0"
+              title="Close [Esc]"
+            >
+              [Esc] Close
+            </button>
           </div>
         );
       })()}
@@ -2305,12 +2319,12 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
                     </span>
                   </h2>
                   <p className="text-xs text-[#8E8C9E]">
-                    Allocate earned points to empower {me.username} ({HERO_CLASSES[me.heroClass].name}).
+                    {me.username} · {HERO_CLASSES[me.heroClass].name}
                   </p>
                 </div>
                 <div className="flex items-center gap-3">
                   <div className="text-right">
-                    <div className="text-[10px] uppercase font-mono text-[#8E8C9E]">Available Points</div>
+                    <div className="text-[10px] uppercase font-mono text-[#8E8C9E]">Available</div>
                     <div className="text-sm font-mono font-bold text-[#FCD34D]">
                       {me.attributePoints} PTS
                     </div>
@@ -2322,7 +2336,7 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
                       setAttributesModalOpen(false);
                     }}
                     className="stone-button stone-button-dark w-8 h-8 p-0 text-white text-sm font-bold"
-                    title="Close"
+                    title="Close [Esc]"
                   >
                     ✕
                   </button>
@@ -2333,7 +2347,7 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
               <div className="stone-input p-3 space-y-2">
                 <div className="flex items-center justify-between gap-2 flex-wrap">
                   <div className="flex items-center gap-2">
-                    <span className="text-[10px] font-mono uppercase text-[#FCD34D] font-bold">[STAT PROJECTIONS]</span>
+                    <span className="text-[10px] font-mono uppercase text-[#FCD34D] font-bold">PROJECTIONS</span>
                     <span
                       className="text-[10px] font-mono font-bold px-1.5 py-0.5 border"
                       style={{
@@ -2354,39 +2368,41 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
                     }}
                     className="stone-button stone-button-gold py-0.5 px-2.5 text-[10px] font-mono font-bold"
                   >
-                    Full Inventory Sheet [I]
+                    Inventory [I]
                   </button>
                 </div>
                 <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-center font-mono text-[11px]">
                   <div className="bg-[#1A1828] p-1.5 border border-[#3A384C]">
                     <div className="text-[9px] text-[#94A3B8] uppercase">Eff. DPS</div>
-                    <div className="font-bold text-[#FCD34D]">{liveStats.effectiveDps}</div>
+                    <div className="font-bold" style={{ color: COMBAT_STAT_COLORS.dps }}>{liveStats.effectiveDps}</div>
                   </div>
                   <div className="bg-[#1A1828] p-1.5 border border-[#3A384C]">
                     <div className="text-[9px] text-[#94A3B8] uppercase">Eff. HP</div>
-                    <div className="font-bold text-[#34D399]">{liveStats.effectiveHp}</div>
+                    <div className="font-bold" style={{ color: COMBAT_STAT_COLORS.ehp }}>{liveStats.effectiveHp}</div>
                   </div>
                   <div className="bg-[#1A1828] p-1.5 border border-[#3A384C]">
                     <div className="text-[9px] text-[#94A3B8] uppercase">Max HP</div>
-                    <div className="font-bold text-[#10B981]">{liveStats.maxHp}</div>
+                    <div className="font-bold" style={{ color: COMBAT_STAT_COLORS.hp }}>{liveStats.maxHp}</div>
                   </div>
                   <div className="bg-[#1A1828] p-1.5 border border-[#3A384C]">
                     <div className="text-[9px] text-[#94A3B8] uppercase">
                       {me.heroClass === 'cleric' ? 'Sustain' : 'Crit Rate'}
                     </div>
-                    <div className="font-bold text-[#38BDF8]">
+                    <div
+                      className="font-bold"
+                      style={{ color: me.heroClass === 'cleric' ? COMBAT_STAT_COLORS.hp : COMBAT_STAT_COLORS.crit }}
+                    >
                       {me.heroClass === 'cleric' ? `${liveStats.healingPerSec}/s` : `${liveStats.critChancePct}%`}
                     </div>
                   </div>
                   <div className="bg-[#1A1828] p-1.5 border border-[#3A384C] col-span-2 sm:col-span-1">
-                    <div className="text-[9px] text-[#94A3B8] uppercase">Phys Armor</div>
-                    <div className="font-bold text-[#60A5FA]">{liveStats.physicalResistPct}%</div>
+                    <div className="text-[9px] text-[#94A3B8] uppercase">Armor</div>
+                    <div className="font-bold" style={{ color: COMBAT_STAT_COLORS.armor }}>{liveStats.physicalResistPct}%</div>
                   </div>
                 </div>
               </div>
 
-              <div className="space-y-3">
-                {/* Helper for rendering attribute quick-allocation buttons */}
+              <div className="space-y-2.5">
                 {(() => {
                   const renderQuickButtons = (attrKey: 'strength' | 'dexterity' | 'vitality' | 'intelligence' | 'faith', currentVal: number) => {
                     const atMax = currentVal >= MAX_ATTRIBUTE;
@@ -2401,7 +2417,7 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
                             onSendAdminCommand?.({ type: 'player:spend_attribute', attribute: attrKey, amount: 1 });
                           }}
                           className="stone-button stone-button-dark py-1.5 px-2 text-[11px] font-bold disabled:opacity-30"
-                          title="Allocate +1 point"
+                          title="+1"
                         >
                           +1
                         </button>
@@ -2413,7 +2429,7 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
                             onSendAdminCommand?.({ type: 'player:spend_attribute', attribute: attrKey, amount: 5 });
                           }}
                           className="stone-button stone-button-dark py-1.5 px-2 text-[11px] font-bold disabled:opacity-30"
-                          title="Allocate +5 points"
+                          title="+5"
                         >
                           +5
                         </button>
@@ -2425,7 +2441,7 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
                             onSendAdminCommand?.({ type: 'player:spend_attribute', attribute: attrKey, amount: 10 });
                           }}
                           className="stone-button stone-button-dark py-1.5 px-2 text-[11px] font-bold disabled:opacity-30"
-                          title="Allocate +10 points"
+                          title="+10"
                         >
                           +10
                         </button>
@@ -2438,7 +2454,7 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
                             onSendAdminCommand?.({ type: 'player:spend_attribute', attribute: attrKey, amount: maxSpend });
                           }}
                           className="stone-button stone-button-dark py-1.5 px-2.5 text-[11px] font-bold text-[#FCD34D] disabled:opacity-30"
-                          title="Spend all remaining available attribute points into this stat"
+                          title="Spend remaining points"
                         >
                           MAX
                         </button>
@@ -2446,95 +2462,43 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
                     );
                   };
 
-                  return (
-                    <>
-                      {/* Strength */}
-                      <div className="stone-plaque p-3.5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                  return PRIMARY_STAT_ORDER.map((attrKey) => {
+                    const meta = PRIMARY_STAT_THEME[attrKey];
+                    const currentVal = me[attrKey] || 0;
+                    return (
+                      <div
+                        key={attrKey}
+                        className="stone-plaque p-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5"
+                      >
                         <div className="space-y-1">
                           <div className="flex items-center gap-2">
-                            <span className="text-xs font-mono font-bold text-[#EF4444]">STR · STRENGTH</span>
-                            <span className="text-xs font-mono font-bold text-white bg-[#252336] px-2 py-0.5 border border-[#3A384C]">
-                              {me.strength || 0} / {MAX_ATTRIBUTE}
+                            <span
+                              className="text-xs font-mono font-bold tracking-wide"
+                              style={{ color: meta.color }}
+                            >
+                              {meta.short} · {meta.name.toUpperCase()}
+                            </span>
+                            <span
+                              className="text-xs font-mono font-bold bg-[#252336] px-2 py-0.5 border"
+                              style={{ color: meta.textColor, borderColor: meta.borderColor }}
+                            >
+                              {currentVal} / {MAX_ATTRIBUTE}
                             </span>
                           </div>
-                          <p className="text-[11px] text-[#A6A4B6]">
-                            Increases physical damage (+0.8% per point) &amp; DoT scaling (+0.1% per point) for Vanguard, and grants physical armor (+0.15% per point).
+                          <p className="text-[11px] text-[#B3B1C4] font-mono">
+                            {meta.scalingSummary}
                           </p>
                         </div>
-                        {renderQuickButtons('strength', me.strength || 0)}
+                        {renderQuickButtons(attrKey, currentVal)}
                       </div>
-
-                      {/* Vitality */}
-                      <div className="stone-plaque p-3.5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-                        <div className="space-y-1">
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs font-mono font-bold text-[#10B981]">VIT · VITALITY</span>
-                            <span className="text-xs font-mono font-bold text-white bg-[#252336] px-2 py-0.5 border border-[#3A384C]">
-                              {me.vitality || 0} / {MAX_ATTRIBUTE}
-                            </span>
-                          </div>
-                          <p className="text-[11px] text-[#A6A4B6]">
-                            Increases maximum health pool (+5 Max HP per point) and grants passive combat health regeneration every 2s (max(1, floor(VIT × 0.1)) at 6+ VIT).
-                          </p>
-                        </div>
-                        {renderQuickButtons('vitality', me.vitality || 0)}
-                      </div>
-
-                      {/* Dexterity */}
-                      <div className="stone-plaque p-3.5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-                        <div className="space-y-1">
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs font-mono font-bold text-[#38BDF8]">DEX · DEXTERITY</span>
-                            <span className="text-xs font-mono font-bold text-white bg-[#252336] px-2 py-0.5 border border-[#3A384C]">
-                              {me.dexterity || 0} / {MAX_ATTRIBUTE}
-                            </span>
-                          </div>
-                          <p className="text-[11px] text-[#A6A4B6]">
-                            Increases Ranger damage (+0.8%) &amp; DoT scaling (+0.1%), attack speed (+0.4%), movement speed (+0.25%), and crit chance (+0.3%).
-                          </p>
-                        </div>
-                        {renderQuickButtons('dexterity', me.dexterity || 0)}
-                      </div>
-
-                      {/* Intelligence */}
-                      <div className="stone-plaque p-3.5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-                        <div className="space-y-1">
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs font-mono font-bold text-[#818CF8]">INT · INTELLIGENCE</span>
-                            <span className="text-xs font-mono font-bold text-white bg-[#252336] px-2 py-0.5 border border-[#3A384C]">
-                              {me.intelligence || 0} / {MAX_ATTRIBUTE}
-                            </span>
-                          </div>
-                          <p className="text-[11px] text-[#A6A4B6]">
-                            Increases Arcanist damage (+0.8%) &amp; DoT scaling (+0.1%), reduces ability cooldowns (+0.2% CDR), and adds elemental resistance (+0.15%).
-                          </p>
-                        </div>
-                        {renderQuickButtons('intelligence', me.intelligence || 0)}
-                      </div>
-
-                      {/* Faith */}
-                      <div className="stone-plaque p-3.5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-                        <div className="space-y-1">
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs font-mono font-bold text-[#FDE047]">FTH · FAITH</span>
-                            <span className="text-xs font-mono font-bold text-white bg-[#252336] px-2 py-0.5 border border-[#3A384C]">
-                              {me.faith || 0} / {MAX_ATTRIBUTE}
-                            </span>
-                          </div>
-                          <p className="text-[11px] text-[#A6A4B6]">
-                            Increases Cleric divine damage (+0.8%), healing (+0.6%), DoT scaling (+0.1%), and crowd-control duration resistance (+0.3%).
-                          </p>
-                        </div>
-                        {renderQuickButtons('faith', me.faith || 0)}
-                      </div>
-                    </>
-                  );
+                    );
+                  });
                 })()}
               </div>
 
               <div className="pt-3 border-t border-[#2B293A] flex items-center justify-between">
                 <p className="text-[11px] font-mono text-[#8E8C9E]">
-                  Gain +3 attribute points per level (Cap Lv. {MAX_LEVEL}).
+                  +3 PTS / level (Cap Lv. {MAX_LEVEL})
                 </p>
                 <button
                   type="button"
@@ -2543,7 +2507,7 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
                     onSendAdminCommand?.({ type: 'player:reset_attributes' });
                   }}
                   className="stone-button stone-button-red text-xs py-1.5 px-3 font-mono font-bold"
-                  title="Reset all allocated attributes and reclaim points"
+                  title="Refund all allocated points"
                 >
                   Reset Stats
                 </button>

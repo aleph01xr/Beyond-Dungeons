@@ -130,8 +130,7 @@ export const ExpeditionGateModal: React.FC<ExpeditionGateModalProps> = ({
             </h2>
           </div>
           <p className="text-xs sm:text-sm text-[#C8C5D8] font-sans leading-relaxed">
-            Step through the dimensional rift to venture into the depths of Beyond.
-            You will enter your own independent multiplayer dungeon instance while other visitors remain safe in the Sanctuary Tavern.
+            Enter a private multiplayer dungeon instance while the Tavern remains open.
           </p>
         </div>
 
@@ -274,12 +273,9 @@ export const ExpeditionGateModal: React.FC<ExpeditionGateModalProps> = ({
                           )}
                         </div>
                         <p className="text-[11px] text-[#A6A3B8] mt-1 leading-snug">
-                          {tier === 'Normal' &&
-                            'Standard monsters, balanced hazards. Best for all adventurers.'}
-                          {tier === 'Heroic' &&
-                            'Enemies strike harder with deadlier elite affixes.'}
-                          {tier === 'Abyssal' &&
-                            'Relentless swarms, catastrophic damage, merciless bosses.'}
+                          {tier === 'Normal' && 'Standard enemies & hazards.'}
+                          {tier === 'Heroic' && 'Stronger enemies & elite affixes.'}
+                          {tier === 'Abyssal' && 'Relentless swarms & lethal bosses.'}
                         </p>
                       </button>
                     );
@@ -338,8 +334,7 @@ export const ExpeditionGateModal: React.FC<ExpeditionGateModalProps> = ({
                 Enter Expedition Room Code
               </label>
               <p className="text-xs text-[#9B99AC]">
-                Enter the party room code shared by your party host (e.g.,{' '}
-                <span className="font-mono text-[#D9AA52]">BYND-7482</span>).
+                Enter a host code (e.g., <span className="font-mono text-[#D9AA52]">BYND-7482</span>).
               </p>
               <div className="flex items-center gap-2 pt-1">
                 <input
@@ -362,7 +357,7 @@ export const ExpeditionGateModal: React.FC<ExpeditionGateModalProps> = ({
             </div>
 
             <div className="text-center text-xs text-[#8E8C9E]">
-              Tip: Room codes allow party members to connect directly without joining the host's Tavern session.
+              Room codes connect straight to the party without entering their Tavern.
             </div>
           </form>
         )}

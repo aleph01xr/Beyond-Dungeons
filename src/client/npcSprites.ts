@@ -1032,11 +1032,15 @@ export function drawNpc(
   ctx: CanvasRenderingContext2D,
   npc: NpcState,
   now: number,
-  facing?: DirectionalPose
+  facing?: DirectionalPose,
+  localSpeakingNpcId?: string | null
 ): void {
   const x = Math.round(npc.x);
   const y = Math.round(npc.y);
-  const isSpeaking = (npc.speakingMs ?? 0) > 0;
+  const isSpeaking =
+    localSpeakingNpcId !== undefined
+      ? npc.id === localSpeakingNpcId
+      : (npc.speakingMs ?? 0) > 0;
   const pose = facing ?? direction8ToPose('S', false);
   const mirrorX = !pose.isPureVertical && pose.facingLeft;
 

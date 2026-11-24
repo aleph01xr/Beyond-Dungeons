@@ -22,9 +22,27 @@
 
 type BossId = 'malakor' | 'vaelor' | 'ignis' | 'malice' | 'archon';
 
+export interface BossSfxOptions {
+  pan?: number;
+  gainScale?: number;
+  pitchScale?: number;
+}
+
 const noiseCache = new WeakMap<AudioContext, AudioBuffer>();
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+const randJitter = (pct: number) => 1 + (Math.random() * 2 - 1) * pct;
+
+function disconnectNodes(nodes: Array<AudioNode | null | undefined>): void {
+  for (const node of nodes) {
+    if (!node) continue;
+    try {
+      node.disconnect();
+    } catch {
+      // ignore
+    }
+  }
+}
 
 function noise(ctx: AudioContext): AudioBuffer {
   const cached = noiseCache.get(ctx);
@@ -68,6 +86,8 @@ function gainEnvelope(g: GainNode, t: number, peak: number, attack: number,
   g.gain.exponentialRampToValueAtTime(0.0001, t + end);
 }
 
+let activeBossCtxOpts: BossSfxOptions = {};
+
 function voice(ctx: AudioContext, dest: AudioNode, t: number, opts: {
   from: number; to?: number; duration: number; peak: number;
   type?: OscillatorType; attack?: number; hold?: number; release?: number;
@@ -75,26 +95,46 @@ function voice(ctx: AudioContext, dest: AudioNode, t: number, opts: {
 }): void {
   const osc = ctx.createOscillator();
   const amp = ctx.createGain();
-  const panner = ctx.createStereoPanner();
+  const panner = typeof ctx.createStereoPanner === 'function' ? ctx.createStereoPanner() : null;
+  const pitchMul = (activeBossCtxOpts.pitchScale ?? 1) * randJitter(0.035);
+  const gainMul = (activeBossCtxOpts.gainScale ?? 1) * randJitter(0.07);
+  const basePan = activeBossCtxOpts.pan ?? 0;
+
   osc.type = opts.type ?? 'sine';
-  osc.frequency.setValueAtTime(Math.max(1, opts.from), t);
+  osc.frequency.setValueAtTime(Math.max(1, opts.from * pitchMul), t);
   if (opts.to !== undefined) {
-    osc.frequency.exponentialRampToValueAtTime(Math.max(1, opts.to), t + Math.max(0.006, opts.duration));
+    osc.frequency.exponentialRampToValueAtTime(
+      Math.max(1, opts.to * pitchMul),
+      t + Math.max(0.006, opts.duration)
+    );
   }
   if (opts.detune) osc.detune.setValueAtTime(opts.detune, t);
-  panner.pan.setValueAtTime(clamp(opts.pan ?? 0, -1, 1), t);
-  gainEnvelope(amp, t, opts.peak, opts.attack ?? 0.004,
+  if (panner) {
+    panner.pan.setValueAtTime(clamp(basePan + (opts.pan ?? 0) * 0.75, -1, 1), t);
+  }
+  gainEnvelope(amp, t, opts.peak * gainMul, opts.attack ?? 0.004,
     opts.hold ?? Math.max(0.008, opts.duration * 0.72),
     opts.release ?? Math.max(0.02, opts.duration * 0.28));
+
+  let shaper: WaveShaperNode | null = null;
   osc.connect(amp);
-  if (opts.drive) {
-    const shaper = saturation(ctx);
+  if (opts.drive && typeof ctx.createWaveShaper === 'function') {
+    shaper = saturation(ctx);
     amp.connect(shaper);
-    shaper.connect(panner);
-  } else {
+    if (panner) {
+      shaper.connect(panner);
+      panner.connect(dest);
+    } else {
+      shaper.connect(dest);
+    }
+  } else if (panner) {
     amp.connect(panner);
+    panner.connect(dest);
+  } else {
+    amp.connect(dest);
   }
-  panner.connect(dest);
+
+  osc.onended = () => disconnectNodes([osc, amp, shaper, panner]);
   const stopAt = t + (opts.hold ?? opts.duration) + (opts.release ?? 0.08) + 0.03;
   osc.start(t);
   osc.stop(stopAt);
@@ -108,25 +148,42 @@ function texture(ctx: AudioContext, dest: AudioNode, t: number, opts: {
   const src = ctx.createBufferSource();
   const filter = ctx.createBiquadFilter();
   const amp = ctx.createGain();
-  const panner = ctx.createStereoPanner();
+  const panner = typeof ctx.createStereoPanner === 'function' ? ctx.createStereoPanner() : null;
+  const filterJitter = randJitter(0.06);
+  const gainMul = (activeBossCtxOpts.gainScale ?? 1) * randJitter(0.08);
+  const basePan = activeBossCtxOpts.pan ?? 0;
+
   src.buffer = noise(ctx);
   filter.type = opts.filter;
   filter.Q.setValueAtTime(opts.q ?? 0.8, t);
-  filter.frequency.setValueAtTime(Math.max(25, opts.from), t);
-  filter.frequency.exponentialRampToValueAtTime(Math.max(25, opts.to), t + opts.duration);
-  panner.pan.setValueAtTime(clamp(opts.pan ?? 0, -1, 1), t);
-  gainEnvelope(amp, t, opts.peak, opts.attack ?? 0.003,
+  filter.frequency.setValueAtTime(Math.max(25, opts.from * filterJitter), t);
+  filter.frequency.exponentialRampToValueAtTime(Math.max(25, opts.to * filterJitter), t + opts.duration);
+  if (panner) {
+    panner.pan.setValueAtTime(clamp(basePan + (opts.pan ?? 0) * 0.75, -1, 1), t);
+  }
+  gainEnvelope(amp, t, opts.peak * gainMul, opts.attack ?? 0.003,
     Math.max(0.006, opts.duration * 0.72), opts.release ?? Math.max(0.025, opts.duration * 0.28));
+
+  let shaper: WaveShaperNode | null = null;
   src.connect(filter);
   filter.connect(amp);
-  if (opts.drive) {
-    const shaper = saturation(ctx);
+  if (opts.drive && typeof ctx.createWaveShaper === 'function') {
+    shaper = saturation(ctx);
     amp.connect(shaper);
-    shaper.connect(panner);
-  } else {
+    if (panner) {
+      shaper.connect(panner);
+      panner.connect(dest);
+    } else {
+      shaper.connect(dest);
+    }
+  } else if (panner) {
     amp.connect(panner);
+    panner.connect(dest);
+  } else {
+    amp.connect(dest);
   }
-  panner.connect(dest);
+
+  src.onended = () => disconnectNodes([src, filter, amp, shaper, panner]);
   src.start(t);
   src.stop(t + opts.duration + (opts.release ?? 0.05) + 0.025);
 }
@@ -429,7 +486,8 @@ export function playBossAbilitySfx(
   ctx: AudioContext,
   dest: AudioNode,
   boss: string,
-  ability: string
+  ability: string,
+  opts: BossSfxOptions = {}
 ): boolean {
   if (!ctx || !dest || ctx.state === 'closed') return false;
   const b = boss.toLowerCase().replace(/[^a-z]/g, '');
@@ -443,11 +501,17 @@ export function playBossAbilitySfx(
     b.includes('malice') ? 'malice' :
     b.includes('archon') ? 'archon' : null;
   if (!id) return false;
-  switch (id) {
-    case 'malakor': return malakor(ctx, dest, a, t);
-    case 'vaelor': return vaelor(ctx, dest, a, t);
-    case 'ignis': return ignis(ctx, dest, a, t);
-    case 'malice': return malice(ctx, dest, a, t);
-    case 'archon': return archon(ctx, dest, a, t);
+  const prevOpts = activeBossCtxOpts;
+  activeBossCtxOpts = opts;
+  try {
+    switch (id) {
+      case 'malakor': return malakor(ctx, dest, a, t);
+      case 'vaelor': return vaelor(ctx, dest, a, t);
+      case 'ignis': return ignis(ctx, dest, a, t);
+      case 'malice': return malice(ctx, dest, a, t);
+      case 'archon': return archon(ctx, dest, a, t);
+    }
+  } finally {
+    activeBossCtxOpts = prevOpts;
   }
 }

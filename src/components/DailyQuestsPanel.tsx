@@ -191,7 +191,7 @@ export const DailyQuestsPanel: React.FC<DailyQuestsPanelProps> = ({
             )}
           </div>
           <p className="text-xs sm:text-sm text-[#9B99AB]">
-            Progress persists across multiple dungeon expeditions. Complete the daily Armory Bounty to unlock a class Armament.
+            Progress persists across runs. Complete the Armory Bounty to unlock class gear.
           </p>
         </div>
 

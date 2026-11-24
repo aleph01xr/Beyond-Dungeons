@@ -11,6 +11,7 @@ import {
   resolveEquippedWeaponForClass,
 } from '../shared/armaments.ts';
 import { type TouchSettings } from './TouchControls.tsx';
+import { COMBAT_STAT_COLORS } from '../shared/statTheme.ts';
 
 interface GameMenuModalProps {
   player: PlayerState;
@@ -96,29 +97,29 @@ export const GameMenuModal: React.FC<GameMenuModalProps> = ({
           <button
             type="button"
             onClick={() => { sfx.playUiClick(); setActiveTab('settings'); }}
-            className={`px-4 py-3 text-xs font-mono font-bold transition-all stone-button ${
+            className={`px-4 py-3 text-xs font-mono font-bold transition-all stone-button whitespace-nowrap ${
               activeTab === 'settings' ? 'stone-button-gold text-black' : 'stone-button-dark text-[#A19FAF]'
             }`}
           >
-            [SYSTEM SETTINGS]
+            System
           </button>
           <button
             type="button"
             onClick={() => { sfx.playUiClick(); setActiveTab('navigation'); }}
-            className={`px-4 py-3 text-xs font-mono font-bold transition-all stone-button ${
+            className={`px-4 py-3 text-xs font-mono font-bold transition-all stone-button whitespace-nowrap ${
               activeTab === 'navigation' ? 'stone-button-gold text-black' : 'stone-button-dark text-[#A19FAF]'
             }`}
           >
-            [NAVIGATION & MENUS]
+            Menus
           </button>
           <button
             type="button"
             onClick={() => { sfx.playUiClick(); setActiveTab('character'); }}
-            className={`px-4 py-3 text-xs font-mono font-bold transition-all stone-button ${
+            className={`px-4 py-3 text-xs font-mono font-bold transition-all stone-button whitespace-nowrap ${
               activeTab === 'character' ? 'stone-button-gold text-black' : 'stone-button-dark text-[#A19FAF]'
             }`}
           >
-            [SOUL OATH & STATS]
+            Hero &amp; Stats
           </button>
         </div>
 
@@ -312,14 +313,14 @@ export const GameMenuModal: React.FC<GameMenuModalProps> = ({
               </div>
 
               <div className="stone-input p-4 space-y-2 text-[#A19FAF]">
-                <div className="text-white font-bold">Hotkeys Reference:</div>
+                <div className="text-white font-bold">Hotkeys</div>
                 <ul className="list-disc list-inside space-y-1">
-                  <li><strong className="text-white">WASD / Arrow Keys</strong>: Move Adventurer</li>
-                  <li><strong className="text-white">Mouse Aim & Click</strong>: Attack / Action</li>
-                  <li><strong className="text-white">I / Tab</strong>: Open Inventory & Relic Vault</li>
-                  <li><strong className="text-white">M</strong>: Open Expanded Tactical Map</li>
-                  <li><strong className="text-white">E</strong>: Interact with Chests, Shrines & NPCs</li>
-                  <li><strong className="text-white">Esc</strong>: Open Master Sanctuary Menu</li>
+                  <li><strong className="text-white">WASD / Arrows</strong>: Move</li>
+                  <li><strong className="text-white">LMB</strong>: Aim &amp; Attack</li>
+                  <li><strong className="text-white">Q / RMB · R · C</strong>: Tactical · Ult · Dash</li>
+                  <li><strong className="text-white">I / Tab</strong>: Inventory &amp; Relics</li>
+                  <li><strong className="text-white">M</strong>: Map · <strong className="text-white">P</strong>: Stats</li>
+                  <li><strong className="text-white">E</strong>: Interact · <strong className="text-white">Esc</strong>: Menu</li>
                 </ul>
               </div>
             </div>
@@ -378,30 +379,33 @@ export const GameMenuModal: React.FC<GameMenuModalProps> = ({
                       {stats.overallRank.label} ({stats.overallRank.score} PTS)
                     </span>
                   </div>
-                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-center text-xs">
+                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-center text-xs tabular-nums">
                     <div className="p-2 stone-plaque">
                       <div className="text-[9px] text-[#A19FAF]">Eff. HP</div>
-                      <div className="font-bold text-[#10B981]">{stats.effectiveHp}</div>
+                      <div className="font-bold" style={{ color: COMBAT_STAT_COLORS.ehp }}>{stats.effectiveHp}</div>
                     </div>
                     <div className="p-2 stone-plaque">
                       <div className="text-[9px] text-[#A19FAF]">Eff. DPS</div>
-                      <div className="font-bold text-[#FCD34D]">{stats.effectiveDps}</div>
+                      <div className="font-bold" style={{ color: COMBAT_STAT_COLORS.dps }}>{stats.effectiveDps}</div>
                     </div>
                     <div className="p-2 stone-plaque">
                       <div className="text-[9px] text-[#A19FAF]">
                         {player.heroClass === 'cleric' ? 'Sustain' : 'DoT Scale'}
                       </div>
-                      <div className="font-bold text-[#F97316]">
+                      <div
+                        className="font-bold"
+                        style={{ color: player.heroClass === 'cleric' ? COMBAT_STAT_COLORS.hp : COMBAT_STAT_COLORS.dot }}
+                      >
                         {player.heroClass === 'cleric' ? `${stats.healingPerSec}/s` : `${stats.dotMultiplier}x`}
                       </div>
                     </div>
                     <div className="p-2 stone-plaque">
                       <div className="text-[9px] text-[#A19FAF]">Crit Rate</div>
-                      <div className="font-bold text-[#38BDF8]">{stats.critChancePct}%</div>
+                      <div className="font-bold" style={{ color: COMBAT_STAT_COLORS.crit }}>{stats.critChancePct}%</div>
                     </div>
                     <div className="p-2 stone-plaque col-span-2 sm:col-span-1">
-                      <div className="text-[9px] text-[#A19FAF]">Phys Armor</div>
-                      <div className="font-bold text-[#60A5FA]">{stats.physicalResistPct}%</div>
+                      <div className="text-[9px] text-[#A19FAF]">Armor</div>
+                      <div className="font-bold" style={{ color: COMBAT_STAT_COLORS.armor }}>{stats.physicalResistPct}%</div>
                     </div>
                   </div>
                 </div>

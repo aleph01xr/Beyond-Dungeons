@@ -32,6 +32,7 @@ import type {
   DifficultyTier,
   GameSnapshot,
   HeroClassId,
+  PlayerNpcDialogueState,
   ServerMessage,
   UserProfile,
 } from './src/shared/types.ts';
@@ -645,6 +646,7 @@ interface ConnectedClient extends ManagedWsClient {
   droppedTicks: number;
   totalDroppedTicks: number;
   needsKeyframe?: boolean;
+  lastSentDialogueKey?: string;
 }
 
 interface RoomDeltaState {
@@ -669,6 +671,21 @@ function generateRoomCode(): string {
 
 function sendJson(ws: WebSocket, msg: ServerMessage, options?: SendFrameOptions): void {
   sendJsonMessage(ws, msg, options);
+}
+
+function getDialogueKey(dialogue: PlayerNpcDialogueState | null | undefined): string {
+  if (!dialogue) return '';
+  return `${dialogue.npcId}:${dialogue.seq}:${dialogue.text}`;
+}
+
+function syncClientNpcDialogue(c: ConnectedClient, room: GameRoom): void {
+  if (c.ws.readyState !== WebSocket.OPEN) return;
+  const dlg = room.getPlayerNpcDialogue(c.userId);
+  const nextKey = getDialogueKey(dlg);
+  if (nextKey !== (c.lastSentDialogueKey ?? '')) {
+    c.lastSentDialogueKey = nextKey;
+    sendJson(c.ws, { type: 'npc:dialogue', dialogue: dlg });
+  }
 }
 
 function broadcastRoomList(): void {
@@ -1899,11 +1916,16 @@ async function startServer() {
       }
 
       if (msg.type === 'room:join') {
-        partyCoordinator.joinOrReconnectRoom(client, toPartyAccount(acc), String(msg.roomId || ''));
+        client.lastSentDialogueKey = '';
+        const res = partyCoordinator.joinOrReconnectRoom(client, toPartyAccount(acc), String(msg.roomId || ''));
+        if (res.ok) {
+          syncClientNpcDialogue(client, res.room);
+        }
         return;
       }
 
       if (msg.type === 'room:leave') {
+        client.lastSentDialogueKey = '';
         partyCoordinator.leaveRoomExplicit(client);
         sendJson(ws, { type: 'room:left' });
         return;
@@ -1932,6 +1954,9 @@ async function startServer() {
             map: res.floorChanged,
           });
           broadcastRoomList();
+        }
+        if (msg.action === 'interact') {
+          syncClientNpcDialogue(client, room);
         }
       } else if (msg.type === 'player:channel_start') {
         room.startDisintegrationChannel(acc.id, msg.aimAngle);
@@ -2316,46 +2341,15 @@ async function startServer() {
           }
         })();
         
-        // Keep Aleph dialogue active with confirmation of reclaimed points
-        const aleph = room.npcs.find(n => n.id === 'npc_aleph');
-        if (aleph) {
-          aleph.dialogue = spent > 0
-            ? `Your spirit is purified. Reclaimed ${spent} attribute points. Forge your destiny anew.`
-            : 'Your attributes are already at balance. Earn greater experience to hone your spirit.';
-          aleph.speakingMs = 9999999;
-          aleph.options = [
-            { id: 'lore', label: 'Who are you?' },
-            { id: 'goodbye', label: 'Thank you, Aleph. (Close)' }
-          ];
-        }
+        // Keep Aleph dialogue active ONLY for the interacting player
+        room.handleAlephResetDialogue(acc.id, spent);
+        syncClientNpcDialogue(client, room);
       } else if (msg.type === 'player:dialogue_close') {
-        const speakingNpc = room.npcs.find(n => (n.speakingMs ?? 0) > 0);
-        if (speakingNpc) {
-          speakingNpc.speakingMs = 0;
-        }
+        room.handleDialogueClose(acc.id);
+        syncClientNpcDialogue(client, room);
       } else if (msg.type === 'player:dialogue_pick') {
-        const speakingNpc = room.npcs.find(n => (n.speakingMs ?? 0) > 0);
-        if (speakingNpc) {
-          if (speakingNpc.id === 'npc_aleph') {
-            if (msg.optionId === 'lore') {
-              speakingNpc.dialogue = 'I am Aleph, weaver of dormant spirits. In this Sanctuary, I return what you have sown so you may reap a new path.';
-              speakingNpc.speakingMs = 9999999; 
-              speakingNpc.options = [
-                { id: 'reset_stats', label: 'I wish to reset my attributes.' },
-                { id: 'back', label: 'I see. (Back)' }
-              ];
-            } else if (msg.optionId === 'back') {
-              speakingNpc.dialogue = 'The paths you walk are many, but your soul remains constant. Do you seek a different focus?';
-              speakingNpc.speakingMs = 9999999;
-              speakingNpc.options = [
-                { id: 'reset_stats', label: 'I wish to reset my attributes.' },
-                { id: 'lore', label: 'Who are you?' }
-              ];
-            } else if (msg.optionId === 'goodbye') {
-              speakingNpc.speakingMs = 0;
-            }
-          }
-        }
+        room.handleDialoguePick(acc.id, msg.optionId);
+        syncClientNpcDialogue(client, room);
       }
     });
 
@@ -2478,6 +2472,10 @@ async function startServer() {
         deltaState.seq = nextSeq;
         deltaState.lastBaseline = cloneSnapshotBaseline(snapshot);
         dirtyNonPlayingRooms.delete(roomId);
+
+        for (const c of roomClientsIter) {
+          syncClientNpcDialogue(c, room);
+        }
       }
 
       if (statusTransitioned) {

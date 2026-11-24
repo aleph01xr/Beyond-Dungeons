@@ -266,12 +266,12 @@ export const HERO_CLASSES: Record<HeroClassId, HeroClassDef> = {
     id: 'vanguard',
     name: 'Vanguard',
     title: 'Ironcrest Bastion',
-    role: 'Frontline Guardian & Juggernaut',
+    role: 'Frontline Tank & Bruiser',
     roleBadge: 'TANK',
-    weapon: 'Sunforged Claymore & Tower Greatshield',
-    weaponType: 'Heavy Cleave & Shield Wall',
+    weapon: 'Sunforged Claymore & Tower Shield',
+    weaponType: 'Heavy Cleave & Shield',
     passiveName: 'Iron Will',
-    passiveDesc: 'Absorbs 15% of all incoming damage. Striking stunned or burning foes restores +3 Shield.',
+    passiveDesc: '-15% incoming damage. Hitting stunned or burning foes restores +3 Shield.',
     maxHp: 155,
     speed: 175,
     damage: 28,
@@ -282,26 +282,26 @@ export const HERO_CLASSES: Record<HeroClassId, HeroClassDef> = {
     capeColor: '#991B1B',
     accentColor: '#F59E0B',
     glowColor: '#FBBF24',
-    lore: 'Sworn knights of the Sunken Bastion who bound their lifeblood into eternal steel. With unbroken wills and towering shields, they stand between ancient horrors and their comrades.',
+    lore: 'Oathbound knights of the Sunken Bastion, immovable behind eternal steel.',
     stats: { survivability: 5, damage: 3, range: 1, mobility: 2, utility: 4 },
     resistances: { physical: 0.28, fire: 0.15, frost: 0.15, lightning: 0.10, poison: 0.15, bleed: 0.30 },
     tacticalName: 'Bulwark Dash',
-    tacticalDesc: 'Slam forward with tower shield, battering through monsters, stunning them for 1.7s and granting +28 Shield to nearby allies.',
+    tacticalDesc: 'Dash and slam: Stuns foes 1.7s and grants nearby allies +28 Shield.',
     tacticalCooldownMs: 4800,
     ultName: 'Aegis Sanctuary',
-    ultDesc: 'Plant your colossal shield into the earth, raising a gleaming dome that deflects projectile barrages and boosts party defense.',
+    ultDesc: 'Raise a protective dome that blocks enemy shots and boosts party defense.',
     ultCooldownMs: 13000,
   },
   ranger: {
     id: 'ranger',
     name: 'Ranger',
     title: 'Thornwood Marksman',
-    role: 'Long-Range Sniper & Scout',
+    role: 'Long-Range Sniper',
     roleBadge: 'MARKSMAN',
     weapon: 'Ashwood Recurve & Barbed Quiver',
-    weaponType: 'Piercing Ranged Bow',
+    weaponType: 'Piercing Bow',
     passiveName: 'Eagle Keenness',
-    passiveDesc: 'Attacks deal +25% Critical damage to targets beyond 180 units. Slaying a foe grants a 2s burst of swiftness.',
+    passiveDesc: '+25% Crit damage beyond 180 range. Kills grant 2s Haste.',
     maxHp: 110,
     speed: 210,
     damage: 24,
@@ -312,26 +312,26 @@ export const HERO_CLASSES: Record<HeroClassId, HeroClassDef> = {
     capeColor: '#1A3826',
     accentColor: '#FBBF24',
     glowColor: '#34D399',
-    lore: 'Sole survivors of the blighted Thornwood groves, master trackers capable of loose-drawing three enchanted shafts in the blink of an eye. Their arrows never falter.',
+    lore: 'Master trackers of the Thornwood whose arrows never miss their mark.',
     stats: { survivability: 2, damage: 5, range: 5, mobility: 5, utility: 2 },
     resistances: { physical: 0.10, fire: 0.10, frost: 0.25, lightning: 0.15, poison: 0.45, bleed: 0.20 },
     tacticalName: 'Frost Volley',
-    tacticalDesc: 'Loose a 5-arrow crystalline fan that pierces foes, slowing enemy advance by 50% and chilling their attacks.',
+    tacticalDesc: 'Fire 5 piercing frost arrows that slow enemies by 50%.',
     tacticalCooldownMs: 4200,
     ultName: 'Hunter Quarry',
-    ultDesc: 'Mark elites and bosses with radiant moonlight hunters-brand, exposing their weak points so all co-op allies deal +35% bonus strike damage.',
+    ultDesc: 'Mark bosses and elites so all allies deal +35% damage.',
     ultCooldownMs: 11500,
   },
   arcanist: {
     id: 'arcanist',
     name: 'Arcanist',
     title: 'Astral Conduit',
-    role: 'AoE Spellweaver & Cosmic Blaster',
+    role: 'AoE Spellweaver',
     roleBadge: 'CASTER',
-    weapon: 'Runebound Spire & Orbiting Astral Orbs',
-    weaponType: 'Cosmic Shards & Starlight',
+    weapon: 'Runebound Spire & Astral Orbs',
+    weaponType: 'Cosmic Shards & Scrolls',
     passiveName: 'Astral Resonance',
-    passiveDesc: 'Basic attacks loose homing cosmic shards that pierce an additional enemy. Spells leave lingering star rifts.',
+    passiveDesc: 'Primary attacks home & pierce +1 foe. Spells spawn star rifts.',
     maxHp: 100,
     speed: 188,
     damage: 24,
@@ -342,26 +342,26 @@ export const HERO_CLASSES: Record<HeroClassId, HeroClassDef> = {
     capeColor: '#312E81',
     accentColor: '#38BDF8',
     glowColor: '#60A5FA',
-    lore: 'Scholars of the shattered celestial spires who channel raw starlight through crystalline conduits. They weave time and void to obliterate dungeon hordes from afar.',
+    lore: 'Scholars of shattered celestial spires who bend starlight and time.',
     stats: { survivability: 2, damage: 5, range: 4, mobility: 3, utility: 4 },
     resistances: { physical: 0.05, fire: 0.25, frost: 0.35, lightning: 0.45, poison: 0.15, bleed: 0.10 },
     tacticalName: 'Astral Nova',
-    tacticalDesc: 'Unleash 8 piercing arcane shards in a starburst. Ancient Scrolls (Fireball, Disintegration, Frost Lance, Chain Lightning, Arcane Meteor, Arcane Orb, Arcane Barrage) replace this Tactical Skill.',
+    tacticalDesc: 'Fire 8 piercing shards in a ring. Replaced when an Ancient Scroll is equipped.',
     tacticalCooldownMs: 5000,
     ultName: 'Chrono Well',
-    ultDesc: 'Anchor a 3s temporal distortion field that suspends enemies, bosses, allies, and ALL projectiles (including player projectiles) in time while leaving the caster unaffected.',
+    ultDesc: 'Freeze foes, allies, and all projectiles for 3s while you act freely.',
     ultCooldownMs: 45000,
   },
   cleric: {
     id: 'cleric',
     name: 'Cleric',
     title: 'Sunbrand Prelate',
-    role: 'Radiant Healer & Divine Enchanter',
+    role: 'Healer & Support',
     roleBadge: 'SUPPORT',
-    weapon: 'Dawnstar Flanged Mace & Reliquary',
-    weaponType: 'Radiant Smite & Holy Relic',
+    weapon: 'Dawnstar Mace & Reliquary',
+    weaponType: 'Radiant Smite & Heal',
     passiveName: 'Radiant Aura',
-    passiveDesc: 'Emits a sacred 140-range warmth that heals wounded party members every 2 seconds (scales with Level & Faith, base 2 HP, +50% when critical), and increases revive speed by 40%.',
+    passiveDesc: 'Heals nearby allies every 2s (scales with Level & Faith) and revives 40% faster.',
     maxHp: 128,
     speed: 185,
     damage: 22,
@@ -372,14 +372,14 @@ export const HERO_CLASSES: Record<HeroClassId, HeroClassDef> = {
     capeColor: '#854D0E',
     accentColor: '#FACC15',
     glowColor: '#FEF08A',
-    lore: 'Devotees of the Eternal Dawn whose sacred chants can mend the gravest wounds and turn undead to ash. A cornerstone of every surviving expedition into the depths.',
+    lore: 'Devotees of the Eternal Dawn whose sacred light mends allies and sears undead.',
     stats: { survivability: 4, damage: 3, range: 3, mobility: 2, utility: 5 },
     resistances: { physical: 0.15, fire: 0.40, frost: 0.20, lightning: 0.15, poison: 0.35, bleed: 0.25 },
     tacticalName: 'Sanctified Pulse',
-    tacticalDesc: 'Release a blinding wave of golden light, healing you and all nearby party members (scales with Level & Faith, base 24 HP) while searing adjacent undead.',
+    tacticalDesc: 'Holy wave: heals nearby allies (scales with Level & Faith) and burns nearby foes.',
     tacticalCooldownMs: 6800,
     ultName: 'Solar Beacon',
-    ultDesc: 'Consecrate holy ground with an avatar of the Sun that continuously heals all allies (scales with Level & Faith, base 4 HP) and rapidly revives downed teammates who enter.',
+    ultDesc: 'Consecrate ground to heal allies over time and rapidly revive downed teammates.',
     ultCooldownMs: 18000,
   },
 };
@@ -397,112 +397,112 @@ export const RELIC_CATALOG: RelicDef[] = [
     id: 'crimson_fang',
     name: 'Crimson Fang',
     category: 'Offense',
-    summary: 'Restore +5 HP whenever you slay an enemy.',
+    summary: 'Heal +5 HP on each kill.',
     accent: '#D14B4B',
   },
   {
     id: 'twinstring_charm',
     name: 'Twinstring Charm',
     category: 'Offense',
-    summary: 'Primary attacks unleash +1 additional projectile or cleave wave, but extra projectiles deal 35% damage.',
+    summary: '+1 extra projectile or wave on primary attacks (35% damage).',
     accent: '#E0A94F',
   },
   {
     id: 'zephyr_greaves',
     name: 'Zephyr Greaves',
     category: 'Mobility',
-    summary: '+15% movement speed across all terrain.',
+    summary: '+15% Movement Speed.',
     accent: '#68B89E',
   },
   {
     id: 'sunfire_signet',
     name: 'Sunfire Signet',
     category: 'Offense',
-    summary: '+12% primary and skill damage.',
+    summary: '+12% attack and skill damage.',
     accent: '#E88348',
   },
   {
     id: 'bastion_pauldron',
     name: 'Bastion Pauldron',
     category: 'Defense',
-    summary: '+30 Max HP and immediate +30 HP recovery.',
+    summary: '+30 Max HP and +30 HP heal on pickup.',
     accent: '#8D9BB5',
   },
   {
     id: 'hourglass_shard',
     name: 'Hourglass Shard',
     category: 'Mobility',
-    summary: 'Tactical and Ultimate cooldowns recharge 25% faster.',
+    summary: '+25% Cooldown Recovery on Tactical & Ultimate.',
     accent: '#76B5E8',
   },
   {
     id: 'keen_arrowhead',
     name: 'Keen Arrowhead',
     category: 'Offense',
-    summary: '+20% critical strike chance (up to 45% total crit cap).',
+    summary: '+20% Crit Chance (45% cap).',
     accent: '#DFC15E',
   },
   {
     id: 'oathbound_censer',
     name: 'Oathbound Censer',
     category: 'Co-op',
-    summary: 'Using your Tactical skill heals nearby co-op allies for +8 HP.',
+    summary: 'Tactical skill heals nearby allies for +8 HP.',
     accent: '#E8CE76',
   },
   {
     id: 'runic_carapace',
     name: 'Runic Carapace',
     category: 'Defense',
-    summary: 'Gain +22 Shield upon entering new rooms, and passive +15% Physical Resistance & +20% Status/Elemental Resistances.',
+    summary: '+22 Shield per new room; +15% Phys & +20% Elem/Status Resist.',
     accent: '#6E85C9',
   },
   {
     id: 'piercing_prism',
     name: 'Piercing Prism',
     category: 'Offense',
-    summary: 'Projectiles and waves pierce +1 extra enemy target.',
+    summary: 'Attacks pierce +1 additional enemy.',
     accent: '#A988E6',
   },
   {
     id: 'cinder_heart',
     name: 'Cinder Heart',
     category: 'Offense',
-    summary: 'Critical hits and tactical skills Ignite enemies with Burn DoT for 4.5s (scales with Level & Primary Attribute).',
+    summary: 'Crits and Tactical skills Burn foes for 4.5s.',
     accent: '#F97316',
   },
   {
     id: 'rimefrost_shard',
     name: 'Rimefrost Shard',
     category: 'Offense',
-    summary: 'Attacks have 35% chance to Chill (3s). Striking a Chilled enemy Freezes them (1.8s base, subject to DR); shattering deals 1.4x hit damage and 35% frost AoE splash.',
+    summary: '35% Chill on hit; hitting Chilled foes Freezes & shatters for 1.4x + frost AoE.',
     accent: '#38BDF8',
   },
   {
     id: 'stormcaller_lodestone',
     name: 'Stormcaller Lodestone',
     category: 'Offense',
-    summary: 'Every 3rd strike inflicts Shock for 5s. Damaging a Shocked foe arcs lightning bolts to up to 3 nearby enemies.',
+    summary: 'Every 3rd hit Shocks (5s); Shocked hits chain to 3 foes.',
     accent: '#FBBF24',
   },
   {
     id: 'viper_crucible',
     name: 'Viper Crucible',
     category: 'Offense',
-    summary: 'Attacks apply virulent Poison for 6s, dealing continuous acid damage and reducing enemy damage output by 30%.',
+    summary: 'Attacks Poison foes for 6s (-30% enemy damage).',
     accent: '#22C55E',
   },
   {
     id: 'bloodletter_talisman',
     name: 'Bloodletter Talisman',
     category: 'Offense',
-    summary: 'Strikes lacerate targets with Bleed for 5s. Bleeding enemies take damage that doubles whenever they attempt to move.',
+    summary: 'Attacks inflict Bleed (5s); damage doubles while moving.',
     accent: '#DC2626',
   },
   {
     id: 'thorned_aegis',
     name: 'Thorned Aegis',
     category: 'Defense',
-    summary: 'When your Shield absorbs enemy damage, discharge a concussive shockwave that Stuns adjacent attackers for 1.8s.',
+    summary: 'Shield hits discharge a shockwave that Stuns nearby foes for 1.8s.',
     accent: '#A855F7',
   },
 ];
@@ -663,6 +663,20 @@ export interface PlayerState {
   bastionCounterMaxMs?: number;
   crimsonFrenzyMs?: number;
   crimsonFrenzyMaxMs?: number;
+  npcDialogue?: PlayerNpcDialogueState | null;
+}
+
+export interface PlayerNpcDialogueState {
+  npcId: string;
+  npcName: string;
+  x: number;
+  y: number;
+  text: string;
+  ttlMs: number;
+  maxTtlMs: number;
+  persistent?: boolean;
+  seq: number;
+  options?: DialogueOption[];
 }
 
 export type PlayerStatusType =
@@ -874,6 +888,7 @@ export interface FloatingEvent {
   attackerId?: string;
   isPrimaryHit?: boolean;
   hitTargetId?: string;
+  targetPlayerId?: string;
 }
 
 export interface ChatMessage {
@@ -1089,6 +1104,7 @@ export type ServerMessage =
   | { type: 'room:tick'; snapshot: GameSnapshot; seq?: number }
   | { type: 'room:delta'; delta: SnapshotDelta }
   | { type: 'chat:message'; message: ChatMessage }
+  | { type: 'npc:dialogue'; dialogue: PlayerNpcDialogueState | null }
   | { type: 'room:left' }
   | { type: 'error'; message: string }
   | { type: 'pong'; t: number; tickMs?: number };

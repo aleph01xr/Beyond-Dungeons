@@ -161,7 +161,6 @@ export function buildSnapshotHudKey(
   const me = snap.players.find((p) => p.id === playerId) || snap.players[0];
   const boss = snap.enemies.find((e) => e.kind === 'boss');
   const near = computeNearInteractable(snap, map, me);
-  const speakingNpc = snap.npcs?.find((n) => (n.speakingMs ?? 0) > 0);
 
   let meKey = 'none';
   if (me) {
@@ -234,8 +233,9 @@ export function buildSnapshotHudKey(
     .map((f) => `${f.id}:${f.cleared ? 1 : 0}:${f.discovered ? 1 : 0}`)
     .join(',');
 
-  const npcKey = speakingNpc
-    ? `${speakingNpc.id}:${speakingNpc.dialogue}:${speakingNpc.options?.length ?? 0}:${(speakingNpc.speakingMs ?? 0) > 6000 ? 1 : 0}`
+  const myDlg = me?.npcDialogue;
+  const npcKey = myDlg
+    ? `${myDlg.npcId}:${myDlg.seq}:${myDlg.text}:${myDlg.options?.length ?? 0}`
     : '';
 
   return [

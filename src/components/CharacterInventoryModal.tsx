@@ -21,6 +21,7 @@ import { sfx } from '../client/sound.ts';
 import { PixelHeroPreview } from './PixelHeroPreview.tsx';
 import { ArmamentIcon } from './ArmamentIcon.tsx';
 import { TacticalSkillIcon } from './TacticalSkillIcon.tsx';
+import { COMBAT_STAT_COLORS, PRIMARY_STAT_THEME, getPrimaryStatColor } from '../shared/statTheme.ts';
 
 interface CharacterInventoryModalProps {
   player: PlayerState;
@@ -205,7 +206,7 @@ export const CharacterInventoryModal: React.FC<CharacterInventoryModalProps> = (
                 onClose();
               }}
               className="stone-button stone-button-dark w-8 h-8 sm:w-9 sm:h-9 p-0 text-white font-mono font-bold text-sm sm:text-base flex items-center justify-center"
-              title="Close Inventory [I]"
+              title="Close [I]"
             >
               ✕
             </button>
@@ -223,7 +224,7 @@ export const CharacterInventoryModal: React.FC<CharacterInventoryModalProps> = (
                 : 'stone-button-dark text-[#A19FAF]'
             }`}
           >
-            <span>[LOADOUT] Gear &amp; Relics</span>
+            <span>Gear &amp; Relics</span>
             <span className="text-[10px] tabular-nums bg-[#252336] px-1.5 py-0.5 border border-[#353442] text-[#FCD34D]">
               {ownedRelics.length}/{MAX_EQUIPPED_RELICS}
             </span>
@@ -238,7 +239,7 @@ export const CharacterInventoryModal: React.FC<CharacterInventoryModalProps> = (
                 : 'stone-button-dark text-[#A19FAF]'
             }`}
           >
-            <span>[ARMORY] Permanent Gear</span>
+            <span>Armory</span>
             <span className="text-[10px] tabular-nums bg-[#252336] px-1.5 py-0.5 border border-[#353442] text-[#E0A94F]">
               {classOwnedCount}/{classCatalogCount}
             </span>
@@ -253,7 +254,7 @@ export const CharacterInventoryModal: React.FC<CharacterInventoryModalProps> = (
                 : 'stone-button-dark text-[#A19FAF]'
             }`}
           >
-            <span>[VAULT] Relic Stash</span>
+            <span>Relic Vault</span>
             <span className="text-[10px] tabular-nums bg-[#252336] px-1.5 py-0.5 border border-[#353442] text-[#38BDF8]">
               {storedRelics.length}/{MAX_STORAGE_SLOTS}
             </span>
@@ -268,7 +269,7 @@ export const CharacterInventoryModal: React.FC<CharacterInventoryModalProps> = (
                 : 'stone-button-dark text-[#A19FAF]'
             }`}
           >
-            <span>[STATS] Projections</span>
+            <span>Stats</span>
             <span className="text-[10px] tabular-nums font-bold px-1.5 py-0.5 border border-[#353442] bg-[#181722]" style={{ color: overallRank.color }}>
               {overallRank.label} · {stats.effectiveDps} DPS
             </span>
@@ -289,7 +290,7 @@ export const CharacterInventoryModal: React.FC<CharacterInventoryModalProps> = (
                     <div>
                       <h3 className="font-mono text-sm font-bold text-[#FCD34D]">Permanent Armaments</h3>
                       <p className="text-[10px] font-mono text-[#A19FAF]">
-                        Account-bound gear · Survives death &amp; dungeon resets
+                        Account-bound · Kept across runs &amp; deaths
                       </p>
                     </div>
                     <button
@@ -473,7 +474,7 @@ export const CharacterInventoryModal: React.FC<CharacterInventoryModalProps> = (
                       </p>
                       {shieldGainLocked && (
                         <p className="text-[10px] font-mono text-[#FCA5A5] mt-1">
-                          SHIELD LOCKED: Crimson War Axe blocks all Shield gain continuously.
+                          SHIELD LOCKED: Crimson War Axe blocks all Shield gain.
                         </p>
                       )}
                     </div>
@@ -487,7 +488,7 @@ export const CharacterInventoryModal: React.FC<CharacterInventoryModalProps> = (
                       </span>
                       <div>
                         <div className="text-xs font-mono font-bold text-white">Health Potions</div>
-                        <div className="text-[10px] text-[#A19FAF]">Restores 30% Max HP on use [E]</div>
+                        <div className="text-[10px] text-[#A19FAF]">Restores 30% Max HP [H / 1]</div>
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
@@ -500,7 +501,7 @@ export const CharacterInventoryModal: React.FC<CharacterInventoryModalProps> = (
                             type="button"
                             onClick={() => onSendAdminCommand({ type: 'player:action', action: 'potion' })}
                             className="stone-button stone-button-dark py-1 px-2.5 text-[10px] font-mono font-bold text-[#5CD68D]"
-                            title="Drink a potion now"
+                            title="Drink 1 potion"
                           >
                             Drink
                           </button>
@@ -508,7 +509,7 @@ export const CharacterInventoryModal: React.FC<CharacterInventoryModalProps> = (
                             type="button"
                             onClick={() => setConfirmDiscardPotion(true)}
                             className="stone-button stone-button-dark py-1 px-2 text-[10px] font-mono font-bold text-[#EF4444]"
-                            title="Discard 1 health potion"
+                            title="Discard 1 potion"
                           >
                             Discard
                           </button>
@@ -594,15 +595,15 @@ export const CharacterInventoryModal: React.FC<CharacterInventoryModalProps> = (
                                 onClick={() => handleStoreRelic(relic.id)}
                                 disabled={storedRelics.length >= MAX_STORAGE_SLOTS}
                                 className="stone-button stone-button-dark text-[10px] font-mono py-1 px-2.5 text-[#38BDF8] disabled:opacity-40"
-                                title={storedRelics.length >= MAX_STORAGE_SLOTS ? 'Vault storage is full (12/12)' : `Move ${relic.name} to Storage Vault`}
+                                title={storedRelics.length >= MAX_STORAGE_SLOTS ? 'Vault full (12/12)' : `Store in Vault`}
                               >
-                                Store in Vault
+                                Store
                               </button>
                               <button
                                 type="button"
                                 onClick={() => setConfirmDelete({ relic, fromStorage: false })}
                                 className="stone-button stone-button-red text-[10px] font-mono py-1 px-2.5"
-                                title={`Dismantle ${relic.name} for +${DISMANTLE_GOLD_REWARD} Gold`}
+                                title={`Dismantle (+${DISMANTLE_GOLD_REWARD}g)`}
                               >
                                 Dismantle
                               </button>
@@ -686,13 +687,13 @@ export const CharacterInventoryModal: React.FC<CharacterInventoryModalProps> = (
                 <div className="flex flex-wrap items-start justify-between gap-4">
                   <div className="space-y-1">
                     <div className="text-[10px] font-mono uppercase text-[#FCD34D]">
-                      [PERMANENT ACCOUNT ARMORY] · {heroDef.name} Lv.{player.level}
+                      Account Armory · {heroDef.name} Lv.{player.level}
                     </div>
                     <h3 className="font-mono text-base sm:text-lg font-bold text-white">
-                      Class Weapons &amp; Vestments ({classOwnedCount}/{classCatalogCount} Unlocked)
+                      Weapons &amp; Vestments ({classOwnedCount}/{classCatalogCount})
                     </h3>
                     <p className="text-xs text-[#A19FAF] font-mono max-w-2xl leading-relaxed">
-                      Permanent Armaments are bound to your account and persist across dungeon runs, deaths, and disconnects. Temporary Relics (5 slots), Vault Stash, and Arcanist Spell Scrolls remain separate expedition systems.
+                      Account-bound gear persists across runs and deaths. Relics and Scrolls stay run-bound.
                     </p>
                   </div>
 
@@ -1010,15 +1011,15 @@ export const CharacterInventoryModal: React.FC<CharacterInventoryModalProps> = (
               {/* Storage Header Banner */}
               <div className="stone-plaque p-4 flex flex-wrap items-center justify-between gap-4">
                 <div className="space-y-1">
-                  <div className="text-[10px] font-mono uppercase text-[#38BDF8]">[PERSONAL SANCTUARY CHEST]</div>
+                  <div className="text-[10px] font-mono uppercase text-[#38BDF8]">Personal Vault</div>
                   <h3 className="font-mono text-base sm:text-lg font-bold text-white flex items-center gap-2">
-                    <span>Vault Storage Stash</span>
+                    <span>Relic Vault</span>
                     <span className="text-xs font-mono px-2 py-0.5 bg-[#252336] border border-[#353442] text-[#FCD34D]">
-                      {storedRelics.length} / {MAX_STORAGE_SLOTS} SLOTS USED
+                      {storedRelics.length} / {MAX_STORAGE_SLOTS}
                     </span>
                   </h3>
                   <p className="text-xs text-[#A19FAF] font-mono max-w-2xl leading-relaxed">
-                    Store extra artifacts here to preserve them across expeditions. Items stored in your vault can be equipped into your active loadout anytime, or dismantled for +{DISMANTLE_GOLD_REWARD} Gold.
+                    Keep spare relics across runs, swap into loadout, or dismantle for +{DISMANTLE_GOLD_REWARD}g.
                   </p>
                 </div>
 
@@ -1082,15 +1083,15 @@ export const CharacterInventoryModal: React.FC<CharacterInventoryModalProps> = (
                                 ? 'stone-button-dark opacity-40 cursor-not-allowed'
                                 : 'stone-button-gold text-black font-bold'
                             }`}
-                            title={isLoadoutFull ? 'Equipped loadout is full (5/5). Unequip an active relic first.' : `Equip ${relic.name} into battle`}
+                            title={isLoadoutFull ? 'Loadout full (5/5)' : `Equip ${relic.name}`}
                           >
-                            {isLoadoutFull ? 'Loadout Full (5/5)' : 'Equip to Loadout'}
+                            {isLoadoutFull ? 'Full (5/5)' : 'Equip'}
                           </button>
                           <button
                             type="button"
                             onClick={() => setConfirmDelete({ relic, fromStorage: true })}
                             className="stone-button stone-button-red text-[10px] font-mono py-1 px-2.5"
-                            title={`Dismantle ${relic.name} for +${DISMANTLE_GOLD_REWARD} Gold`}
+                            title={`Dismantle (+${DISMANTLE_GOLD_REWARD}g)`}
                           >
                             Dismantle
                           </button>
@@ -1158,22 +1159,22 @@ export const CharacterInventoryModal: React.FC<CharacterInventoryModalProps> = (
                     </p>
                   </div>
 
-                  <div className="flex flex-wrap items-center gap-4 stone-input p-3 font-mono text-xs">
+                  <div className="flex flex-wrap items-center gap-4 stone-input p-3 font-mono text-xs tabular-nums">
                     <div>
-                      <span className="text-[#A19FAF] text-[10px] block uppercase">Damage Mult</span>
-                      <span className="text-[#FCD34D] font-bold text-sm">{stats.damageMultiplier}x</span>
+                      <span className="text-[#A19FAF] text-[10px] block uppercase">Dmg Mult</span>
+                      <span className="font-bold text-sm" style={{ color: COMBAT_STAT_COLORS.dps }}>{stats.damageMultiplier}x</span>
                     </div>
                     <div className="border-l border-[#353442] pl-4">
-                      <span className="text-[#A19FAF] text-[10px] block uppercase">Effective HP</span>
-                      <span className="text-[#10B981] font-bold text-sm">{stats.effectiveHp}</span>
+                      <span className="text-[#A19FAF] text-[10px] block uppercase">Eff. HP</span>
+                      <span className="font-bold text-sm" style={{ color: COMBAT_STAT_COLORS.ehp }}>{stats.effectiveHp}</span>
                     </div>
                     <div className="border-l border-[#353442] pl-4">
                       <span className="text-[#A19FAF] text-[10px] block uppercase">Crit Rate</span>
-                      <span className="text-[#38BDF8] font-bold text-sm">{stats.critChancePct}%</span>
+                      <span className="font-bold text-sm" style={{ color: COMBAT_STAT_COLORS.crit }}>{stats.critChancePct}%</span>
                     </div>
                     <div className="border-l border-[#353442] pl-4">
-                      <span className="text-[#A19FAF] text-[10px] block uppercase">Attack Cooldown</span>
-                      <span className="text-[#34D399] font-bold text-sm">{stats.attackCooldownMs}ms</span>
+                      <span className="text-[#A19FAF] text-[10px] block uppercase">Atk CD</span>
+                      <span className="font-bold text-sm" style={{ color: COMBAT_STAT_COLORS.speed }}>{stats.attackCooldownMs}ms</span>
                     </div>
                   </div>
                 </div>
@@ -1182,8 +1183,8 @@ export const CharacterInventoryModal: React.FC<CharacterInventoryModalProps> = (
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 font-mono text-xs">
                   <div className="stone-input p-2.5 flex items-center justify-between gap-2">
                     <div>
-                      <div className="text-[10px] uppercase text-[#A19FAF]">Offense Output</div>
-                      <div className="text-xs font-bold text-white">{stats.effectiveDps} Eff. DPS</div>
+                      <div className="text-[10px] uppercase text-[#A19FAF]">Offense</div>
+                      <div className="text-xs font-bold" style={{ color: COMBAT_STAT_COLORS.dps }}>{stats.effectiveDps} Eff. DPS</div>
                     </div>
                     <span
                       className="text-[11px] font-bold px-2 py-0.5 border"
@@ -1199,8 +1200,8 @@ export const CharacterInventoryModal: React.FC<CharacterInventoryModalProps> = (
 
                   <div className="stone-input p-2.5 flex items-center justify-between gap-2">
                     <div>
-                      <div className="text-[10px] uppercase text-[#A19FAF]">Defense &amp; EHP</div>
-                      <div className="text-xs font-bold text-white">{stats.effectiveHp} EHP</div>
+                      <div className="text-[10px] uppercase text-[#A19FAF]">Defense</div>
+                      <div className="text-xs font-bold" style={{ color: COMBAT_STAT_COLORS.ehp }}>{stats.effectiveHp} EHP</div>
                     </div>
                     <span
                       className="text-[11px] font-bold px-2 py-0.5 border"
@@ -1242,17 +1243,17 @@ export const CharacterInventoryModal: React.FC<CharacterInventoryModalProps> = (
 
                 {/* Box A: Offense & Attack Cadence */}
                 <div className="stone-plaque p-4 space-y-3">
-                  <h3 className="font-mono text-xs font-bold text-[#FCD34D] uppercase tracking-wider border-b border-[#353442] pb-2 flex items-center justify-between">
-                    <span>[OFFENSE] Attack Cadence</span>
-                    <span className="font-mono text-[10px] text-[#34D399]">
-                      {stats.primaryCategory.toUpperCase()} DAMAGE{stats.isAdaptiveDamage ? ' (ADAPTIVE)' : ''}
+                  <h3 className="font-mono text-xs font-bold uppercase tracking-wider border-b border-[#353442] pb-2 flex items-center justify-between" style={{ color: COMBAT_STAT_COLORS.dps }}>
+                    <span>Offense &amp; Cadence</span>
+                    <span className="font-mono text-[10px]" style={{ color: getPrimaryStatColor(stats.scalingAttribute) }}>
+                      {stats.primaryCategory.toUpperCase()} DMG{stats.isAdaptiveDamage ? ' (ADAPT)' : ''}
                     </span>
                   </h3>
 
-                  <div className="space-y-2 font-mono text-xs">
+                  <div className="space-y-2 font-mono text-xs tabular-nums">
                     <div className="flex items-center justify-between p-2 stone-input">
-                      <span className="text-[#A19FAF]">Primary Stat ({stats.primaryStatName})</span>
-                      <span className="font-bold text-white">
+                      <span className="text-[#A19FAF]">Primary ({stats.primaryStatName})</span>
+                      <span className="font-bold" style={{ color: getPrimaryStatColor(stats.scalingAttribute) }}>
                         {stats.primaryStatValue} Pts (+{stats.primaryStatDamageBonusPct}% Dmg
                         {stats.dexScalingMult !== 1 ? ` · ${Math.round(stats.dexScalingMult * 100)}% Scale` : ''})
                       </span>
@@ -1260,16 +1261,16 @@ export const CharacterInventoryModal: React.FC<CharacterInventoryModalProps> = (
 
                     {player.heroClass === 'cleric' && (
                       <div className="flex items-center justify-between p-2 stone-input">
-                        <span className="text-[#A19FAF]">Healing Effectiveness (Faith)</span>
-                        <span className="font-bold text-[#34D399]">{stats.healingMultiplier}x (+{stats.healingBonusPct}% Lv &amp; FTH)</span>
+                        <span className="text-[#A19FAF]">Healing Bonus (FTH)</span>
+                        <span className="font-bold" style={{ color: PRIMARY_STAT_THEME.faith.color }}>{stats.healingMultiplier}x (+{stats.healingBonusPct}%)</span>
                       </div>
                     )}
 
                     <div className="flex items-center justify-between p-2 stone-input gap-2">
                       <span className="text-[#A19FAF]">
-                        {stats.isChargedWeapon ? 'Full-Draw Primary Hit' : 'Scaled Primary Hit'}
+                        {stats.isChargedWeapon ? 'Full-Draw Hit' : 'Primary Hit'}
                       </span>
-                      <span className="font-bold text-[#FCD34D] text-right">
+                      <span className="font-bold text-right" style={{ color: COMBAT_STAT_COLORS.damage }}>
                         {stats.isChargedWeapon
                           ? `${stats.scaledHitDamage} Dmg (${stats.unchargedHitDamage}–${stats.scaledHitDamage} · ${stats.directDps} DPS)`
                           : `${stats.scaledHitDamage} Dmg (${stats.directDps} DPS)`}
@@ -1278,14 +1279,14 @@ export const CharacterInventoryModal: React.FC<CharacterInventoryModalProps> = (
 
                     {stats.longshotHitDamage > stats.scaledHitDamage && (
                       <div className="flex items-center justify-between p-2 stone-input">
-                        <span className="text-[#A19FAF]">Eagle Keenness (180u+ Longshot)</span>
-                        <span className="font-bold text-[#34D399]">{stats.longshotHitDamage} Dmg / Hit (+{stats.longshotBonusPct}%)</span>
+                        <span className="text-[#A19FAF]">Longshot (180u+)</span>
+                        <span className="font-bold" style={{ color: COMBAT_STAT_COLORS.speed }}>{stats.longshotHitDamage} Dmg (+{stats.longshotBonusPct}%)</span>
                       </div>
                     )}
 
                     <div className="flex items-center justify-between p-2 stone-input gap-2">
                       <span className="text-[#A19FAF]">{stats.activeTacticalLabel}</span>
-                      <span className="font-bold text-[#E879F9] text-right">
+                      <span className="font-bold text-right" style={{ color: PRIMARY_STAT_THEME.intelligence.color }}>
                         {stats.activeTacticalHitDamage} Hit (+{stats.tacticalAbilityDps} DPS)
                       </span>
                     </div>
@@ -1294,149 +1295,159 @@ export const CharacterInventoryModal: React.FC<CharacterInventoryModalProps> = (
                       (!activeVestmentDef || activeVestmentDef.passiveId === 'astral_resonance') &&
                       stats.passiveCombatDps > 0 && (
                         <div className="flex items-center justify-between p-2 stone-input">
-                          <span className="text-[#A19FAF]">Star Rift Passive (4th Hit / 8s CD)</span>
-                          <span className="font-bold text-[#C084FC]">+{stats.passiveCombatDps} DPS</span>
+                          <span className="text-[#A19FAF]">Star Rift (4th Hit / 8s)</span>
+                          <span className="font-bold" style={{ color: PRIMARY_STAT_THEME.intelligence.color }}>+{stats.passiveCombatDps} DPS</span>
                         </div>
                       )}
 
                     <div className="flex items-center justify-between p-2 stone-input">
-                      <span className="text-[#A19FAF]">Hybrid DoT Scaling</span>
-                      <span className="font-bold text-[#F97316]">{stats.dotMultiplier}x (+{stats.dotBonusPct}% Lv & {stats.primaryStatName.slice(0, 3).toUpperCase()})</span>
+                      <span className="text-[#A19FAF]">DoT Scaling</span>
+                      <span className="font-bold" style={{ color: COMBAT_STAT_COLORS.dot }}>{stats.dotMultiplier}x (+{stats.dotBonusPct}% Lv &amp; {stats.primaryStatName.slice(0, 3).toUpperCase()})</span>
                     </div>
 
                     <div className="flex items-center justify-between p-2 stone-input gap-2">
-                      <span className="text-[#A19FAF]">Active DoT Output</span>
-                      <span className="font-bold text-[#FB923C] text-right">
+                      <span className="text-[#A19FAF]">DoT Output</span>
+                      <span className="font-bold text-right" style={{ color: COMBAT_STAT_COLORS.dot }}>
                         {stats.dotDpsContribution > 0
                           ? `+${stats.dotDpsContribution} DPS (${[
                               stats.hasBurnRelic ? `Burn ${stats.burnTickDamage}` : '',
                               stats.hasPoisonRelic ? `Poison ${stats.poisonTickDamage}` : '',
                               stats.hasBleedRelic ? `Bleed ${stats.bleedTickDamage}-${stats.bleedMovingTickDamage}` : '',
                             ].filter(Boolean).join(' / ')})`
-                          : `0.0 DPS (Base Burn ${stats.burnTickDamage} / Poison ${stats.poisonTickDamage} / Bleed ${stats.bleedTickDamage}-${stats.bleedMovingTickDamage})`}
+                          : `0.0 DPS (Burn ${stats.burnTickDamage} / Poison ${stats.poisonTickDamage} / Bleed ${stats.bleedTickDamage}-${stats.bleedMovingTickDamage})`}
                       </span>
                     </div>
 
                     <div className="flex items-center justify-between p-2 stone-input">
                       <span className="text-[#A19FAF]">
-                        {stats.isChargedWeapon ? 'Draw + Recovery Cadence' : 'Attack Cooldown & Frequency'}
+                        {stats.isChargedWeapon ? 'Draw Cycle' : 'Attack Speed'}
                       </span>
-                      <span className="font-bold text-[#34D399]">
+                      <span className="font-bold" style={{ color: COMBAT_STAT_COLORS.speed }}>
                         {stats.isChargedWeapon
-                          ? `${stats.effectiveAttackCycleMs} ms (${stats.attacksPerSecond} atk/s)`
-                          : `${stats.attackCooldownMs} ms (${stats.attacksPerSecond} atk/s)`}
+                          ? `${stats.effectiveAttackCycleMs} ms (${stats.attacksPerSecond}/s)`
+                          : `${stats.attackCooldownMs} ms (${stats.attacksPerSecond}/s)`}
                       </span>
                     </div>
 
                     <div className="flex items-center justify-between p-2 stone-input">
-                      <span className="text-[#A19FAF]">Critical Strike Chance</span>
-                      <span className="font-bold text-[#38BDF8]">{stats.critChancePct}% (Cap: 45.0%)</span>
+                      <span className="text-[#A19FAF]">Crit Chance</span>
+                      <span className="font-bold" style={{ color: COMBAT_STAT_COLORS.crit }}>{stats.critChancePct}% (Cap 45%)</span>
                     </div>
 
                     <div className="flex items-center justify-between p-2 stone-input">
-                      <span className="text-[#A19FAF]">Critical Damage Multiplier</span>
-                      <span className="font-bold text-[#E0A94F]">{stats.critMultiplier}x ({stats.critHitDamage} Crit Dmg)</span>
+                      <span className="text-[#A19FAF]">Crit Damage</span>
+                      <span className="font-bold" style={{ color: COMBAT_STAT_COLORS.crit }}>{stats.critMultiplier}x ({stats.critHitDamage} Dmg)</span>
                     </div>
 
                     <div className="flex items-center justify-between p-2 stone-input">
-                      <span className="text-[#A19FAF]">Piercing & Extra Projectiles</span>
-                      <span className="font-bold text-[#A855F7]">{stats.pierceCount} Target Pierce {stats.extraProjectileCount > 0 ? '(+1 Twin Shot)' : ''}</span>
+                      <span className="text-[#A19FAF]">Pierce &amp; Projectiles</span>
+                      <span className="font-bold" style={{ color: PRIMARY_STAT_THEME.intelligence.color }}>{stats.pierceCount} Pierce {stats.extraProjectileCount > 0 ? '(+1 Twin)' : ''}</span>
                     </div>
                   </div>
                 </div>
 
                 {/* Box B: Defense, Armor & Vitality */}
                 <div className="stone-plaque p-4 space-y-3">
-                  <h3 className="font-mono text-xs font-bold text-[#10B981] uppercase tracking-wider border-b border-[#353442] pb-2 flex items-center justify-between">
-                    <span>[DEFENSE] Survivability</span>
-                    <span className="font-mono text-[10px] text-[#10B981]">MAX HP: {stats.maxHp}</span>
+                  <h3 className="font-mono text-xs font-bold uppercase tracking-wider border-b border-[#353442] pb-2 flex items-center justify-between" style={{ color: COMBAT_STAT_COLORS.hp }}>
+                    <span>Defense &amp; Survivability</span>
+                    <span className="font-mono text-[10px]" style={{ color: COMBAT_STAT_COLORS.hp }}>MAX HP: {stats.maxHp}</span>
                   </h3>
 
-                  <div className="space-y-2 font-mono text-xs">
+                  <div className="space-y-2 font-mono text-xs tabular-nums">
                     <div className="flex items-center justify-between p-2 stone-input">
-                      <span className="text-[#A19FAF]">Max Health Pool Breakdown</span>
-                      <span className="font-bold text-[#10B981]">
-                        {stats.maxHp} HP (Base {stats.baseHp} + Lv {stats.levelHpBonus} + VIT {stats.vitHpBonus}{stats.relicHpBonus > 0 ? ` + Relic ${stats.relicHpBonus}` : ''})
+                      <span className="text-[#A19FAF]">Max HP</span>
+                      <span className="font-bold" style={{ color: COMBAT_STAT_COLORS.hp }}>
+                        {stats.maxHp} (Base {stats.baseHp} + Lv {stats.levelHpBonus} +{' '}
+                        <span style={{ color: PRIMARY_STAT_THEME.vitality.color }}>VIT {stats.vitHpBonus}</span>
+                        {stats.relicHpBonus > 0 ? ` + Relic ${stats.relicHpBonus}` : ''})
                       </span>
                     </div>
 
                     <div className="flex items-center justify-between p-2 stone-input">
-                      <span className="text-[#A19FAF]">Effective Health (EHP)</span>
-                      <span className="font-bold text-[#34D399]">{stats.effectiveHp} EHP (Mitigation-Adjusted)</span>
+                      <span className="text-[#A19FAF]">Effective HP</span>
+                      <span className="font-bold" style={{ color: COMBAT_STAT_COLORS.ehp }}>{stats.effectiveHp} EHP</span>
                     </div>
 
                     <div className="flex items-center justify-between p-2 stone-input">
-                      <span className="text-[#A19FAF]">Combat Health Regeneration</span>
-                      <span className="font-bold text-[#5CD68D]">
-                        +{stats.hpRegenPerTick} HP / 2.0s ({stats.healingPerSec} Total Sustain/s)
+                      <span className="text-[#A19FAF]">HP Regen</span>
+                      <span className="font-bold" style={{ color: COMBAT_STAT_COLORS.hp }}>
+                        +{stats.hpRegenPerTick} / 2s ({stats.healingPerSec}/s sustain)
                       </span>
                     </div>
 
                     {shieldGainLocked ? (
                       <div className="flex items-center justify-between p-2 stone-input border border-[#EF4444]/50">
-                        <span className="text-[#FCA5A5]">Shield Gain Status (Crimson War Axe)</span>
-                        <span className="font-bold text-[#EF4444]">PERMANENTLY LOCKED (0 Shield/s)</span>
+                        <span className="text-[#FCA5A5]">Shield Status</span>
+                        <span className="font-bold text-[#EF4444]">LOCKED (0/s)</span>
                       </div>
                     ) : stats.selfShieldPerSec > 0 ? (
                       <div className="flex items-center justify-between p-2 stone-input">
-                        <span className="text-[#A19FAF]">Bulwark &amp; Iron Will Shielding</span>
-                        <span className="font-bold text-[#93C5FD]">+{stats.selfShieldPerSec} Shield/s</span>
+                        <span className="text-[#A19FAF]">Shield Generation</span>
+                        <span className="font-bold" style={{ color: COMBAT_STAT_COLORS.shield }}>+{stats.selfShieldPerSec}/s</span>
                       </div>
                     ) : null}
 
                     <div className="flex items-center justify-between p-2 stone-input">
-                      <span className="text-[#A19FAF]">Physical Damage Mitigation</span>
-                      <span className="font-bold text-[#60A5FA]">{stats.physicalResistPct}% (Base + STR + Relics)</span>
+                      <span className="text-[#A19FAF]">
+                        Armor (<span style={{ color: PRIMARY_STAT_THEME.strength.color }}>STR</span>)
+                      </span>
+                      <span className="font-bold" style={{ color: COMBAT_STAT_COLORS.armor }}>{stats.physicalResistPct}%</span>
                     </div>
 
                     {stats.vanguardIronWillPct > 0 && (
                       <div className="flex items-center justify-between p-2 stone-input">
-                        <span className="text-[#A19FAF]">Vanguard Iron Will Passive</span>
-                        <span className="font-bold text-[#CBD5E1]">Absorbs 15.0% incoming damage</span>
+                        <span className="text-[#A19FAF]">Iron Will</span>
+                        <span className="font-bold text-[#CBD5E1]">-15% Incoming Dmg</span>
                       </div>
                     )}
 
                     <div className="flex items-center justify-between p-2 stone-input">
-                      <span className="text-[#A19FAF]">Elemental / Status Resistance</span>
-                      <span className="font-bold text-[#F472B6]">{stats.elementalResistPct}% (Base + INT + Relics)</span>
+                      <span className="text-[#A19FAF]">
+                        Elem Res (<span style={{ color: PRIMARY_STAT_THEME.intelligence.color }}>INT</span>)
+                      </span>
+                      <span className="font-bold" style={{ color: COMBAT_STAT_COLORS.elemResist }}>{stats.elementalResistPct}%</span>
                     </div>
 
                     <div className="flex items-center justify-between p-2 stone-input">
-                      <span className="text-[#A19FAF]">Spiritual Debuff Tenacity</span>
-                      <span className="font-bold text-[#FDE047]">{stats.faithCcTenacityPct}% CC Duration Reduction</span>
+                      <span className="text-[#A19FAF]">
+                        Tenacity (<span style={{ color: PRIMARY_STAT_THEME.faith.color }}>FTH</span>)
+                      </span>
+                      <span className="font-bold" style={{ color: COMBAT_STAT_COLORS.tenacity }}>{stats.faithCcTenacityPct}% CC Reduce</span>
                     </div>
                   </div>
                 </div>
 
                 {/* Box C: Mobility & Cooldown Reduction */}
                 <div className="stone-plaque p-4 space-y-3 md:col-span-2">
-                  <h3 className="font-mono text-xs font-bold text-[#38BDF8] uppercase tracking-wider border-b border-[#353442] pb-2 flex items-center justify-between">
-                    <span>[MOBILITY] Speed & Acceleration</span>
-                    <span className="font-mono text-[10px] text-[#38BDF8]">CDR: {stats.cooldownReductionPct}%</span>
+                  <h3 className="font-mono text-xs font-bold uppercase tracking-wider border-b border-[#353442] pb-2 flex items-center justify-between" style={{ color: PRIMARY_STAT_THEME.dexterity.color }}>
+                    <span>Mobility &amp; Cooldowns</span>
+                    <span className="font-mono text-[10px]" style={{ color: COMBAT_STAT_COLORS.cdr }}>CDR: {stats.cooldownReductionPct}%</span>
                   </h3>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 font-mono text-xs">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 font-mono text-xs tabular-nums">
                     <div className="p-3 stone-input space-y-1">
-                      <div className="text-[#A19FAF] text-[10px] uppercase">Movement Velocity</div>
-                      <div className="text-sm font-bold text-[#38BDF8]">{stats.moveSpeedPx} px/s</div>
-                      <div className="text-[10px] text-[#34D399]">+{stats.moveSpeedBonusPct}% over base class speed</div>
+                      <div className="text-[#A19FAF] text-[10px] uppercase">
+                        Move Speed (<span style={{ color: PRIMARY_STAT_THEME.dexterity.color }}>DEX</span>)
+                      </div>
+                      <div className="text-sm font-bold" style={{ color: PRIMARY_STAT_THEME.dexterity.color }}>{stats.moveSpeedPx} px/s</div>
+                      <div className="text-[10px]" style={{ color: COMBAT_STAT_COLORS.speed }}>+{stats.moveSpeedBonusPct}% base speed</div>
                     </div>
 
                     <div className="p-3 stone-input space-y-1">
                       <div className="text-[#A19FAF] text-[10px] uppercase">Tactical [Q] · {stats.activeTacticalLabel}</div>
-                      <div className="text-sm font-bold text-[#FCD34D] tabular-nums">{stats.tacticalCooldownSec} seconds</div>
-                      <div className="text-[10px] text-[#A19FAF] tabular-nums">
-                        Base: {(stats.tacticalBaseCooldownMs / 1000).toFixed(1)}s
+                      <div className="text-sm font-bold" style={{ color: COMBAT_STAT_COLORS.cdr }}>{stats.tacticalCooldownSec}s</div>
+                      <div className="text-[10px] text-[#A19FAF]">
+                        Base {(stats.tacticalBaseCooldownMs / 1000).toFixed(1)}s
                         {activeTactical.id === 'crimson_frenzy'
-                          ? ` · +${Math.round(ARMAMENT_TUNING.weapons.crimson.frenzyDamageBonusPct * 100)}% DMG / ${Math.round(ARMAMENT_TUNING.weapons.crimson.frenzyLifestealPct * 100)}% LS / +${Math.round(ARMAMENT_TUNING.weapons.crimson.frenzyAttackSpeedBonusPct * 100)}% SPD / +${Math.round(ARMAMENT_TUNING.weapons.crimson.frenzyMoveSpeedBonusPct * 100)}% Fading MS`
+                          ? ` · +${Math.round(ARMAMENT_TUNING.weapons.crimson.frenzyDamageBonusPct * 100)}% DMG / ${Math.round(ARMAMENT_TUNING.weapons.crimson.frenzyLifestealPct * 100)}% LS / +${Math.round(ARMAMENT_TUNING.weapons.crimson.frenzyAttackSpeedBonusPct * 100)}% SPD / +${Math.round(ARMAMENT_TUNING.weapons.crimson.frenzyMoveSpeedBonusPct * 100)}% MS`
                           : ''}
                       </div>
                     </div>
 
                     <div className="p-3 stone-input space-y-1">
-                      <div className="text-[#A19FAF] text-[10px] uppercase">Ultimate Ability Cadence</div>
-                      <div className="text-sm font-bold text-[#E0A94F]">{stats.ultCooldownSec} seconds</div>
-                      <div className="text-[10px] text-[#A19FAF]">Base: {(heroDef.ultCooldownMs / 1000).toFixed(1)}s</div>
+                      <div className="text-[#A19FAF] text-[10px] uppercase">Ultimate [R]</div>
+                      <div className="text-sm font-bold" style={{ color: COMBAT_STAT_COLORS.gold }}>{stats.ultCooldownSec}s</div>
+                      <div className="text-[10px] text-[#A19FAF]">Base {(heroDef.ultCooldownMs / 1000).toFixed(1)}s</div>
                     </div>
                   </div>
                 </div>
@@ -1489,7 +1500,7 @@ export const CharacterInventoryModal: React.FC<CharacterInventoryModalProps> = (
                   </span>
                 </div>
                 <p className="text-xs text-[#E2E8F0] font-mono leading-relaxed">
-                  Are you sure you want to dismantle <span className="font-bold text-white">{confirmDelete.relic.name}</span>? You will salvage its raw components for <span className="font-bold text-[#FCD34D]">+{DISMANTLE_GOLD_REWARD} Gold</span>. This artifact will be permanently destroyed.
+                  Destroy <span className="font-bold text-white">{confirmDelete.relic.name}</span> for <span className="font-bold text-[#FCD34D]">+{DISMANTLE_GOLD_REWARD}g</span>?
                 </p>
               </div>
 
@@ -1527,7 +1538,7 @@ export const CharacterInventoryModal: React.FC<CharacterInventoryModalProps> = (
               </div>
 
               <p className="text-xs text-[#E2E8F0] font-mono leading-relaxed">
-                Discard 1 Health Potion from your pouch? Discarded potions cannot be recovered.
+                Discard 1 Health Potion? It cannot be recovered.
               </p>
 
               <div className="flex items-center justify-end gap-3 pt-2 border-t border-[#353442]">

@@ -9,6 +9,7 @@ import {
   type GameSnapshot,
 } from '../shared/types.ts';
 import { PixelHeroPreview } from './PixelHeroPreview.tsx';
+import { PRIMARY_STAT_ORDER, PRIMARY_STAT_THEME } from '../shared/statTheme.ts';
 
 interface PartyLobbyViewProps {
   playerId: string;
@@ -259,7 +260,7 @@ export const PartyLobbyView: React.FC<PartyLobbyViewProps> = ({
                     Expedition Party Roster
                   </h2>
                   <p className="text-xs text-[#9E9CAE] mt-0.5">
-                    Share code <span className="font-mono text-[#FCD34D]">{snapshot.roomId}</span> so allies can join before entering Floor 1. Once started, the party locks until the run concludes.
+                    Share <span className="font-mono text-[#FCD34D]">{snapshot.roomId}</span> before Floor 1. Party locks once started.
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
@@ -514,9 +515,9 @@ export const PartyLobbyView: React.FC<PartyLobbyViewProps> = ({
 
             <div className="p-4 bg-[#1B1A26] border border-[#323044] text-xs space-y-1.5 text-[#B4B2C6]">
               <div className="font-display text-sm text-[#FDE68A]">Expedition Rules</div>
-              <p>1. All party members spawn together on Floor 1 when the host starts.</p>
-              <p>2. Once active, the party is locked across all floors (1–10) against new players.</p>
-              <p>3. Disconnected members can rejoin their active run using code {snapshot.roomId}.</p>
+              <p>1. Party spawns together on Floor 1.</p>
+              <p>2. Roster locks across Floors 1–10 once started.</p>
+              <p>3. Disconnects can rejoin via code {snapshot.roomId}.</p>
             </div>
           </section>
         </div>
@@ -545,75 +546,85 @@ export const PartyLobbyView: React.FC<PartyLobbyViewProps> = ({
             </div>
 
             <div className="space-y-2.5 text-xs font-mono">
-              {(
-                [
-                  ['strength', 'STR', me.strength || 0],
-                  ['vitality', 'VIT', me.vitality || 0],
-                  ['dexterity', 'DEX', me.dexterity || 0],
-                  ['intelligence', 'INT', me.intelligence || 0],
-                  ['faith', 'FTH', me.faith || 0],
-                ] as const
-              ).map(([key, label, val]) => (
-                <div
-                  key={key}
-                  className="p-2.5 bg-[#1B1A26] border border-[#323044] flex items-center justify-between gap-3"
-                >
-                  <span className="shrink-0">
-                    {label}: <strong className="text-white">{val}</strong> / {MAX_ATTRIBUTE}
-                  </span>
-                  <div className="flex items-center gap-1">
-                    <button
-                      type="button"
-                      disabled={me.attributePoints <= 0 || val >= MAX_ATTRIBUTE}
-                      onClick={() => {
-                        sfx.playUiClick('confirm');
-                        onSendCommand?.({ type: 'player:spend_attribute', attribute: key, amount: 1 });
-                      }}
-                      className="stone-button stone-button-dark py-1 px-2 text-[11px] disabled:opacity-30"
-                      title="Allocate +1"
-                    >
-                      +1
-                    </button>
-                    <button
-                      type="button"
-                      disabled={me.attributePoints < 5 || val >= MAX_ATTRIBUTE}
-                      onClick={() => {
-                        sfx.playUiClick('confirm');
-                        onSendCommand?.({ type: 'player:spend_attribute', attribute: key, amount: 5 });
-                      }}
-                      className="stone-button stone-button-dark py-1 px-2 text-[11px] disabled:opacity-30"
-                      title="Allocate +5"
-                    >
-                      +5
-                    </button>
-                    <button
-                      type="button"
-                      disabled={me.attributePoints < 10 || val >= MAX_ATTRIBUTE}
-                      onClick={() => {
-                        sfx.playUiClick('confirm');
-                        onSendCommand?.({ type: 'player:spend_attribute', attribute: key, amount: 10 });
-                      }}
-                      className="stone-button stone-button-dark py-1 px-2 text-[11px] disabled:opacity-30"
-                      title="Allocate +10"
-                    >
-                      +10
-                    </button>
-                    <button
-                      type="button"
-                      disabled={me.attributePoints <= 0 || val >= MAX_ATTRIBUTE}
-                      onClick={() => {
-                        sfx.playUiClick('confirm');
-                        const maxSpend = Math.max(1, MAX_ATTRIBUTE - val);
-                        onSendCommand?.({ type: 'player:spend_attribute', attribute: key, amount: maxSpend });
-                      }}
-                      className="stone-button stone-button-dark py-1 px-2.5 text-[11px] text-[#FCD34D] disabled:opacity-30"
-                      title="Spend all remaining available points into this stat"
-                    >
-                      MAX
-                    </button>
+              {PRIMARY_STAT_ORDER.map((key) => {
+                const meta = PRIMARY_STAT_THEME[key];
+                const val = me[key] || 0;
+                return (
+                  <div
+                    key={key}
+                    className="p-2.5 bg-[#1B1A26] border flex items-center justify-between gap-3"
+                    style={{ borderColor: meta.borderTint }}
+                  >
+                    <div className="min-w-0 space-y-0.5">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold tracking-wide" style={{ color: meta.color }}>
+                          {meta.short}
+                        </span>
+                        <span
+                          className="px-1.5 py-0.2 border text-[11px] font-bold bg-[#14131E] tabular-nums"
+                          style={{ color: meta.textColor, borderColor: meta.borderColor }}
+                        >
+                          {val} / {MAX_ATTRIBUTE}
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-[#A8A6B8] leading-snug">
+                        {meta.conciseDesc}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        type="button"
+                        disabled={me.attributePoints <= 0 || val >= MAX_ATTRIBUTE}
+                        onClick={() => {
+                          sfx.playUiClick('confirm');
+                          onSendCommand?.({ type: 'player:spend_attribute', attribute: key, amount: 1 });
+                        }}
+                        className="stone-button stone-button-dark py-1 px-2 text-[11px] disabled:opacity-30"
+                        title="+1"
+                      >
+                        +1
+                      </button>
+                      <button
+                        type="button"
+                        disabled={me.attributePoints < 5 || val >= MAX_ATTRIBUTE}
+                        onClick={() => {
+                          sfx.playUiClick('confirm');
+                          onSendCommand?.({ type: 'player:spend_attribute', attribute: key, amount: 5 });
+                        }}
+                        className="stone-button stone-button-dark py-1 px-2 text-[11px] disabled:opacity-30"
+                        title="+5"
+                      >
+                        +5
+                      </button>
+                      <button
+                        type="button"
+                        disabled={me.attributePoints < 10 || val >= MAX_ATTRIBUTE}
+                        onClick={() => {
+                          sfx.playUiClick('confirm');
+                          onSendCommand?.({ type: 'player:spend_attribute', attribute: key, amount: 10 });
+                        }}
+                        className="stone-button stone-button-dark py-1 px-2 text-[11px] disabled:opacity-30"
+                        title="+10"
+                      >
+                        +10
+                      </button>
+                      <button
+                        type="button"
+                        disabled={me.attributePoints <= 0 || val >= MAX_ATTRIBUTE}
+                        onClick={() => {
+                          sfx.playUiClick('confirm');
+                          const maxSpend = Math.max(1, MAX_ATTRIBUTE - val);
+                          onSendCommand?.({ type: 'player:spend_attribute', attribute: key, amount: maxSpend });
+                        }}
+                        className="stone-button stone-button-dark py-1 px-2.5 text-[11px] text-[#FCD34D] disabled:opacity-30"
+                        title="Spend remaining points"
+                      >
+                        MAX
+                      </button>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         </div>

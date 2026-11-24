@@ -33,6 +33,7 @@ import { hydrateDailyQuestsForAccount } from '../shared/dailyQuests.ts';
 import { hydrateArmamentShopForAccount } from '../shared/armamentShop.ts';
 import { DailyQuestsPanel } from './DailyQuestsPanel.tsx';
 import { ArmamentShopPanel } from './ArmamentShopPanel.tsx';
+import { COMBAT_STAT_COLORS, PRIMARY_STAT_THEME } from '../shared/statTheme.ts';
 
 interface SanctuaryLobbyProps {
   user: UserProfile;
@@ -373,7 +374,7 @@ export const SanctuaryLobby: React.FC<SanctuaryLobbyProps> = ({
                   Sanctuary Tavern & Training Ground
                 </h2>
                 <p className="text-xs sm:text-sm text-[#BDBACF] max-w-3xl leading-relaxed">
-                  Step inside the warm hearth of the Tavern! Meet fellow adventurers, chat in real-time, interact with NPCs (Innkeeper Bram, Barkeep Lena, Veteran Jorah), and test your skills and weapons against training dummies.
+                  Meet adventurers in real time, talk to Tavern NPCs, and test your build on training dummies.
                 </p>
               </div>
               <button
@@ -548,11 +549,11 @@ export const SanctuaryLobby: React.FC<SanctuaryLobbyProps> = ({
                         </strong>
                       </span>
                       <span aria-hidden="true">·</span>
-                      <span>HP: <strong className="text-[#4ADE80]">{currentClassDef.maxHp}</strong></span>
+                      <span>HP: <strong style={{ color: COMBAT_STAT_COLORS.hp }}>{currentClassDef.maxHp}</strong></span>
                       <span aria-hidden="true">·</span>
-                      <span>DMG: <strong className="text-[#F87171]">{currentClassDef.damage}</strong></span>
+                      <span>DMG: <strong style={{ color: COMBAT_STAT_COLORS.damage }}>{currentClassDef.damage}</strong></span>
                       <span aria-hidden="true">·</span>
-                      <span>SPD: <strong className="text-[#38BDF8]">{currentClassDef.speed}</strong></span>
+                      <span>SPD: <strong style={{ color: COMBAT_STAT_COLORS.speed }}>{currentClassDef.speed}</strong></span>
                     </div>
 
                     {(() => {
@@ -725,7 +726,7 @@ export const SanctuaryLobby: React.FC<SanctuaryLobbyProps> = ({
                   <span>Grand Hero Sanctum & Codex</span>
                 </h2>
                 <p className="text-xs sm:text-sm text-[#A8A6B8] mt-1 max-w-2xl leading-relaxed">
-                  Every hero represents an unbroken soul oath with specialized abilities, passives, and distinct pixel armaments. Each adventurer account is permanently bonded to 1 class.
+                  Each account bonds permanently to 1 class with distinct skills, passives, and pixel armaments.
                 </p>
               </div>
               <div className="p-3 bg-[#242332] border border-[#D9AA52]/40 text-xs text-[#E6E4EE] font-mono shrink-0">
@@ -791,17 +792,36 @@ export const SanctuaryLobby: React.FC<SanctuaryLobbyProps> = ({
                           <strong className="text-[#9E9CAE] font-mono">Armament:</strong> {c.weapon} ({c.weaponType})
                         </p>
 
-                        <div className="flex flex-wrap items-center justify-center sm:justify-start gap-3 pt-1 text-xs font-mono tabular-nums">
-                          <span className="px-2 py-0.5 bg-[#171622] border border-[#2F2E40] text-[#4ADE80]">
+                        <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2 pt-1 text-xs font-mono tabular-nums">
+                          {(() => {
+                            const statKey =
+                              cid === 'vanguard'
+                                ? 'strength'
+                                : cid === 'ranger'
+                                  ? 'dexterity'
+                                  : cid === 'arcanist'
+                                    ? 'intelligence'
+                                    : 'faith';
+                            const statMeta = PRIMARY_STAT_THEME[statKey];
+                            return (
+                              <span
+                                className="px-2 py-0.5 bg-[#171622] border font-bold"
+                                style={{ color: statMeta.color, borderColor: statMeta.borderTint }}
+                              >
+                                {statMeta.short}
+                              </span>
+                            );
+                          })()}
+                          <span className="px-2 py-0.5 bg-[#171622] border border-[#2F2E40]" style={{ color: COMBAT_STAT_COLORS.hp }}>
                             HP {c.maxHp}
                           </span>
-                          <span className="px-2 py-0.5 bg-[#171622] border border-[#2F2E40] text-[#F87171]">
+                          <span className="px-2 py-0.5 bg-[#171622] border border-[#2F2E40]" style={{ color: COMBAT_STAT_COLORS.damage }}>
                             DMG {c.damage}
                           </span>
-                          <span className="px-2 py-0.5 bg-[#171622] border border-[#2F2E40] text-[#38BDF8]">
+                          <span className="px-2 py-0.5 bg-[#171622] border border-[#2F2E40]" style={{ color: COMBAT_STAT_COLORS.range }}>
                             RNG {c.range}
                           </span>
-                          <span className="px-2 py-0.5 bg-[#171622] border border-[#2F2E40] text-[#FBBF24]">
+                          <span className="px-2 py-0.5 bg-[#171622] border border-[#2F2E40]" style={{ color: COMBAT_STAT_COLORS.speed }}>
                             SPD {c.speed}
                           </span>
                         </div>
@@ -945,7 +965,7 @@ export const SanctuaryLobby: React.FC<SanctuaryLobbyProps> = ({
                       : 'text-[#A5A3B8] hover:text-white'
                   }`}
                 >
-                  Ancient Relics (12)
+                  Ancient Relics ({RELIC_CATALOG.length})
                 </button>
                 <button
                   type="button"
@@ -959,7 +979,7 @@ export const SanctuaryLobby: React.FC<SanctuaryLobbyProps> = ({
                       : 'text-[#A5A3B8] hover:text-white'
                   }`}
                 >
-                  Status Effects (19)
+                  Status Effects ({ALL_STATUS_EFFECTS.length})
                 </button>
               </div>
             </div>
@@ -972,7 +992,7 @@ export const SanctuaryLobby: React.FC<SanctuaryLobbyProps> = ({
                   <span className="text-xs text-[#8E8C9E] font-mono mr-1">Filter:</span>
                   {(
                     [
-                      { id: 'all', label: 'All (12)' },
+                      { id: 'all', label: `All (${RELIC_CATALOG.length})` },
                       { id: 'status', label: 'Status Procs (6)' },
                       { id: 'offensive', label: 'Offense' },
                       { id: 'defensive', label: 'Defense' },
@@ -1067,9 +1087,9 @@ export const SanctuaryLobby: React.FC<SanctuaryLobbyProps> = ({
                   <span className="text-xs text-[#8E8C9E] font-mono mr-1">Filter:</span>
                   {(
                     [
-                      { id: 'all', label: 'All Statuses (19)' },
-                      { id: 'guardian', label: 'Guardian Afflictions (10)' },
-                      { id: 'combat', label: 'Combat Procs (9)' },
+                      { id: 'all', label: `All (${ALL_STATUS_EFFECTS.length})` },
+                      { id: 'guardian', label: `Boss Afflictions (${Object.keys(GUARDIAN_STATUS_EFFECTS).length})` },
+                      { id: 'combat', label: `Combat Procs (${Object.keys(COMBAT_STATUS_EFFECTS).length})` },
                     ] as const
                   ).map((sf) => (
                     <button
@@ -1165,16 +1185,16 @@ export const SanctuaryLobby: React.FC<SanctuaryLobbyProps> = ({
               </h2>
               <ul className="space-y-3 text-xs sm:text-sm text-[#C7C5D5] leading-relaxed">
                 <li>
-                  <strong className="text-white">Smart Auto-Aiming on Touch:</strong>{' '}
-                  Tapping the attack or skill buttons on mobile automatically acquires and aims at the nearest enemy target within range.
+                  <strong className="text-white">Smart Auto-Aim:</strong>{' '}
+                  Tap attacks or skills on touch to aim at the nearest enemy in range.
                 </li>
                 <li>
-                  <strong className="text-white">Analog Virtual Joystick:</strong>{' '}
-                  Drag smoothly with your left thumb to move in 360 degrees through dungeon corridors and combat rooms.
+                  <strong className="text-white">Virtual Joystick:</strong>{' '}
+                  Drag the left thumbstick for 360° movement.
                 </li>
                 <li>
                   <strong className="text-white">Co-op Revivals:</strong>{' '}
-                  When an ally falls, stand near their golden ring for 2.2 seconds to revive them.
+                  Stand inside a fallen ally&apos;s ring for 2.2s to revive them.
                 </li>
               </ul>
             </div>

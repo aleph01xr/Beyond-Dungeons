@@ -35,6 +35,13 @@ export interface HeroRenderOptions {
   facingDirection?: Direction8;
   equippedWeapon?: string | null;
   equippedVestment?: string | null;
+  isDashing?: boolean;
+  dashProgress?: number;
+  dashAngle?: number;
+  dashStretchAlong?: number;
+  dashStretchPerp?: number;
+  dashRimColor?: string;
+  dashFlashAlpha?: number;
 }
 
 function resolveVisualWeaponId(
@@ -257,7 +264,7 @@ export function drawHeroSprite(
   );
 
   const speedMag = Math.hypot(p.vx || 0, p.vy || 0);
-  const isDashing = speedMag > 290;
+  const isDashing = Boolean(options.isDashing) || speedMag > 290;
   const walkPhase = now * (isDashing ? 0.026 : 0.017) + hx * 0.03;
   const strideA = moving ? Math.sin(walkPhase) : 0;
   const strideB = moving ? -Math.sin(walkPhase) : 0;
@@ -313,6 +320,28 @@ export function drawHeroSprite(
   // Articulated torso/head/limbs perform independent rotation, footwork stepping, and coil.
   ctx.save();
   ctx.translate(hx, hy);
+  if (
+    options.dashAngle !== undefined &&
+    options.dashStretchAlong !== undefined &&
+    options.dashStretchPerp !== undefined &&
+    (Math.abs(options.dashStretchAlong - 1) > 0.005 || Math.abs(options.dashStretchPerp - 1) > 0.005)
+  ) {
+    // Symmetric tensor stretch along dash direction with zero net rotation
+    ctx.rotate(options.dashAngle);
+    ctx.scale(options.dashStretchAlong, options.dashStretchPerp);
+    ctx.rotate(-options.dashAngle);
+  }
+  if (options.dashFlashAlpha && options.dashFlashAlpha > 0.02) {
+    const prevComp = ctx.globalCompositeOperation;
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.fillStyle = options.dashRimColor || '#E2E8F0';
+    ctx.globalAlpha = Math.min(0.45, options.dashFlashAlpha * 0.42);
+    ctx.beginPath();
+    ctx.ellipse(0, -4, 15, 19, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = prevComp;
+  }
   if (mirrorX) {
     ctx.scale(-1, 1);
   }

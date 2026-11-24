@@ -43,6 +43,7 @@ import {
   drawGenericEnemySprite,
 } from './src/client/enemySprites.ts';
 import { drawFallenAndGhostPlayer } from './src/client/fallenPlayerSprite.ts';
+import { DashAfterimageManager, resolveDashPalette } from './src/client/dashAfterimages.ts';
 import {
   ParticleManager,
   DEFAULT_PARTICLE_BUDGET,
@@ -68,6 +69,8 @@ import {
   type CombatParticle,
 } from './src/client/canvasEffects.ts';
 import { CHANGELOG_DATA, CATEGORY_ORDER } from './src/data/changelog.ts';
+import { sfx, soundManager, resolveFootstepSurface } from './src/client/sound.ts';
+import { SoundManagerDiagnostic } from './src/client/soundManagerDiagnostic.ts';
 import {
   applyKeyboardToUnifiedInput,
   applyTouchStickToUnifiedInput,
@@ -12160,6 +12163,797 @@ async function runRegressionTests() {
           `${hc} @ ${dir}: expected back-facing arm strokes (${lastArmIdx}) to finish before head/cape (${firstHeadIdx})`);
       }
     }
+  });
+
+  // --- Test 138: Advanced Particle Diversity Engine & Live Canvas Wiring ---
+  await test('138. Particle Engine: 29 shapes, curl turbulence, 3-stop ramps, ribbon trails, bounce squash, sub-emitters, and diverse spawners', async () => {
+    const pm = new ParticleManager({
+      maxParticles: 600,
+      reserveForCritical: 120,
+      reserveForHigh: 80,
+    });
+    const recordedFills: string[] = [];
+    let strokeCalls = 0;
+    const noop = () => {};
+    const mockCtx = {
+      save: noop,
+      restore: noop,
+      translate: noop,
+      rotate: noop,
+      scale: noop,
+      beginPath: noop,
+      closePath: noop,
+      moveTo: noop,
+      lineTo: noop,
+      arc: noop,
+      quadraticCurveTo: noop,
+      strokeRect: noop,
+      fillRect: noop,
+      fill: () => {
+        recordedFills.push(String(mockCtx.fillStyle));
+      },
+      stroke: () => {
+        strokeCalls++;
+      },
+      globalAlpha: 1,
+      globalCompositeOperation: 'source-over',
+      shadowColor: '',
+      shadowBlur: 0,
+      fillStyle: '',
+      strokeStyle: '',
+      lineWidth: 1,
+    } as unknown as CanvasRenderingContext2D;
+
+    // 1. All 29 ParticleShape variants render cleanly and recycle without leftovers
+    const all29Shapes = [
+      'square', 'circle', 'spark', 'star', 'diamond', 'triangle', 'shard', 'ring',
+      'crescent', 'cross', 'rune', 'hexagon', 'starburst', 'streak', 'smoke', 'flame',
+      'ember', 'leaf', 'droplet', 'bolt', 'feather', 'crystal', 'dust',
+      'petal', 'lightning_fork', 'smoke_puff', 'arc_slash', 'glyph_ring', 'splatter',
+    ] as const;
+    assert.strictEqual(all29Shapes.length, 29, 'Expected all 29 particle shapes covered');
+
+    const t0 = 10000;
+    for (const shape of all29Shapes) {
+      (pm as any).acquireParticle({
+        x: 200,
+        y: 200,
+        vx: 45,
+        vy: -25,
+        color: '#FF0000',
+        secondaryColor: '#FFFFFF',
+        colorMid: '#00FF00',
+        colorEnd: '#0000FF',
+        size: 3.2,
+        bornAt: t0,
+        maxAgeMs: 400,
+        shape,
+        trailLength: 4,
+        turbulence: 40,
+        rotation: 0.4,
+        angularVelocity: 3,
+        blendMode: 'lighter',
+        priority: 'high',
+      });
+    }
+    assert.strictEqual(pm.count, 29, 'All 29 shapes acquired');
+    pm.updateAndDraw(mockCtx, t0 + 190, 0.032);
+    pm.updateAndDraw(mockCtx, t0 + 210, 0.02); // near 50% life -> colorMid
+    assert.strictEqual(pm.count, 29, 'All 29 shapes survive at midpoint');
+    assert.ok(strokeCalls > 0, 'Motion ribbon trails and stroke shapes drew lines');
+    assert.ok(
+      recordedFills.some((c) => c.startsWith('rgb(0,2') || c.startsWith('rgb(4,2') || c.startsWith('rgb(8,2')),
+      `Expected 3-stop color ramp to pass near green midpoint (#00FF00); sample=${recordedFills.slice(-6).join(',')}`
+    );
+
+    const pSample = (pm as any).particles[0];
+    assert.ok(Array.isArray(pSample.trailPts) && pSample.trailPts.length >= 4, 'trailPts recorded movement coords');
+
+    // Expire all 29
+    pm.updateAndDraw(mockCtx, t0 + 500, 0.016);
+    assert.strictEqual(pm.count, 0, 'All 29 particles expired cleanly');
+    assert.strictEqual(pm.poolSize, 29, 'All 29 returned to pool');
+
+    // Re-acquire 1 plain particle and confirm advanced fields are scrubbed clean
+    (pm as any).acquireParticle({
+      x: 50,
+      y: 50,
+      vx: 0,
+      vy: 0,
+      color: '#FFFFFF',
+      size: 2,
+      bornAt: t0 + 500,
+      maxAgeMs: 200,
+    });
+    const recycled = (pm as any).particles[0];
+    assert.strictEqual(recycled.colorMid, undefined, 'Recycled particle cleared colorMid');
+    assert.strictEqual(recycled.turbulence, undefined, 'Recycled particle cleared turbulence');
+    assert.strictEqual(recycled.trailLength, undefined, 'Recycled particle cleared trailLength');
+    assert.strictEqual(recycled.squashUntil, undefined, 'Recycled particle cleared squashUntil');
+    assert.strictEqual(recycled.subEmitOnBounce, undefined, 'Recycled particle cleared subEmitOnBounce');
+    assert.strictEqual(recycled.subEmitOnDeath, undefined, 'Recycled particle cleared subEmitOnDeath');
+    assert.strictEqual(recycled.trailPts ? recycled.trailPts.length : 0, 0, 'Recycled particle emptied trailPts');
+    pm.updateAndDraw(mockCtx, t0 + 800, 0.016);
+
+    // 2. Bounce squash + bounce sub-emitter + death sub-emitter
+    const tBounce = 20000;
+    (pm as any).acquireParticle({
+      x: 100,
+      y: 99,
+      vx: 30,
+      vy: 90,
+      color: '#EF4444',
+      size: 3,
+      bornAt: tBounce,
+      maxAgeMs: 200,
+      bounceY: 100,
+      squashOnBounce: true,
+      subEmitOnBounce: 'droplet',
+      subEmitOnDeath: 'ember',
+      subEmitCount: 2,
+      priority: 'high',
+    });
+    pm.updateAndDraw(mockCtx, tBounce + 40, 0.04);
+    assert.ok(pm.count >= 3, `Expected bounce sub-emitter to spawn droplets (count=${pm.count})`);
+    assert.ok((pm as any).particles[0].squashUntil > tBounce + 40, 'Expected squashUntil set after high-speed bounce');
+
+    // Expire parent at +220ms -> triggers subEmitOnDeath
+    const beforeDeathCount = pm.count;
+    pm.updateAndDraw(mockCtx, tBounce + 220, 0.02);
+    assert.ok(pm.count >= beforeDeathCount, `Expected death sub-emitter embers on expiration (count=${pm.count})`);
+    pm.updateAndDraw(mockCtx, tBounce + 1200, 0.016);
+    assert.strictEqual(pm.count, 0, 'Sub-emitted particles expire cleanly');
+
+    // 3. Weapon combo swing & categorized hit diversity across classes, weapons & damage types
+    const classesAndWeapons: Array<[HeroClassId, string]> = [
+      ['vanguard', 'vanguard_crimson_halberd'],
+      ['vanguard', 'vanguard_stormbreaker_flail'],
+      ['vanguard', 'vanguard_sunforged_claymore'],
+      ['ranger', 'ranger_galewind_twinbow'],
+      ['ranger', 'ranger_eclipse_longbow'],
+      ['arcanist', 'arcanist_cinderflare_rod'],
+      ['arcanist', 'arcanist_chronostar_scepter'],
+      ['cleric', 'cleric_solaris_censer'],
+      ['cleric', 'cleric_seraphim_crozier'],
+    ];
+    for (const [hc, wId] of classesAndWeapons) {
+      pm.updateAndDraw(mockCtx, 999999, 0.016);
+      pm.spawnWeaponComboSwingParticles(100, 100, { heroClass: hc, weaponId: wId, aimAngle: 0.4, comboStep: 0 }, 30000);
+      const step0Count = pm.count;
+      pm.updateAndDraw(mockCtx, 999999, 0.016);
+      pm.spawnWeaponComboSwingParticles(100, 100, { heroClass: hc, weaponId: wId, aimAngle: 0.4, comboStep: 2 }, 30500);
+      const step2Count = pm.count;
+      assert.ok(step0Count >= 4 && step2Count >= 7, `${hc}/${wId}: finisher (${step2Count}) must burst more than opener (${step0Count})`);
+    }
+    const categories = ['physical', 'bleed', 'lightning', 'fire', 'frost', 'poison', 'divine', 'arcane', 'elemental'];
+    for (const dmgCat of categories) {
+      pm.updateAndDraw(mockCtx, 9999999, 0.016);
+      pm.spawnCategorizedHitImpact(150, 150, { damageCategory: dmgCat, comboStep: 2, isCrit: true, angle: 0.5 }, 40000);
+      assert.ok(pm.count >= 8, `Categorized impact for ${dmgCat} must emit particles (got ${pm.count})`);
+    }
+
+    // 4. Biomes, torches, footsteps, statuses, prop breaks, gold & loot pickups
+    const biomes = ['courtyard', 'catacombs', 'ember', 'void', 'astral', 'hymns', 'reliquary', 'scripture', 'nave', 'wardengate'] as const;
+    let biomeStamp = 50000;
+    for (const b of biomes) {
+      biomeStamp += 100;
+      const before = pm.count;
+      pm.spawnBiomeAmbientMotes(b, { left: 0, right: 400, top: 0, bottom: 300 }, biomeStamp);
+      assert.ok(pm.count > before, `Biome ${b} emitted ambient mote`);
+      pm.spawnTorchEmbers(120 + biomeStamp % 50, 80, biomeStamp, b);
+    }
+    pm.updateAndDraw(mockCtx, 99999999, 0.016);
+
+    pm.spawnFootstepDust('p1', 100, 100, 0, 'catacombs', 60000, { crimsonFrenzy: true });
+    pm.spawnFootstepDust('p2', 120, 100, 1, 'void', 60000, { hasted: true });
+    const statuses = ['burned', 'frozen', 'shocked', 'poisoned', 'bleeding', 'stunned', 'chrono'] as const;
+    for (const st of statuses) {
+      pm.spawnEnemyStatusMote('en1', 200, 200, 16, st, 61000);
+    }
+    pm.spawnPropBreakBurst(240, 240, 'crate', 62000);
+    pm.spawnGoldPickupBurst(260, 260, 62000);
+    pm.spawnLootPickupBurst(280, 280, '#C084FC', 62000);
+    assert.ok(pm.count >= 25, 'All environmental, status, footstep, prop, and pickup effects spawned');
+    pm.updateAndDraw(mockCtx, 62100, 0.016);
+    assert.doesNotThrow(() => pm.updateAndDraw(mockCtx, 65000, 0.05), 'Full mixed particle scene renders & expires cleanly');
+
+    // 5. Verify live wiring in GameCanvas.tsx
+    const gameCanvasSrc = fs.readFileSync(path.join(process.cwd(), 'src/components/GameCanvas.tsx'), 'utf8');
+    for (const methodName of [
+      'spawnCategorizedHitImpact',
+      'spawnWeaponComboSwingParticles',
+      'spawnBiomeAmbientMotes',
+      'spawnTorchEmbers',
+      'spawnFootstepDust',
+      'spawnEnemyStatusMote',
+      'spawnPropBreakBurst',
+      'spawnGoldPickupBurst',
+      'spawnLootPickupBurst',
+    ]) {
+      assert.ok(gameCanvasSrc.includes(methodName), `GameCanvas.tsx must invoke ${methodName}`);
+    }
+  });
+
+  await test('139. Procedural Audio Engine: Variations, Class Identity, Footsteps, Spatial Culling, Ambience & Boss SFX', async () => {
+    // 1. Run headless SoundManagerDiagnostic first (verifies Node-safe behavior + 16 diagnostics)
+    const headlessReport = await SoundManagerDiagnostic.runSuite();
+    assert.ok(headlessReport.allPassed, `Headless SoundManagerDiagnostic failed: ${JSON.stringify(headlessReport.results.filter((r) => !r.passed))}`);
+
+    // 2. Spy Web Audio API context to inspect real AudioNode synthesis, randomization, panning & cleanup
+    const createdOscs: any[] = [];
+    const createdBufSrcs: any[] = [];
+    const createdLimiters: any[] = [];
+    const createdPanners: any[] = [];
+    const disconnectedNodes = new Set<any>();
+
+    const makeParam = (init = 0) => {
+      const history: Array<{ fn: string; val: number; time: number }> = [];
+      return {
+        value: init,
+        history,
+        setValueAtTime(v: number, t: number) {
+          this.value = v;
+          history.push({ fn: 'set', val: v, time: t });
+        },
+        linearRampToValueAtTime(v: number, t: number) {
+          this.value = v;
+          history.push({ fn: 'lin', val: v, time: t });
+        },
+        exponentialRampToValueAtTime(v: number, t: number) {
+          this.value = v;
+          history.push({ fn: 'exp', val: v, time: t });
+        },
+        cancelScheduledValues() {},
+      };
+    };
+
+    const makeNode = (kind: string) => ({
+      kind,
+      connectedTo: [] as any[],
+      disconnected: false,
+      connect(target: any) {
+        this.connectedTo.push(target);
+        return target;
+      },
+      disconnect() {
+        this.disconnected = true;
+        disconnectedNodes.add(this);
+      },
+    });
+
+    class MockAudioContext {
+      public state: AudioContextState = 'running';
+      public sampleRate = 44100;
+      public currentTime = 1.0;
+      public destination = makeNode('destination');
+      public resume() {
+        return Promise.resolve();
+      }
+      public createGain() {
+        return { ...makeNode('gain'), gain: makeParam(1) };
+      }
+      public createStereoPanner() {
+        const p = { ...makeNode('panner'), pan: makeParam(0) };
+        createdPanners.push(p);
+        return p;
+      }
+      public createDynamicsCompressor() {
+        const c = {
+          ...makeNode('compressor'),
+          threshold: makeParam(-8),
+          knee: makeParam(12),
+          ratio: makeParam(8),
+          attack: makeParam(0.003),
+          release: makeParam(0.14),
+        };
+        createdLimiters.push(c);
+        return c;
+      }
+      public createWaveShaper() {
+        return { ...makeNode('shaper'), curve: null, oversample: 'none' };
+      }
+      public createBiquadFilter() {
+        return {
+          ...makeNode('filter'),
+          type: 'lowpass',
+          frequency: makeParam(1000),
+          Q: makeParam(1),
+        };
+      }
+      public createBuffer(_ch: number, length: number, _sr: number) {
+        const arr = new Float32Array(length);
+        return {
+          length,
+          getChannelData: () => arr,
+        };
+      }
+      public createOscillator() {
+        const osc: any = {
+          ...makeNode('osc'),
+          type: 'sine',
+          frequency: makeParam(440),
+          detune: makeParam(0),
+          startedAt: null as number | null,
+          stoppedAt: null as number | null,
+          onended: null as null | (() => void),
+          start(t = 0) {
+            this.startedAt = t;
+          },
+          stop(t = 0) {
+            this.stoppedAt = t;
+          },
+        };
+        createdOscs.push(osc);
+        return osc;
+      }
+      public createBufferSource() {
+        const src: any = {
+          ...makeNode('bufsrc'),
+          buffer: null,
+          loop: false,
+          playbackRate: makeParam(1),
+          startedAt: null as number | null,
+          stoppedAt: null as number | null,
+          onended: null as null | (() => void),
+          start(t = 0) {
+            this.startedAt = t;
+          },
+          stop(t = 0) {
+            this.stoppedAt = t;
+          },
+        };
+        createdBufSrcs.push(src);
+        return src;
+      }
+    }
+
+    const prevWindow = (globalThis as any).window;
+    const fakeSm = soundManager as any;
+    const prevCtx = fakeSm.ctx;
+    const prevMaster = fakeSm.masterGain;
+    const prevLimiter = fakeSm.masterLimiter;
+    const prevSfx = fakeSm.sfxGain;
+    const prevMusic = fakeSm.musicGain;
+    const prevPool = [...fakeSm.voiceNodePool];
+    const origNow = performance.now.bind(performance);
+    let mockNow = 10000;
+
+    try {
+      (globalThis as any).window = {
+        AudioContext: MockAudioContext,
+        setInterval,
+        clearInterval,
+        addEventListener() {},
+        removeEventListener() {},
+      };
+      (performance as any).now = () => mockNow;
+      fakeSm.ctx = null;
+      fakeSm.masterGain = null;
+      fakeSm.masterLimiter = null;
+      fakeSm.sfxGain = null;
+      fakeSm.musicGain = null;
+      fakeSm.voiceNodePool = [];
+
+      // Re-run diagnostics with live AudioContext spy
+      const browserReport = await SoundManagerDiagnostic.runSuite();
+      assert.ok(browserReport.allPassed, `Mock-AudioContext diagnostic failed: ${JSON.stringify(browserReport.results.filter((r) => !r.passed))}`);
+      assert.ok(createdLimiters.length >= 1, 'SoundManager must wire anti-clipping DynamicsCompressorNode limiter');
+
+      // 3. Verify randomized pitch/timbre variations + distinct class attacks
+      const vanguardFreqs: number[] = [];
+      for (let i = 0; i < 6; i++) {
+        mockNow += 120;
+        const beforeOscCount = createdOscs.length;
+        sfx.playAttack('vanguard', { comboStep: i % 3, weaponId: 'vanguard_sunforged_claymore', playerId: 'p1', isLocal: true });
+        assert.ok(createdOscs.length > beforeOscCount, 'Vanguard attack must synthesize oscillator layers');
+        vanguardFreqs.push(createdOscs[beforeOscCount].frequency.history[0].val);
+      }
+      const uniqueVanguardFreqs = new Set(vanguardFreqs.map((f) => f.toFixed(2)));
+      assert.ok(uniqueVanguardFreqs.size >= 3, `Expected randomized/combo pitch variations across attacks, got ${JSON.stringify(vanguardFreqs)}`);
+
+      // Distinct class identities (Vanguard, Ranger, Arcanist, Cleric)
+      for (const hc of ['vanguard', 'ranger', 'arcanist', 'cleric'] as const) {
+        mockNow += 150;
+        const beforeOsc = createdOscs.length;
+        sfx.playAttack(hc, { playerId: `hero_${hc}`, isLocal: true });
+        sfx.playSkill('tactical', { heroClass: hc, isLocal: true });
+        sfx.playDash({ heroClass: hc, isLocal: true });
+        assert.ok(createdOscs.length > beforeOsc, `${hc} attack/skill/dash must synthesize audio`);
+      }
+
+      // 4. Verify all 5 footstep surfaces + class differences + immediate stop + spatial culling
+      const sampleTiles = new Array<number>(64 * 48).fill(1);
+      sampleTiles[2 * 64 + 2] = 5;
+      sampleTiles[3 * 64 + 3] = 6;
+      const tavernMap = { floor: 0, biome: 'courtyard' as const, width: 64, height: 48, tiles: sampleTiles, portalPos: { x: 9999, y: 9999 }, rooms: [] };
+      const courtyardMap = { ...tavernMap, floor: 1, biome: 'courtyard' as const, portalPos: { x: 40 * TILE_SIZE, y: 40 * TILE_SIZE } };
+      let foundGrass = false;
+      for (let tx = 0; tx < 25; tx++) {
+        if (resolveFootstepSurface(courtyardMap, tx * TILE_SIZE + 4, 4) === 'grass') {
+          foundGrass = true;
+          break;
+        }
+      }
+      assert.ok(foundGrass, 'Courtyard map must expose grass footstep surface tiles');
+      assert.strictEqual(resolveFootstepSurface(tavernMap, 5 * TILE_SIZE, 5 * TILE_SIZE), 'wood');
+      assert.strictEqual(resolveFootstepSurface(tavernMap, 2 * TILE_SIZE + 4, 2 * TILE_SIZE + 4), 'stone');
+      assert.strictEqual(resolveFootstepSurface(tavernMap, 3 * TILE_SIZE + 4, 3 * TILE_SIZE + 4), 'dirt');
+      assert.strictEqual(resolveFootstepSurface(courtyardMap, 40 * TILE_SIZE, 40 * TILE_SIZE), 'metal');
+
+      soundManager.setListenerPosition(500, 500);
+      for (const surf of ['stone', 'dirt', 'grass', 'wood', 'metal'] as const) {
+        mockNow += 140;
+        const beforeSrc = createdBufSrcs.length;
+        const beforeOsc = createdOscs.length;
+        sfx.playFootstep({
+          playerId: 'local_p',
+          surface: surf,
+          heroClass: 'vanguard',
+          isRunning: surf === 'metal',
+          strideIndex: 1,
+          worldPos: { x: 520, y: 500 },
+          isLocal: true,
+        });
+        assert.ok(createdBufSrcs.length + createdOscs.length > beforeSrc + beforeOsc, `Footstep surface "${surf}" must synthesize audio`);
+      }
+      sfx.stopFootstepsForPlayer('local_p');
+
+      // Spatial panning + off-screen culling test for remote player
+      mockNow += 200;
+      const beforeCulledOsc = createdOscs.length;
+      const beforeCulledSrc = createdBufSrcs.length;
+      sfx.playFootstep({
+        playerId: 'far_ally',
+        surface: 'stone',
+        heroClass: 'ranger',
+        worldPos: { x: 500 + 2500, y: 500 },
+        isLocal: false,
+      });
+      assert.strictEqual(createdOscs.length, beforeCulledOsc, 'Offscreen footstep must not allocate OscillatorNodes');
+      assert.strictEqual(createdBufSrcs.length, beforeCulledSrc, 'Offscreen footstep must not allocate BufferSourceNodes');
+
+      mockNow += 200;
+      const beforeNearPan = createdPanners.length;
+      sfx.playAttack('ranger', {
+        playerId: 'right_ally',
+        worldPos: { x: 500 + 400, y: 500 },
+        isLocal: false,
+      });
+      const latestPanner = createdPanners[createdPanners.length - 1];
+      assert.ok(createdPanners.length >= beforeNearPan && latestPanner && latestPanner.pan.value > 0.3, 'Nearby remote ally on right must pan right');
+
+      // 5. Floor 0-10 ambience & cleanup check
+      const allBiomes = ['courtyard', 'catacombs', 'ember', 'void', 'astral', 'hymns', 'reliquary', 'scripture', 'nave', 'wardengate'] as const;
+      sfx.startFloorAmbience(0, 'courtyard');
+      for (let idx = 0; idx < allBiomes.length; idx++) {
+        sfx.startFloorAmbience(idx + 1, allBiomes[idx]);
+      }
+      sfx.stopFloorAmbience(0);
+      assert.strictEqual((sfx as any).ambientSession, null, 'stopFloorAmbience(0) must clear active ambientSession cleanly');
+
+      // 6. Floors 1-10 boss ability synthesis + onended node cleanup verification
+      const oscBeforeBoss = createdOscs.length;
+      sfx.playBossAbility('malakor', 'iron_bulwark', { worldPos: { x: 550, y: 500 } });
+      sfx.playBossAbility('elyndor', 'resonant_crescendo', { worldPos: { x: 550, y: 500 } });
+      sfx.playBossAbility('oriphiel', 'bastion_ground_shatter', { worldPos: { x: 550, y: 500 } });
+      assert.ok(createdOscs.length > oscBeforeBoss + 5, 'Boss abilities (Floors 1-10) must emit multi-layered voices');
+      // Trigger onended on spawned nodes and verify disconnect hygiene
+      for (const osc of createdOscs.slice(oscBeforeBoss)) {
+        osc.onended?.();
+        assert.ok(disconnectedNodes.has(osc), 'Completed boss/SFX oscillator must disconnect cleanly');
+      }
+
+      // 7. Wire check in DungeonRunView & GameCanvas
+      const gameCanvasSrc = fs.readFileSync(path.join(process.cwd(), 'src/components/GameCanvas.tsx'), 'utf8');
+      const runViewSrc = fs.readFileSync(path.join(process.cwd(), 'src/components/DungeonRunView.tsx'), 'utf8');
+      for (const sym of ['resolveFootstepSurface', 'playFootstep', 'stopFootstepsForPlayer', 'playExplosion', 'playPropBreak']) {
+        assert.ok(gameCanvasSrc.includes(sym), `GameCanvas.tsx must call ${sym}`);
+      }
+      assert.ok(runViewSrc.includes('startFloorAmbience') && runViewSrc.includes('stopFloorAmbience'), 'DungeonRunView.tsx must drive floor ambience lifecycle');
+    } finally {
+      sfx.stopFloorAmbience(0);
+      soundManager.stopAll(0);
+      (performance as any).now = origNow;
+      (globalThis as any).window = prevWindow;
+      fakeSm.ctx = prevCtx;
+      fakeSm.masterGain = prevMaster;
+      fakeSm.masterLimiter = prevLimiter;
+      fakeSm.sfxGain = prevSfx;
+      fakeSm.musicGain = prevMusic;
+      fakeSm.voiceNodePool = prevPool;
+    }
+  });
+
+  await test('140. Dash Visual Overhaul: True Silhouette Afterimages, Canvas Pooling, Kinetic Lunge Interpolation & Class Themes', async () => {
+    // 1. Headless mode safety (no document): verify ghost & ribbon scheduling, lunge interpolation, and cleanup
+    const headlessMgr = new DashAfterimageManager();
+    const basePlayer = {
+      id: 'dash_p1',
+      heroClass: 'arcanist' as HeroClassId,
+      attackAnimMs: 0,
+      vx: 0,
+      vy: 0,
+      hasteMs: 600,
+      shield: 0,
+      crimsonFrenzyMs: 0,
+      equippedWeapon: 'arcanist_cinderflare_rod',
+      equippedVestment: 'arcanist_void_raiment',
+      attackComboStep: 1,
+      eclipseChargeRatio: 0,
+    };
+    headlessMgr.triggerDash({
+      player: basePlayer,
+      fromX: 100,
+      fromY: 100,
+      toX: 210,
+      toY: 100,
+      aimAngle: 0,
+      moving: true,
+      facingLeft: false,
+      facingDirection: 'E',
+      now: 1000,
+      kind: 'evasion',
+    });
+
+    const statsStart = headlessMgr.getStats();
+    assert.strictEqual(statsStart.activeGhosts, 6, 'Evasion dash must spawn 6 staggered afterimage ghosts');
+    assert.strictEqual(statsStart.activeRibbons, 1, 'Evasion dash must spawn kinetic slipstream ribbon');
+
+    // Visual lunge starts ~38%+ forward on frame 0 and converges smoothly to destination
+    const s0 = headlessMgr.getVisualDashSample('dash_p1', 210, 100, 1000);
+    const sMid = headlessMgr.getVisualDashSample('dash_p1', 210, 100, 1045);
+    const sEnd = headlessMgr.getVisualDashSample('dash_p1', 210, 100, 1180);
+    assert.ok(s0 && s0.isDashing && s0.x > 135 && s0.x < 170, `Expected immediate forward snap at t=0 (got x=${s0?.x})`);
+    assert.ok(sMid && sMid.x > s0!.x && sMid.x <= 210, 'Expected smooth mid-flight lunge progression');
+    assert.strictEqual(sEnd, null, 'Visual dash sample expires cleanly after flight + follow-through');
+
+    // 2. Simulated browser document + Canvas2D: verify offscreen hero pose capture, drawImage ghosts & pool release
+    const prevDoc = (globalThis as any).document;
+    let drawImageCalls = 0;
+    const makeSpyCtx = () => {
+      const noop = () => {};
+      return {
+        fillStyle: '#000',
+        strokeStyle: '#000',
+        lineWidth: 1,
+        lineCap: 'butt',
+        lineJoin: 'miter',
+        globalAlpha: 1,
+        globalCompositeOperation: 'source-over',
+        shadowColor: 'transparent',
+        shadowBlur: 0,
+        save: noop,
+        restore: noop,
+        setTransform: noop,
+        clearRect: noop,
+        translate: noop,
+        rotate: noop,
+        scale: noop,
+        setLineDash: noop,
+        beginPath: noop,
+        closePath: noop,
+        moveTo: noop,
+        lineTo: noop,
+        quadraticCurveTo: noop,
+        bezierCurveTo: noop,
+        arc: noop,
+        ellipse: noop,
+        fillRect: noop,
+        strokeRect: noop,
+        fill: noop,
+        stroke: noop,
+        fillText: noop,
+        drawImage: () => {
+          drawImageCalls++;
+        },
+        createRadialGradient: () => ({ addColorStop: noop }),
+        createLinearGradient: () => ({ addColorStop: noop }),
+      } as unknown as CanvasRenderingContext2D;
+    };
+
+    try {
+      (globalThis as any).document = {
+        createElement: (tag: string) => {
+          assert.strictEqual(tag, 'canvas');
+          const cCtx = makeSpyCtx();
+          return {
+            width: 0,
+            height: 0,
+            getContext: () => cCtx,
+          };
+        },
+      };
+
+      const browserMgr = new DashAfterimageManager();
+      const mainCtx = makeSpyCtx();
+      const classes: HeroClassId[] = ['vanguard', 'ranger', 'arcanist', 'cleric'];
+      let ts = 2000;
+      for (const hc of classes) {
+        ts += 20;
+        browserMgr.triggerDash({
+          player: {
+            ...basePlayer,
+            id: `p_${hc}`,
+            heroClass: hc,
+            crimsonFrenzyMs: hc === 'vanguard' ? 1200 : 0,
+          },
+          fromX: 200,
+          fromY: 200,
+          toX: 300,
+          toY: 240,
+          aimAngle: 0.38,
+          moving: true,
+          facingLeft: false,
+          facingDirection: 'SE',
+          now: ts,
+          kind: hc === 'vanguard' ? 'bulwark' : 'evasion',
+        });
+      }
+
+      const activeStats = browserMgr.getStats();
+      assert.ok(activeStats.activeGhosts >= 24, `Expected multi-class ghosts across 4 heroes (got ${activeStats.activeGhosts})`);
+      assert.ok(activeStats.checkedOutCanvases >= 4, 'Expected offscreen pose & silhouette canvases checked out from pool');
+
+      // Advance frame to draw active ghosts and slipstream ribbons
+      drawImageCalls = 0;
+      browserMgr.updateAndDraw(mainCtx, ts + 95);
+      assert.ok(drawImageCalls >= 20, `Expected real sprite drawImage compositing for afterimages (got ${drawImageCalls})`);
+
+      // Expire all ghosts cleanly and confirm pooled canvases return with 0 leaks
+      browserMgr.updateAndDraw(mainCtx, ts + 2000);
+      const afterExpire = browserMgr.getStats();
+      assert.strictEqual(afterExpire.activeGhosts, 0, 'Expired afterimages must clear cleanly');
+      assert.strictEqual(afterExpire.activeRibbons, 0, 'Expired ribbons must clear cleanly');
+      assert.strictEqual(afterExpire.checkedOutCanvases, 0, 'All offscreen canvases must return cleanly to pool after expiration');
+      assert.ok(afterExpire.pooledCanvases >= 4, 'Returned offscreen canvases remain warm in pool for reuse');
+
+      // Verify distinct class & modifier palettes
+      const frenzyPal = resolveDashPalette('vanguard', 'evasion', true);
+      const bulwarkPal = resolveDashPalette('vanguard', 'bulwark', false);
+      const rangerPal = resolveDashPalette('ranger', 'evasion', false);
+      assert.notStrictEqual(frenzyPal.primary, bulwarkPal.primary);
+      assert.notStrictEqual(rangerPal.primary, bulwarkPal.primary);
+
+      // Verify GameCanvas.tsx & heroSprites.ts wiring
+      const gameCanvasSrc = fs.readFileSync(path.join(process.cwd(), 'src/components/GameCanvas.tsx'), 'utf8');
+      const heroSpritesSrc = fs.readFileSync(path.join(process.cwd(), 'src/client/heroSprites.ts'), 'utf8');
+      assert.ok(gameCanvasSrc.includes('DashAfterimageManager') && gameCanvasSrc.includes('dashAfterimageManager.updateAndDraw'));
+      assert.ok(gameCanvasSrc.includes('dashAfterimageManager.triggerDash') && gameCanvasSrc.includes('getVisualDashSample'));
+      assert.ok(heroSpritesSrc.includes('dashStretchAlong') && heroSpritesSrc.includes('dashFlashAlpha'));
+    } finally {
+      (globalThis as any).document = prevDoc;
+    }
+  });
+
+  await test('141. UI Overhaul & Multiplayer Dialogue Isolation: Private Per-Player NPC State, Typewriter World Box, Concise Copy & Canonical Stat Colors', async () => {
+    const { PRIMARY_STAT_THEME, PRIMARY_STAT_ORDER, COMBAT_STAT_COLORS } = await import('./src/shared/statTheme.ts');
+
+    // 1. Canonical stat colors & order consistency
+    assert.deepStrictEqual([...PRIMARY_STAT_ORDER], ['strength', 'vitality', 'dexterity', 'intelligence', 'faith']);
+    assert.strictEqual(PRIMARY_STAT_THEME.strength.color, '#F97316');
+    assert.strictEqual(PRIMARY_STAT_THEME.vitality.color, '#22C55E');
+    assert.strictEqual(PRIMARY_STAT_THEME.dexterity.color, '#38BDF8');
+    assert.strictEqual(PRIMARY_STAT_THEME.intelligence.color, '#C084FC');
+    assert.strictEqual(PRIMARY_STAT_THEME.faith.color, '#FDE047');
+    assert.ok(COMBAT_STAT_COLORS.dps && COMBAT_STAT_COLORS.ehp && COMBAT_STAT_COLORS.armor);
+
+    // 2. Multiplayer NPC dialogue isolation in Tavern Hub
+    const tavern = new GameRoom({
+      roomId: 'TAVERN-HUB',
+      name: 'Tavern',
+      hostName: 'Innkeeper',
+      difficulty: 'Normal',
+      seed: 1234,
+    });
+    tavern.addOrReconnectPlayer('p1', 'HeroOne', 'vanguard');
+    tavern.addOrReconnectPlayer('p2', 'HeroTwo', 'arcanist');
+    const p1 = tavern.getPlayerState('p1')!;
+    const p2 = tavern.getPlayerState('p2')!;
+
+    const bram = tavern.npcs.find((n) => n.id === 'npc_bram')!;
+    const lena = tavern.npcs.find((n) => n.id === 'npc_lena')!;
+    const aleph = tavern.npcs.find((n) => n.id === 'npc_aleph')!;
+    assert.ok(bram && lena && aleph, 'Tavern must contain Bram, Lena, and Aleph');
+
+    const bramInitialSpeakingMs = bram.speakingMs || 0;
+    const chatBefore = tavern.chat.length;
+    p1.x = bram.x + 20;
+    p1.y = bram.y;
+    p2.x = lena.x + 20;
+    p2.y = lena.y;
+
+    tavern.performAction('p1', 'interact', 0);
+    const p1BramDlg = tavern.getPlayerNpcDialogue('p1');
+    assert.ok(p1BramDlg && p1BramDlg.npcId === 'npc_bram', 'p1 must receive private Bram dialogue');
+    assert.ok(p1BramDlg.text.length > 0 && p1BramDlg.text.length <= 90, `NPC dialogue must stay concise (got ${p1BramDlg.text.length} chars)`);
+    assert.strictEqual(tavern.getPlayerNpcDialogue('p2'), null, 'p2 must NOT see p1 NPC dialogue');
+    assert.strictEqual(bram.speakingMs || 0, bramInitialSpeakingMs, 'Shared room.npcs speaking state must not be mutated for all players');
+    assert.strictEqual(tavern.chat.length, chatBefore, 'NPC dialogue must not broadcast into shared room chat');
+
+    // Network snapshot must strip private npcDialogue from players array (never broadcast to others)
+    const netSnap = tavern.buildNetworkSnapshot();
+    for (const np of netSnap.players) {
+      assert.strictEqual((np as any).npcDialogue, undefined, 'Broadcast network snapshot must omit private npcDialogue');
+    }
+
+    // Independent per-player NPC line progression on Lena
+    p1.x = lena.x + 18;
+    p1.y = lena.y;
+    tavern.performAction('p1', 'interact', 0);
+    const p1Lena1 = tavern.getPlayerNpcDialogue('p1')!;
+    tavern.performAction('p1', 'interact', 0);
+    const p1Lena2 = tavern.getPlayerNpcDialogue('p1')!;
+    assert.notStrictEqual(p1Lena1.text, p1Lena2.text, 'p1 repeated interacts must advance p1 dialogue line');
+
+    tavern.performAction('p2', 'interact', 0);
+    const p2Lena1 = tavern.getPlayerNpcDialogue('p2')!;
+    assert.strictEqual(p2Lena1.text, 'Hey HeroTwo! Honeyed mead or spiced cider?', 'p2 must start on Lena line 0 independently of p1 progress');
+
+    // Aleph interactive options & dialogue pick isolation
+    p1.x = aleph.x + 18;
+    p1.y = aleph.y;
+    tavern.performAction('p1', 'interact', 0);
+    const p1Aleph = tavern.getPlayerNpcDialogue('p1')!;
+    assert.strictEqual(p1Aleph.persistent, true);
+    assert.ok(p1Aleph.options && p1Aleph.options.some((o) => o.id === 'reset_stats'));
+    tavern.handleDialoguePick('p1', 'lore');
+    assert.ok(tavern.getPlayerNpcDialogue('p1')!.text.includes('Aleph'));
+    assert.strictEqual(tavern.getPlayerNpcDialogue('p2')!.npcId, 'npc_lena', 'p1 Aleph pick must not affect p2 dialogue');
+    tavern.handleAlephResetDialogue('p1', 6);
+    assert.ok(tavern.getPlayerNpcDialogue('p1')!.text.includes('6 Stat Pts'));
+    assert.strictEqual(tavern.getPlayerNpcDialogue('p2')!.npcId, 'npc_lena', 'p1 Aleph reset dialogue must stay private');
+
+    // Distance auto-close (>250px) clears p1 dialogue without affecting p2
+    p1.x = aleph.x + 260;
+    tavern.tick(50);
+    assert.strictEqual(tavern.getPlayerNpcDialogue('p1'), null, 'Walking >250px away must close local player dialogue');
+    assert.strictEqual(tavern.getPlayerNpcDialogue('p2')!.npcId, 'npc_lena', 'Distance close for p1 must leave p2 untouched');
+
+    // Non-persistent TTL expiration closes p2 dialogue cleanly
+    tavern.tick(6000);
+    assert.strictEqual(tavern.getPlayerNpcDialogue('p2'), null, 'Expired non-persistent dialogue must close cleanly');
+
+    // Warden Gate private dialogue in dungeon
+    const dung = new GameRoom({
+      roomId: 'GATE-ISO',
+      name: 'Gate Isolation',
+      hostName: 'HeroOne',
+      difficulty: 'Normal',
+      seed: 55,
+      initialFloor: 1,
+    });
+    dung.status = 'playing';
+    dung.addOrReconnectPlayer('gp1', 'G1', 'vanguard');
+    dung.addOrReconnectPlayer('gp2', 'G2', 'cleric');
+    const gp1 = dung.getPlayerState('gp1')!;
+    dung.props.push({
+      id: 'warden_gate_test',
+      kind: 'warden_gate',
+      x: gp1.x + 20,
+      y: gp1.y,
+      opened: false,
+      value: 0,
+    });
+    dung.performAction('gp1', 'interact', 0);
+    assert.strictEqual(dung.getPlayerNpcDialogue('gp1')?.npcId, 'warden_gate_test');
+    assert.strictEqual(dung.getPlayerNpcDialogue('gp2'), null, "Warden's Gate refusal must stay private to interacting player");
+
+    // 3. Static verification of client/server wiring & UI theme coverage
+    const serverSrc = fs.readFileSync(path.join(process.cwd(), 'server.ts'), 'utf8');
+    const appSrc = fs.readFileSync(path.join(process.cwd(), 'src/App.tsx'), 'utf8');
+    const canvasSrc = fs.readFileSync(path.join(process.cwd(), 'src/components/GameCanvas.tsx'), 'utf8');
+    const runViewSrc = fs.readFileSync(path.join(process.cwd(), 'src/components/DungeonRunView.tsx'), 'utf8');
+    const invSrc = fs.readFileSync(path.join(process.cwd(), 'src/components/CharacterInventoryModal.tsx'), 'utf8');
+    const partySrc = fs.readFileSync(path.join(process.cwd(), 'src/components/PartyLobbyView.tsx'), 'utf8');
+    const lobbySrc = fs.readFileSync(path.join(process.cwd(), 'src/components/SanctuaryLobby.tsx'), 'utf8');
+
+    assert.ok(serverSrc.includes("type: 'npc:dialogue'") && serverSrc.includes('syncClientNpcDialogue'));
+    assert.ok(appSrc.includes("msg.type === 'npc:dialogue'") && appSrc.includes('privateNpcDialogueRef'));
+    assert.ok(canvasSrc.includes('npcTypewriterRef') && canvasSrc.includes('onNpcDialogueAnchor'));
+    assert.ok(runViewSrc.includes('PRIMARY_STAT_THEME') && runViewSrc.includes('COMBAT_STAT_COLORS'));
+    assert.ok(invSrc.includes('PRIMARY_STAT_THEME') && invSrc.includes('COMBAT_STAT_COLORS'));
+    assert.ok(partySrc.includes('PRIMARY_STAT_THEME') && partySrc.includes('PRIMARY_STAT_ORDER'));
+    assert.ok(lobbySrc.includes('PRIMARY_STAT_THEME') && lobbySrc.includes('RELIC_CATALOG.length'));
   });
 
   console.log(`\nAll regression tests completed: ${passed}/${total} passed.`);

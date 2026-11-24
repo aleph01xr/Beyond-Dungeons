@@ -9,6 +9,7 @@ import {
 } from '../client/camera.ts';
 import { computeExpSmoothingFactor } from '../client/networkStats.ts';
 import { LocalPredictionController } from '../client/prediction.ts';
+import { DashAfterimageManager } from '../client/dashAfterimages.ts';
 import { drawEnhancedProjectile, ParticleManager } from '../client/canvasEffects.ts';
 import {
   drawDungeonPortal,
@@ -91,7 +92,7 @@ import {
   type EnemyImpactState,
   type WeaponSwingAnimationState,
 } from '../client/hitStop.ts';
-import { sfx, soundManager } from '../client/sound.ts';
+import { resolveFootstepSurface, sfx, soundManager } from '../client/sound.ts';
 import {
   angleDeltaRad,
   isEditableEventTarget,
@@ -112,6 +113,7 @@ import {
   type HeroClassId,
   type PlayerInputState,
   type ProjectileState,
+  type PropState,
 } from '../shared/types.ts';
 
 interface GameCanvasProps {
@@ -145,8 +147,30 @@ interface GameCanvasProps {
   ) => void;
   onSendCommand?: (msg: ClientMessage) => void;
   onSendPing: (label: string, x: number, y: number) => void;
+  onNpcDialogueAnchor?: (
+    anchor: { npcId: string; screenX: number; screenY: number } | null
+  ) => void;
   chatFocused: boolean;
   controlsBlocked?: boolean;
+}
+
+function wrapDialogueLines(text: string, maxChars: number): string[] {
+  const words = text.split(/\s+/).filter(Boolean);
+  if (words.length === 0) return [''];
+  const lines: string[] = [];
+  let current = '';
+  for (const word of words) {
+    if (!current) {
+      current = word;
+    } else if (current.length + 1 + word.length <= maxChars) {
+      current += ` ${word}`;
+    } else {
+      lines.push(current);
+      current = word;
+    }
+  }
+  if (current) lines.push(current);
+  return lines;
 }
 
 interface ActiveFloatingText extends FloatingEvent {
@@ -172,6 +196,7 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
   onTriggerAction,
   onSendCommand,
   onSendPing,
+  onNpcDialogueAnchor,
   chatFocused,
   controlsBlocked = false,
 }) => {
@@ -226,6 +251,16 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
   onSendCommandRef.current = onSendCommand;
   const onSendPingRef = useRef(onSendPing);
   onSendPingRef.current = onSendPing;
+  const onNpcDialogueAnchorRef = useRef(onNpcDialogueAnchor);
+  onNpcDialogueAnchorRef.current = onNpcDialogueAnchor;
+  const npcTypewriterRef = useRef<{
+    key: string;
+    bornAt: number;
+    revealedAll: boolean;
+    fullText: string;
+    bubbleRect?: { left: number; top: number; right: number; bottom: number };
+  } | null>(null);
+  const lastDialogueAnchorKeyRef = useRef('');
   const disintegrationHoldSourceRef = useRef<'q' | 'rmb' | null>(null);
   const lastChannelUpdateAtRef = useRef(0);
   const lastSentChannelAngleRef = useRef(0);
@@ -419,23 +454,32 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
     }
 
     if (cur.action === 'dash') {
-      sfx.playDash();
+      const snap = latestSnapshotRef.current;
+      const me = snap?.players.find((p) => p.id === playerId) || snap?.players[0];
+      sfx.playDash({ heroClass: me?.heroClass, isLocal: true });
     } else if (cur.action === 'tactical') {
       const snap = latestSnapshotRef.current;
       const me = snap?.players.find((p) => p.id === playerId) || snap?.players[0];
       if (me?.heroClass === 'arcanist' && me.equippedScrollId) {
-        sfx.playArcanistSpell(me.equippedScrollId);
+        sfx.playArcanistSpell(me.equippedScrollId, { isLocal: true });
       } else {
-        sfx.playSkill('tactical');
+        const activeTac = me
+          ? resolveActiveTacticalDef(me.heroClass, me.equippedWeapon, me.equippedScrollId)
+          : undefined;
+        sfx.playSkill('tactical', {
+          heroClass: me?.heroClass,
+          skillId: activeTac?.id ?? me?.equippedWeapon,
+          isLocal: true,
+        });
       }
       triggerLocalSwing('tactical');
     } else {
       const snap = latestSnapshotRef.current;
       const me = snap?.players.find((p) => p.id === playerId) || snap?.players[0];
       if (me?.heroClass === 'arcanist') {
-        sfx.playChronoWell();
+        sfx.playChronoWell({ isLocal: true });
       } else {
-        sfx.playSkill('ult');
+        sfx.playSkill('ult', { heroClass: me?.heroClass, isLocal: true });
       }
       triggerLocalSwing('ult');
     }
@@ -946,7 +990,7 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
           disintegrationHoldSourceRef.current = 'q';
           lastSentChannelAngleRef.current = smartTarget.aimAngle;
           lastChannelUpdateAtRef.current = performance.now();
-          sfx.playArcanistSpell('disintegration');
+          sfx.playArcanistSpell('disintegration', { isLocal: true });
           onSendCommandRef.current?.({
             type: 'player:channel_start',
             spellId: 'disintegration',
@@ -970,7 +1014,7 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
         const snap = latestSnapshotRef.current;
         const me = snap?.players.find((p) => p.id === playerId) || snap?.players[0];
         if (me && !me.downed && me.potions > 0 && me.hp < me.maxHp) {
-          sfx.playHeal();
+          sfx.playHeal({ isLocal: true });
         }
         onTriggerActionRef.current('potion', aimAngleRef.current);
       } else if (k === 'e') {
@@ -1183,7 +1227,11 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
     >();
     const prevAttackAnimMap = new Map<string, number>();
     const prevComboStepMap = new Map<string, number>();
+    const prevPropsMap = new Map<string, { opened: boolean; kind: PropState['kind']; x: number; y: number }>();
+    let prevPropsFloor = -1;
     const playerWeaponSwings = new Map<string, WeaponSwingAnimationState>();
+    const triggeredSwingVfxMap = new Map<string, number>();
+    const playerFootstepStateMap = new Map<string, { lastStepIndex: number; wasMoving: boolean }>();
     const enemyImpactMap = new Map<string, EnemyImpactState>();
     let impactVignetteFlash = { until: 0, bornAt: 0, durationMs: 0, alpha: 0, color: '#FFFFFF' };
     let hasInitWorldEffects = false;
@@ -1229,6 +1277,7 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
       return w;
     };
     const particleManager = new ParticleManager();
+    const dashAfterimageManager = new DashAfterimageManager();
     const localPredictor = new LocalPredictionController();
     let lastSeenSnapshot: GameSnapshot | null = null;
     let lastSnapshotAt = performance.now();
@@ -1442,6 +1491,9 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
       for (const ev of snap.events) {
         if (!seenEventIds.has(ev.id)) {
           seenEventIds.add(ev.id);
+          if (ev.targetPlayerId && ev.targetPlayerId !== playerId) {
+            continue;
+          }
           const trimmedText = ev.text.trim();
           const upperText = trimmedText.toUpperCase();
           const isDialogue = trimmedText.startsWith('"');
@@ -1490,12 +1542,14 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
             }
             floatingTexts.push({ ...ev, bornAt: now });
           }
-          if (ev.kind === 'gold') sfx.playCoin();
-          else if (ev.kind === 'heal') {
-            sfx.playHeal();
+          if (ev.kind === 'gold') {
+            sfx.playCoin({ worldPos: { x: ev.x, y: ev.y } });
+            particleManager.spawnGoldPickupBurst(ev.x, ev.y, now);
+          } else if (ev.kind === 'heal') {
+            sfx.playHeal({ worldPos: { x: ev.x, y: ev.y } });
             particleManager.spawnClericHealBurst(ev.x, ev.y, now);
           } else if (ev.kind === 'cleric_pulse') {
-            sfx.playHeal();
+            sfx.playHeal({ worldPos: { x: ev.x, y: ev.y } });
             clericPulses.push({ x: ev.x, y: ev.y, bornAt: now });
             particleManager.spawnClericHealBurst(ev.x, ev.y, now);
           } else if (ev.kind === 'damage') {
@@ -1503,7 +1557,9 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
               triggerBossEventAnim(activeBossRuntime, ev.kind, ev.text, bossAimAngle, now);
             }
             if (ev.text.toUpperCase().includes('SOUL SIPHON')) {
-              sfx.playBossAbility('vaelor', 'soul_siphon_tether');
+              sfx.playBossAbility('vaelor', 'soul_siphon_tether', {
+                worldPos: activeBoss ? { x: activeBoss.x, y: activeBoss.y } : { x: ev.x, y: ev.y },
+              });
               particleManager.spawnVaelorSoulSiphonTether(
                 ev.x,
                 ev.y + 14,
@@ -1512,11 +1568,32 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
                 now
               );
             } else {
-              sfx.playEnemyHit(false);
-              if (hitSparkBurstsThisTick < 3) {
+              sfx.playEnemyHit(false, {
+                damageCategory: ev.damageCategory,
+                worldPos: { x: ev.x, y: ev.y },
+              });
+              if (hitSparkBurstsThisTick < 4) {
                 hitSparkBurstsThisTick++;
-                particleManager.spawnHitSparks(ev.x, ev.y, ev.color || '#EF4444', 5, now, false);
-                if (!ev.damageCategory || ev.damageCategory === 'physical') {
+                const hitAttacker = ev.attackerId ? snap.players.find((pl) => pl.id === ev.attackerId) : undefined;
+                if (hitAttacker || ev.damageCategory) {
+                  const hitSwing = hitAttacker ? playerWeaponSwings.get(hitAttacker.id) : undefined;
+                  const hitStep = hitSwing?.comboStep ?? hitAttacker?.attackComboStep ?? 0;
+                  const hitAngle = hitAttacker ? Math.atan2(ev.y - hitAttacker.y, ev.x - hitAttacker.x) : Math.random() * Math.PI * 2;
+                  particleManager.spawnCategorizedHitImpact(
+                    ev.x,
+                    ev.y,
+                    {
+                      damageCategory: ev.damageCategory,
+                      weaponId: hitAttacker?.equippedWeapon,
+                      comboStep: hitStep,
+                      angle: hitAngle,
+                      isCrit: false,
+                      color: ev.color,
+                    },
+                    now
+                  );
+                } else {
+                  particleManager.spawnHitSparks(ev.x, ev.y, ev.color || '#EF4444', 5, now, false);
                   particleManager.spawnPhysicalImpact(ev.x, ev.y, Math.random() * Math.PI * 2, 3, now);
                 }
               }
@@ -1526,13 +1603,29 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
             const critSparkColor = ev.damageCategory
               ? getDamageTypeColor(ev.damageCategory, true)
               : ev.color || '#FBBF24';
-            sfx.playEnemyHit(true);
-            if (hitSparkBurstsThisTick < 4) {
+            sfx.playEnemyHit(true, {
+              damageCategory: ev.damageCategory,
+              worldPos: { x: ev.x, y: ev.y },
+            });
+            if (hitSparkBurstsThisTick < 5) {
               hitSparkBurstsThisTick++;
-              particleManager.spawnHitSparks(ev.x, ev.y, critSparkColor, 10, now, true);
-              if (!ev.damageCategory || ev.damageCategory === 'physical') {
-                particleManager.spawnPhysicalImpact(ev.x, ev.y, Math.random() * Math.PI * 2, 6, now);
-              }
+              const critAttacker = ev.attackerId ? snap.players.find((pl) => pl.id === ev.attackerId) : undefined;
+              const critSwing = critAttacker ? playerWeaponSwings.get(critAttacker.id) : undefined;
+              const critStep = critSwing?.comboStep ?? critAttacker?.attackComboStep ?? 0;
+              const critAngle = critAttacker ? Math.atan2(ev.y - critAttacker.y, ev.x - critAttacker.x) : Math.random() * Math.PI * 2;
+              particleManager.spawnCategorizedHitImpact(
+                ev.x,
+                ev.y,
+                {
+                  damageCategory: ev.damageCategory,
+                  weaponId: critAttacker?.equippedWeapon,
+                  comboStep: critStep,
+                  angle: critAngle,
+                  isCrit: true,
+                  color: critSparkColor,
+                },
+                now
+              );
             }
             screenShake = Math.min(8, screenShake + 2.6);
           }
@@ -1609,7 +1702,8 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
           }
 
           if (ev.text.includes('Relic')) {
-            sfx.playRelicChime();
+            sfx.playRelicChime({ worldPos: { x: ev.x, y: ev.y } });
+            particleManager.spawnLootPickupBurst(ev.x, ev.y, ev.color || '#F59E0B', now);
           } else if (ev.kind === 'status') {
             if (activeBossRuntime) {
               triggerBossEventAnim(activeBossRuntime, ev.kind, ev.text, bossAimAngle, now);
@@ -1617,142 +1711,145 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
             const txt = ev.text.trim().toUpperCase();
             const bx = activeBoss ? activeBoss.x : ev.x;
             const by = activeBoss ? activeBoss.y : ev.y + 38;
+            const bossPosOpt = { worldPos: { x: bx, y: by } };
             if (txt.includes('SHIELD WALL')) {
-              sfx.playBossAbility('malakor', 'iron_bulwark');
+              sfx.playBossAbility('malakor', 'iron_bulwark', bossPosOpt);
               particleManager.spawnMalakorBulwarkCast(bx, by, now);
             } else if (txt.includes('CLEAVE')) {
-              sfx.playBossAbility('malakor', 'triple_cleave');
+              sfx.playBossAbility('malakor', 'triple_cleave', bossPosOpt);
               particleManager.spawnMalakorTripleCleave(bx, by, bossAimAngle, now);
             } else if (txt.includes('GROUND SLAM')) {
-              sfx.playBossAbility('malakor', 'bastion_ground_slam');
+              sfx.playBossAbility('malakor', 'bastion_ground_slam', bossPosOpt);
               particleManager.spawnImpactRing(bx, by, 35, now);
             } else if (txt.includes('WAR CHARGE')) {
-              sfx.playBossAbility('malakor', 'war_charge');
+              sfx.playBossAbility('malakor', 'war_charge', bossPosOpt);
               particleManager.spawnMalakorWarCharge(bx, by, activeBoss?.chargeAngle ?? bossAimAngle, now);
             } else if (txt.includes('FROST NOVA')) {
-              sfx.playBossAbility('vaelor', 'glacial_frost_nova');
+              sfx.playBossAbility('vaelor', 'glacial_frost_nova', bossPosOpt);
               particleManager.spawnFrostRing(bx, by, 36, now);
             } else if (txt.includes('SOUL SIPHON')) {
-              sfx.playBossAbility('vaelor', 'soul_siphon_tether');
+              sfx.playBossAbility('vaelor', 'soul_siphon_tether', bossPosOpt);
               particleManager.spawnVaelorSoulSiphonTether(ev.x, ev.y + 14, bx, by, now);
             } else if (txt.includes('SOUL HAIL')) {
-              sfx.playBossAbility('vaelor', 'seeking_soul_hail');
+              sfx.playBossAbility('vaelor', 'seeking_soul_hail', bossPosOpt);
               particleManager.spawnVaelorSoulHail(bx, by, bossAimAngle, now);
             } else if (txt.includes('DEATH RING')) {
-              sfx.playBossAbility('vaelor', 'necrotic_death_ring');
+              sfx.playBossAbility('vaelor', 'necrotic_death_ring', bossPosOpt);
               particleManager.spawnVaelorDeathRing(bx, by, now);
             } else if (txt.includes('MAGMA')) {
-              sfx.playBossAbility('ignis', 'magma_eruptions');
+              sfx.playBossAbility('ignis', 'magma_eruptions', bossPosOpt);
               particleManager.spawnIgnisMagmaEruption(bx, by, 40, now);
             } else if (txt.includes('FISSURE WAVE')) {
-              sfx.playBossAbility('ignis', 'molten_fissure_wave');
+              sfx.playBossAbility('ignis', 'molten_fissure_wave', bossPosOpt);
               particleManager.spawnIgnisFissureWave(bx, by, bossAimAngle, now);
             } else if (txt.includes('CINDER SPIRAL')) {
-              sfx.playBossAbility('ignis', 'cinder_ember_spiral');
+              sfx.playBossAbility('ignis', 'cinder_ember_spiral', bossPosOpt);
               particleManager.spawnIgnisCinderSpiral(bx, by, now);
             } else if (txt.includes('CORE DETONATION')) {
-              sfx.playBossAbility('ignis', 'volcanic_core_detonation');
+              sfx.playBossAbility('ignis', 'volcanic_core_detonation', bossPosOpt);
               particleManager.spawnIgnisCoreDetonation(bx, by, 110, now);
             } else if (txt.includes('SINGULARITY')) {
-              sfx.playBossAbility('malice', 'gravitational_singularity');
+              sfx.playBossAbility('malice', 'gravitational_singularity', bossPosOpt);
               particleManager.spawnMaliceSingularityImplosion(bx, by, 45, now);
             } else if (txt.includes('TENDRIL FLURRY')) {
-              sfx.playBossAbility('malice', 'void_tendril_flurry');
+              sfx.playBossAbility('malice', 'void_tendril_flurry', bossPosOpt);
               particleManager.spawnMaliceTendrilFlurry(bx, by, bossAimAngle, now);
             } else if (txt.includes('VOID STEP')) {
-              sfx.playBossAbility('malice', 'void_step');
+              sfx.playBossAbility('malice', 'void_step', bossPosOpt);
               didVoidStepStatus = true;
               const fromX = prevBossState && activeBoss && prevBossState.id === activeBoss.id ? prevBossState.x : bx;
               const fromY = prevBossState && activeBoss && prevBossState.id === activeBoss.id ? prevBossState.y : by;
               particleManager.spawnMaliceVoidStep(fromX, fromY, bx, by, now);
             } else if (txt.includes('ABYSSAL NOVA')) {
-              sfx.playBossAbility('malice', 'abyssal_nova_spread');
+              sfx.playBossAbility('malice', 'abyssal_nova_spread', bossPosOpt);
               particleManager.spawnMaliceAbyssalNova(bx, by, now);
             } else if (txt.includes('SUPERNOVA')) {
-              sfx.playBossAbility('archon', 'celestial_supernova_ring');
+              sfx.playBossAbility('archon', 'celestial_supernova_ring', bossPosOpt);
               particleManager.spawnArchonSupernovaBurst(bx, by, 80, now);
             } else if (txt.includes('STARBEAM')) {
-              sfx.playBossAbility('archon', 'orbital_starlight_beams');
+              sfx.playBossAbility('archon', 'orbital_starlight_beams', bossPosOpt);
               particleManager.spawnArchonStarbeamStrike(bx, by, 50, now);
             } else if (txt.includes('COSMIC VOLLEY')) {
-              sfx.playBossAbility('archon', 'cosmic_shard_volley');
+              sfx.playBossAbility('archon', 'cosmic_shard_volley', bossPosOpt);
               particleManager.spawnArchonCosmicVolley(bx, by, bossAimAngle, now);
             } else if (txt.includes('RESONANT CRESCENDO')) {
-              sfx.playBossAbility('elyndor', 'resonant_crescendo');
+              sfx.playBossAbility('elyndor', 'resonant_crescendo', bossPosOpt);
               particleManager.spawnElyndorResonantCrescendo(bx, by, bossAimAngle, now);
             } else if (txt.includes('LAMENT')) {
-              sfx.playBossAbility('elyndor', 'lament_of_the_forgotten');
+              sfx.playBossAbility('elyndor', 'lament_of_the_forgotten', bossPosOpt);
               particleManager.spawnElyndorLamentBurst(bx, by, 55, now);
             } else if (txt.includes('DIVINE CHORUS')) {
-              sfx.playBossAbility('elyndor', 'divine_chorus_beams');
+              sfx.playBossAbility('elyndor', 'divine_chorus_beams', bossPosOpt);
               particleManager.spawnElyndorDivineChorus(bx, by, bossAimAngle, now);
             } else if (txt.includes('CHORUS OF REMEMBRANCE')) {
-              sfx.playBossAbility('elyndor', 'resonant_crescendo');
+              sfx.playBossAbility('elyndor', 'resonant_crescendo', bossPosOpt);
               particleManager.spawnElyndorChorusRemembrance(bx, by, now);
             } else if (txt.includes('ASHEN PROCESSION')) {
-              sfx.playBossAbility('zadkiel', 'ashen_procession');
+              sfx.playBossAbility('zadkiel', 'ashen_procession', bossPosOpt);
               particleManager.spawnZadkielAshenCloudMotes(bx, by, 60, now);
             } else if (txt.includes('CHAIN OF THE DEPARTED')) {
-              sfx.playBossAbility('zadkiel', 'chain_of_the_departed');
+              sfx.playBossAbility('zadkiel', 'chain_of_the_departed', bossPosOpt);
               particleManager.spawnZadkielCenserSweepSparks(bx, by, bossAimAngle, 155, 0.25, now);
             } else if (txt.includes('RELIQUARY AWAKENING')) {
-              sfx.playBossAbility('zadkiel', 'reliquary_awakening');
+              sfx.playBossAbility('zadkiel', 'reliquary_awakening', bossPosOpt);
               particleManager.spawnZadkielReliquaryAwakening(bx, by, now);
             } else if (txt.includes('JUDGMENT OF THE DEPARTED')) {
-              sfx.playBossAbility('zadkiel', 'reliquary_awakening');
+              sfx.playBossAbility('zadkiel', 'reliquary_awakening', bossPosOpt);
               particleManager.spawnZadkielJudgmentCast(bx, by, bossAimAngle, now);
             } else if (txt.includes('SCRIPTURE OF BINDING')) {
-              sfx.playBossAbility('sariel', 'scripture_of_binding');
+              sfx.playBossAbility('sariel', 'scripture_of_binding', bossPosOpt);
               particleManager.spawnSarielScriptureBinding(bx, by, bossAimAngle, now);
             } else if (txt.includes('FORBIDDEN VERSES')) {
-              sfx.playBossAbility('sariel', 'forbidden_verses');
+              sfx.playBossAbility('sariel', 'forbidden_verses', bossPosOpt);
               particleManager.spawnSarielForbiddenPageBurst(bx, by, 55, now);
             } else if (txt.includes('SEAL OF SILENCE')) {
-              sfx.playBossAbility('sariel', 'seal_of_silence');
+              sfx.playBossAbility('sariel', 'seal_of_silence', bossPosOpt);
               particleManager.spawnSarielSilenceDetonation(bx, by, 55, now);
             } else if (txt.includes('HERETICAL VOLLEY')) {
-              sfx.playBossAbility('sariel', 'heretical_volley');
+              sfx.playBossAbility('sariel', 'heretical_volley', bossPosOpt);
               particleManager.spawnSarielHereticalVolley(bx, by, now);
             } else if (txt.includes("HEAVEN'S PIERCING LINE")) {
-              sfx.playBossAbility('seraphel', 'heavens_piercing_line');
+              sfx.playBossAbility('seraphel', 'heavens_piercing_line', bossPosOpt);
               particleManager.spawnSeraphelPiercingLine(bx, by, bossAimAngle, 380, now);
             } else if (txt.includes('LANCEFALL')) {
-              sfx.playBossAbility('seraphel', 'lancefall_sequence');
+              sfx.playBossAbility('seraphel', 'lancefall_sequence', bossPosOpt);
               particleManager.spawnSeraphelLancefallImpact(bx, by, 50, now);
             } else if (txt.includes('AERIAL JUDGMENT')) {
-              sfx.playBossAbility('seraphel', 'aerial_judgment');
+              sfx.playBossAbility('seraphel', 'aerial_judgment', bossPosOpt);
               particleManager.spawnSeraphelAerialJudgment(bx, by, bossAimAngle, now);
             } else if (txt.includes('SENTINEL SPEARFALL CASCADE')) {
-              sfx.playBossAbility('seraphel', 'lancefall_sequence');
+              sfx.playBossAbility('seraphel', 'lancefall_sequence', bossPosOpt);
               particleManager.spawnSeraphelSpearfallCascade(bx, by, now);
             } else if (txt.includes("WARDEN'S EDICT")) {
-              sfx.playBossAbility('oriphiel', 'wardens_edict');
+              sfx.playBossAbility('oriphiel', 'wardens_edict', bossPosOpt);
               particleManager.spawnOriphielWardenEdictCast(bx, by, now);
             } else if (txt.includes('REFLECTED')) {
-              sfx.playBossAbility('oriphiel', 'unbroken_judgment');
+              sfx.playBossAbility('oriphiel', 'unbroken_judgment', bossPosOpt);
               particleManager.spawnOriphielParryReflectBurst(bx, by, now);
             } else if (txt.includes('UNBROKEN JUDGMENT')) {
-              sfx.playBossAbility('oriphiel', 'unbroken_judgment');
+              sfx.playBossAbility('oriphiel', 'unbroken_judgment', bossPosOpt);
               particleManager.spawnOriphielParryStance(bx, by, now);
             } else if (txt.includes('FINAL VERDICT')) {
-              sfx.playBossAbility('oriphiel', 'the_final_verdict_combo');
+              sfx.playBossAbility('oriphiel', 'the_final_verdict_combo', bossPosOpt);
               particleManager.spawnOriphielVerdictStage(bx, by, 75, 2, now);
             } else if (txt.includes('BASTION GROUND SHATTER')) {
-              sfx.playBossAbility('oriphiel', 'the_final_verdict_combo');
+              sfx.playBossAbility('oriphiel', 'the_final_verdict_combo', bossPosOpt);
               particleManager.spawnOriphielBastionShatter(bx, by, 140, now);
             } else if (txt.includes('GUARDIAN DEFEATED')) {
-              sfx.playRelicChime();
+              sfx.playRelicChime({ worldPos: { x: ev.x, y: ev.y } });
               particleManager.spawnRoomClearBlessing(ev.x, ev.y + 24, true, now);
               screenShake = Math.min(8, screenShake + 2.5);
             } else if (txt.includes('ROOM CLEARED')) {
-              sfx.playRelicChime();
+              sfx.playRelicChime({ worldPos: { x: ev.x, y: ev.y } });
               particleManager.spawnRoomClearBlessing(ev.x, ev.y + 24, false, now);
             } else if (txt.includes('WARD SHATTERED') || txt.includes('ALL WARDS SHATTERED')) {
               particleManager.spawnBossWardShatter(bx, by, snap.bossWards ?? 0, now);
               screenShake = Math.min(8, screenShake + 2.2);
             } else if (txt.includes('FLOOR CLEARED') || txt.includes('PORTAL UNLOCKED')) {
-              sfx.playRelicChime();
+              sfx.playRelicChime({ worldPos: { x: ev.x, y: ev.y } });
               particleManager.spawnRoomClearBlessing(ev.x, ev.y + 34, true, now);
+            } else if (txt.includes('SCROLL') || txt.includes('LEVEL UP') || txt.includes('LEVEL ')) {
+              particleManager.spawnLootPickupBurst(ev.x, ev.y, ev.color || '#C084FC', now);
             }
           }
         }
@@ -1842,7 +1939,46 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
             const dx = p.x - prev.x;
             const dy = p.y - prev.y;
             const dashMoveAngle = Math.hypot(dx, dy) > 4 ? Math.atan2(dy, dx) : p.aimAngle;
-            particleManager.spawnClassDashEffect(p.heroClass, prev.x, prev.y, p.x, p.y, dashMoveAngle, now);
+            const existingFacing = playerFacingMap.get(p.id);
+            const dashFacing =
+              existingFacing ??
+              resolvePlayerDirection8({
+                moveX: dx,
+                moveY: dy,
+                aimAngle: p.id === playerId ? aimAngleRef.current : p.aimAngle,
+                isMoving: true,
+                prevFacingLeft: Math.cos(dashMoveAngle) < 0,
+              });
+            const fromSmooth = smoothedPlayers.get(p.id);
+            const fromX =
+              fromSmooth && Math.hypot(fromSmooth.x - prev.x, fromSmooth.y - prev.y) < 55
+                ? fromSmooth.x
+                : prev.x;
+            const fromY =
+              fromSmooth && Math.hypot(fromSmooth.x - prev.x, fromSmooth.y - prev.y) < 55
+                ? fromSmooth.y
+                : prev.y;
+            const existingSwing = playerWeaponSwings.get(p.id);
+            const swingSnap = existingSwing ? computeEffectiveSwingProgress(existingSwing, now) : undefined;
+            dashAfterimageManager.triggerDash({
+              player: p,
+              fromX,
+              fromY,
+              toX: p.x,
+              toY: p.y,
+              aimAngle: p.id === playerId ? aimAngleRef.current : p.aimAngle,
+              moving: true,
+              facingLeft: dashFacing.facingLeft,
+              facingDirection: dashFacing.dir,
+              swingProgress: swingSnap?.isDone ? undefined : swingSnap?.progress,
+              swingKind: swingSnap?.isDone ? undefined : existingSwing?.kind,
+              now,
+              kind: 'evasion',
+            });
+            particleManager.spawnClassDashEffect(p.heroClass, fromX, fromY, p.x, p.y, dashMoveAngle, now);
+            if (p.id !== playerId) {
+              sfx.playDash({ heroClass: p.heroClass, worldPos: { x: p.x, y: p.y }, isLocal: false });
+            }
             activeDashTrails.set(p.id, {
               until: now + (p.heroClass === 'vanguard' ? 190 : 280),
               lastEmit: now,
@@ -1858,13 +1994,62 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
               p.equippedWeapon,
               p.equippedScrollId
             );
+            if (p.id !== playerId) {
+              if (p.heroClass === 'arcanist' && p.equippedScrollId) {
+                sfx.playArcanistSpell(p.equippedScrollId, {
+                  worldPos: { x: p.x, y: p.y },
+                  isLocal: false,
+                });
+              } else {
+                sfx.playSkill('tactical', {
+                  heroClass: p.heroClass,
+                  skillId: activeTac.id,
+                  worldPos: { x: p.x, y: p.y },
+                  isLocal: false,
+                });
+              }
+            }
             if (activeTac.id === 'bastion_counter') {
               particleManager.spawnVanguardBastionBraceCast(p.x, p.y, p.aimAngle, now);
             } else if (activeTac.id === 'crimson_frenzy') {
               particleManager.spawnVanguardCrimsonFrenzyCast(p.x, p.y, now);
               screenShake = Math.min(8, Math.max(screenShake, 3.2));
             } else if (p.heroClass === 'vanguard') {
+              const bx = p.x - prev.x;
+              const by = p.y - prev.y;
+              const bAngle = Math.hypot(bx, by) > 4 ? Math.atan2(by, bx) : p.aimAngle;
+              const existingFacing = playerFacingMap.get(p.id);
+              const bFacing =
+                existingFacing ??
+                resolvePlayerDirection8({
+                  moveX: bx,
+                  moveY: by,
+                  aimAngle: p.aimAngle,
+                  isMoving: true,
+                  prevFacingLeft: Math.cos(bAngle) < 0,
+                });
+              dashAfterimageManager.triggerDash({
+                player: p,
+                fromX: prev.x,
+                fromY: prev.y,
+                toX: p.x,
+                toY: p.y,
+                aimAngle: p.id === playerId ? aimAngleRef.current : p.aimAngle,
+                moving: true,
+                facingLeft: bFacing.facingLeft,
+                facingDirection: bFacing.dir,
+                swingProgress: 0.45,
+                swingKind: 'tactical',
+                now,
+                kind: 'bulwark',
+              });
               particleManager.spawnVanguardBulwarkDash(prev.x, prev.y, p.x, p.y, p.aimAngle, now);
+              activeDashTrails.set(p.id, {
+                until: now + 220,
+                lastEmit: now,
+                heroClass: p.heroClass,
+                angle: bAngle,
+              });
               screenShake = Math.min(8, Math.max(screenShake, 3.2));
             } else if (activeTac.id === 'cyclone_break') {
               particleManager.spawnRangerCycloneArrowCast(p.x, p.y, p.aimAngle, now);
@@ -1883,6 +2068,17 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
           if (p.ultCooldownMs > prev.ultCooldownMs + 400) {
             detectedSwingKind = 'ult';
             detectedSwingDur = 320;
+            if (p.id !== playerId) {
+              if (p.heroClass === 'arcanist') {
+                sfx.playChronoWell({ worldPos: { x: p.x, y: p.y }, isLocal: false });
+              } else {
+                sfx.playSkill('ult', {
+                  heroClass: p.heroClass,
+                  worldPos: { x: p.x, y: p.y },
+                  isLocal: false,
+                });
+              }
+            }
             if (p.heroClass === 'ranger') {
               particleManager.spawnRangerQuarryCast(p.x, p.y, now);
             }
@@ -1891,6 +2087,9 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
             particleManager.spawnVanguardShieldGrant(p.x, p.y, now);
           } else if (prev.shield > 0 && p.shield === 0) {
             particleManager.spawnVanguardShieldBreak(p.x, p.y, now);
+            if (p.id !== playerId) {
+              sfx.playShieldBreak({ worldPos: { x: p.x, y: p.y }, isLocal: false });
+            }
           }
         }
 
@@ -1916,6 +2115,15 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
             p.attackComboStep ?? 0,
             detectedSwingKind
           );
+          if (p.id !== playerId && detectedSwingKind === 'primary') {
+            sfx.playAttack(p.heroClass, {
+              comboStep: p.attackComboStep ?? 0,
+              weaponId: p.equippedWeapon,
+              playerId: p.id,
+              worldPos: { x: p.x, y: p.y },
+              isLocal: false,
+            });
+          }
         }
 
         if (detectedSwingKind) {
@@ -1960,6 +2168,14 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
       for (const id of playerWeaponSwings.keys()) {
         if (!prevPlayersMap.has(id)) {
           playerWeaponSwings.delete(id);
+          triggeredSwingVfxMap.delete(id);
+        }
+      }
+      for (const id of playerFootstepStateMap.keys()) {
+        if (!prevPlayersMap.has(id)) {
+          playerFootstepStateMap.delete(id);
+          dashAfterimageManager.removePlayer(id);
+          sfx.stopFootstepsForPlayer(id);
         }
       }
 
@@ -2001,16 +2217,20 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
               screenShake = Math.min(8, Math.max(screenShake, 4.2));
             } else if (z.kind === 'cyclone_break') {
               particleManager.spawnCycloneWhirlwindBurst(z.x, z.y, z.radius || 132, now);
+              sfx.playExplosion('physical', z.radius || 132, { worldPos: { x: z.x, y: z.y } });
               screenShake = Math.min(8, Math.max(screenShake, 3.5));
             } else if (z.kind === 'galeburst_nova') {
               particleManager.spawnGaleburstNovaBurst(z.x, z.y, z.radius || 88, now);
+              sfx.playExplosion('physical', z.radius || 88, { worldPos: { x: z.x, y: z.y } });
             } else if (z.kind === 'black_sun_zone') {
               particleManager.spawnRangerBlackSunCast(z.x, z.y, z.radius || 115, now);
             } else if (z.kind === 'black_sun_burst') {
               particleManager.spawnRangerBlackSunStrike(z.x, z.y, z.radius || 115, now);
+              sfx.playExplosion('void', z.radius || 115, { worldPos: { x: z.x, y: z.y } });
               screenShake = Math.min(9, Math.max(screenShake, 5.5));
             } else if (z.kind === 'seraphim_holy_burst') {
               particleManager.spawnClericSeraphicJudgmentBurst(z.x, z.y, z.radius || 110, now);
+              sfx.playExplosion('holy', z.radius || 110, { worldPos: { x: z.x, y: z.y } });
               screenShake = Math.min(8, Math.max(screenShake, 4.5));
             }
           }
@@ -2019,6 +2239,7 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
         for (const [id, prevZ] of prevZonesMap.entries()) {
           if (!currentZoneIds.has(id) && prevZ.ttlMs <= 220 && prevZ.kind === 'arcane_meteor') {
             particleManager.spawnArcaneMeteorImpact(prevZ.x, prevZ.y, prevZ.radius, now);
+            sfx.playExplosion('arcane', prevZ.radius, { worldPos: { x: prevZ.x, y: prevZ.y } });
             screenShake = Math.min(9, Math.max(screenShake, 6.5));
           }
         }
@@ -2160,6 +2381,9 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
                 prevProj.explosionRadius ?? 105,
                 now
               );
+              sfx.playExplosion('fire', prevProj.explosionRadius ?? 105, {
+                worldPos: { x: prevProj.x, y: prevProj.y },
+              });
               screenShake = Math.min(8, Math.max(screenShake, 5.2));
             } else if (prevProj.ttlMs > 90) {
               if (prevProj.style === 'arrow') {
@@ -2187,6 +2411,36 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
       for (const proj of snap.projectiles) {
         prevProjectilesMap.set(proj.id, proj);
       }
+
+      // Track broken crates & picked up potions/chests on the active floor
+      if (hasInitWorldEffects && prevPropsFloor === snap.floor) {
+        for (const prop of snap.props) {
+          const prevProp = prevPropsMap.get(prop.id);
+          if (prevProp && !prevProp.opened && prop.opened) {
+            if (prop.kind === 'crate') {
+              particleManager.spawnPropBreakBurst(prop.x, prop.y, prop.kind, now);
+              sfx.playPropBreak(prop.kind, { worldPos: { x: prop.x, y: prop.y } });
+            } else if (prop.kind === 'potion') {
+              particleManager.spawnLootPickupBurst(prop.x, prop.y, '#34D399', now);
+            } else if (prop.kind === 'chest' || prop.kind === 'relic_chest') {
+              particleManager.spawnGoldPickupBurst(prop.x, prop.y, now);
+              sfx.playPropBreak(prop.kind, { worldPos: { x: prop.x, y: prop.y } });
+            }
+          }
+        }
+        for (const [propId, prevProp] of prevPropsMap.entries()) {
+          if (!prevProp.opened && prevProp.kind === 'crate' && !snap.props.some((pr) => pr.id === propId)) {
+            particleManager.spawnPropBreakBurst(prevProp.x, prevProp.y, prevProp.kind, now);
+            sfx.playPropBreak(prevProp.kind, { worldPos: { x: prevProp.x, y: prevProp.y } });
+          }
+        }
+      }
+      prevPropsMap.clear();
+      for (const prop of snap.props) {
+        prevPropsMap.set(prop.id, { opened: prop.opened, kind: prop.kind, x: prop.x, y: prop.y });
+      }
+      prevPropsFloor = snap.floor;
+
       prevBossState = activeBoss ? { id: activeBoss.id, x: activeBoss.x, y: activeBoss.y } : null;
       hasInitWorldEffects = true;
       }
@@ -2224,10 +2478,16 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
           const pSnap = snap.players.find((x) => x.id === pid);
           if (!pSnap || pSnap.downed || now >= dashTrail.until) {
             activeDashTrails.delete(pid);
-          } else if (now - dashTrail.lastEmit >= 42) {
-            const livePos = smoothedPlayers.get(pid) || { x: pSnap.x, y: pSnap.y };
+          } else if (now - dashTrail.lastEmit >= 36) {
+            const basePos = smoothedPlayers.get(pid) || { x: pSnap.x, y: pSnap.y };
+            const visualDash = dashAfterimageManager.getVisualDashSample(pid, basePos.x, basePos.y, now);
+            const livePos = visualDash ? { x: visualDash.x, y: visualDash.y } : basePos;
             const liveAngle =
-              Math.hypot(pSnap.vx, pSnap.vy) > 15 ? Math.atan2(pSnap.vy, pSnap.vx) : dashTrail.angle;
+              visualDash
+                ? visualDash.angle
+                : Math.hypot(pSnap.vx, pSnap.vy) > 15
+                  ? Math.atan2(pSnap.vy, pSnap.vx)
+                  : dashTrail.angle;
             particleManager.spawnClassDashTrailStep(pSnap.heroClass, livePos.x, livePos.y, liveAngle, now);
             dashTrail.lastEmit = now;
           }
@@ -2301,7 +2561,13 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
             (me.attackAnimMs > 0 && lastMyAttackAnim === 0) ||
             me.attackAnimMs > lastMyAttackAnim + 40
           ) {
-            sfx.playAttack(me.heroClass);
+            sfx.playAttack(me.heroClass, {
+              comboStep: me.attackComboStep ?? localComboStepRef.current.step,
+              weaponId: me.equippedWeapon,
+              playerId: me.id,
+              worldPos: { x: me.x, y: me.y },
+              isLocal: true,
+            });
           }
           lastMyAttackAnim = me.attackAnimMs;
 
@@ -2455,6 +2721,7 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
           : 'SEALED · BOSS AWAKE';
       drawDungeonPortal(ctx, map.portalPos.x, map.portalPos.y, snap.bossDefeated, now, map.biome, snap.floor, portalSealText);
       particleManager.spawnPortalWisps(map.portalPos.x, map.portalPos.y, snap.bossDefeated, now);
+      particleManager.spawnBiomeAmbientMotes(map.biome, worldView, now);
 
       // Torches
       const flicker = 0.88 + Math.sin(now * 0.009) * 0.12;
@@ -2482,6 +2749,7 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
         ctx.fillRect(t.x - 3, t.y - 7, 6, 5);
         ctx.fillStyle = '#FEF08A';
         ctx.fillRect(t.x - 1, t.y - 6, 2, 3);
+        particleManager.spawnTorchEmbers(t.x, t.y, now, map.biome);
       }
 
       // Field Zones (viewport-culled)
@@ -4637,7 +4905,7 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
             continue;
           }
           const npcPose = resolveNpcDirection8(npc, snap.players, 140);
-          drawNpc(ctx, npc, now, npcPose);
+          drawNpc(ctx, npc, now, npcPose, me?.npcDialogue?.npcId ?? null);
         }
       }
 
@@ -5354,12 +5622,28 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
           ctx.stroke();
           ctx.restore();
         }
+
+        // Dynamic rate-limited enemy status particles
+        if ((en.burnedMs ?? 0) > 0) particleManager.spawnEnemyStatusMote(en.id, ex, ey, en.radius, 'burned', now);
+        if ((en.frozenMs ?? 0) > 0) particleManager.spawnEnemyStatusMote(en.id, ex, ey, en.radius, 'frozen', now);
+        if ((en.shockedMs ?? 0) > 0) particleManager.spawnEnemyStatusMote(en.id, ex, ey, en.radius, 'shocked', now);
+        if ((en.poisonedMs ?? 0) > 0) particleManager.spawnEnemyStatusMote(en.id, ex, ey, en.radius, 'poisoned', now);
+        if ((en.bleedingMs ?? 0) > 0) particleManager.spawnEnemyStatusMote(en.id, ex, ey, en.radius, 'bleeding', now);
+        if ((en.stunnedMs ?? 0) > 0) particleManager.spawnEnemyStatusMote(en.id, ex, ey, en.radius, 'stunned', now);
+        if ((en.chronoSuspendedMs ?? 0) > 0) particleManager.spawnEnemyStatusMote(en.id, ex, ey, en.radius, 'chrono', now);
       }
+
+      // Dash Afterimages & Slipstream Ribbons rendered smoothly behind active hero sprites
+      dashAfterimageManager.updateAndDraw(ctx, now, worldView);
 
       // Players
       const speakingSet = voiceManager.getSpeakingParticipantIds();
       for (const p of snap.players) {
-        const pos = smoothedPlayers.get(p.id) || { x: p.x, y: p.y };
+        const basePos = smoothedPlayers.get(p.id) || { x: p.x, y: p.y };
+        const dashVisual = !p.downed
+          ? dashAfterimageManager.getVisualDashSample(p.id, basePos.x, basePos.y, now)
+          : null;
+        const pos = dashVisual ? { x: dashVisual.x, y: dashVisual.y } : basePos;
         const hx = snapToScreenPixel(pos.x, zoom);
         const hy = snapToScreenPixel(pos.y, zoom);
         const def = HERO_CLASSES[p.heroClass];
@@ -5385,6 +5669,12 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
         const bob = moving ? Math.sin(now * 0.018) * 2 : 0;
 
         if (p.downed) {
+          const fState = playerFootstepStateMap.get(p.id);
+          if (fState?.wasMoving) {
+            fState.wasMoving = false;
+            fState.lastStepIndex = -1;
+            sfx.stopFootstepsForPlayer(p.id);
+          }
           drawFallenAndGhostPlayer(ctx, p, hx, hy, now, isLocalPlayer);
           continue;
         }
@@ -5617,16 +5907,62 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
           }
         }
 
-        // Subtle ambient motes for equipped Forged/Ascendant Vestments & Weapons
-        particleManager.spawnArmamentAmbientMotes(
-          p.id,
-          p.heroClass,
-          p.equippedWeapon,
-          p.equippedVestment,
-          hx,
-          hy,
-          now
-        );
+        // Subtle ambient motes for equipped Forged/Ascendant Vestments & Weapons + moving footsteps
+        const inPlayerView =
+          hx >= worldView.left - 80 &&
+          hx <= worldView.right + 80 &&
+          hy >= worldView.top - 80 &&
+          hy <= worldView.bottom + 80;
+        if (inPlayerView) {
+          particleManager.spawnArmamentAmbientMotes(
+            p.id,
+            p.heroClass,
+            p.equippedWeapon,
+            p.equippedVestment,
+            hx,
+            hy,
+            now
+          );
+          if (moving) {
+            const moveAngle = Math.hypot(moveX, moveY) > 0.05 ? Math.atan2(moveY, moveX) : ang;
+            particleManager.spawnFootstepDust(p.id, hx, hy, moveAngle, map.biome, now, {
+              crimsonFrenzy: (p.crimsonFrenzyMs || 0) > 0,
+              hasted: (p.hasteMs || 0) > 0,
+            });
+          }
+        }
+
+        // Stride-synchronized procedural footsteps (walking/running; immediately stop when halted or dashing)
+        let fState = playerFootstepStateMap.get(p.id);
+        if (!fState) {
+          fState = { lastStepIndex: -1, wasMoving: false };
+          playerFootstepStateMap.set(p.id, fState);
+        }
+        const isPlayerDashing = velMag > 290 || Boolean(dashVisual?.isDashing);
+        const isPlayerRunning = velMag > 215 || (p.crimsonFrenzyMs || 0) > 0 || (p.hasteMs || 0) > 0;
+        if (moving && !isPlayerDashing && (p.chronoSuspendedMs || 0) <= 0) {
+          const strideRate = isPlayerRunning ? 0.021 : 0.017;
+          const stepIndex = Math.floor((now * strideRate) / Math.PI);
+          if (stepIndex !== fState.lastStepIndex) {
+            fState.lastStepIndex = stepIndex;
+            fState.wasMoving = true;
+            const surface = resolveFootstepSurface(map, pos.x, pos.y);
+            sfx.playFootstep({
+              playerId: p.id,
+              surface,
+              heroClass: p.heroClass,
+              speed: velMag,
+              isRunning: isPlayerRunning,
+              strideIndex: stepIndex,
+              worldPos: { x: pos.x, y: pos.y },
+              isLocal: isLocalPlayer,
+            });
+          }
+        } else if (fState.wasMoving) {
+          fState.wasMoving = false;
+          fState.lastStepIndex = -1;
+          sfx.stopFootstepsForPlayer(p.id);
+        }
 
         // Floor Status Effects Visual Feedback
         if (p.statuses && p.statuses.length > 0) {
@@ -5704,10 +6040,32 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
 
         const swingState = playerWeaponSwings.get(p.id);
         const swingSample = swingState ? computeEffectiveSwingProgress(swingState, now) : undefined;
+        if (
+          swingState &&
+          swingSample &&
+          swingState.kind === 'primary' &&
+          swingSample.progress >= 0.25 &&
+          triggeredSwingVfxMap.get(p.id) !== swingState.bornAt
+        ) {
+          triggeredSwingVfxMap.set(p.id, swingState.bornAt);
+          if (inPlayerView) {
+            particleManager.spawnWeaponComboSwingParticles(
+              hx,
+              hy,
+              {
+                heroClass: p.heroClass,
+                weaponId: p.equippedWeapon,
+                aimAngle: ang,
+                comboStep: swingState.comboStep ?? p.attackComboStep ?? 0,
+              },
+              now
+            );
+          }
+        }
         drawHeroSprite(ctx, p, hx, hy, {
           aimAngle: ang,
           bob,
-          moving,
+          moving: moving || Boolean(dashVisual?.isDashing),
           now,
           swingProgress: swingSample?.progress,
           swingKind: swingState?.kind,
@@ -5717,6 +6075,13 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
           impactJitter: swingSample?.impactJitter,
           facingLeft: playerPose.facingLeft,
           facingDirection: playerPose.dir,
+          isDashing: Boolean(dashVisual?.isDashing),
+          dashProgress: dashVisual?.progress,
+          dashAngle: dashVisual?.angle,
+          dashStretchAlong: dashVisual?.stretchAlong,
+          dashStretchPerp: dashVisual?.stretchPerp,
+          dashRimColor: dashVisual?.palette.glow,
+          dashFlashAlpha: dashVisual?.rimFlashAlpha,
         });
 
         // Player Name Tag (Username Lvl X without border box; Green for players, Purple for admin)
@@ -6212,8 +6577,198 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
         ctx.restore();
       }
 
-      // ——— HIGH-DETAIL STONE RADAR MINIMAP ———
+      // ——— FLOATING PIXEL-ART TYPEWRITER NPC DIALOGUE (LOCAL PLAYER ONLY) ———
       const isMobileScreen = cw < 640;
+      const activeDlg = me?.npcDialogue ?? null;
+      if (activeDlg && activeDlg.text) {
+        const dlgKey = `${activeDlg.npcId}:${activeDlg.seq}:${activeDlg.text}`;
+        let tw = npcTypewriterRef.current;
+        if (!tw || tw.key !== dlgKey) {
+          tw = {
+            key: dlgKey,
+            bornAt: now,
+            revealedAll: false,
+            fullText: activeDlg.text,
+          };
+          npcTypewriterRef.current = tw;
+        }
+
+        const charsPerSec = 48;
+        const totalChars = tw.fullText.length;
+        const revealedChars = tw.revealedAll
+          ? totalChars
+          : Math.min(totalChars, Math.max(1, Math.floor(((now - tw.bornAt) / 1000) * charsPerSec)));
+        const isTyping = revealedChars < totalChars;
+
+        const maxLineChars = isMobileScreen ? 27 : 34;
+        const wrappedLines = wrapDialogueLines(tw.fullText, maxLineChars);
+        const bodyFont = isMobileScreen
+          ? '500 11.5px "Plus Jakarta Sans", sans-serif'
+          : '500 12px "Plus Jakarta Sans", sans-serif';
+        const headerFont = '700 9.5px "JetBrains Mono", monospace';
+        const hintFont = '600 8.5px "JetBrains Mono", monospace';
+
+        const headerText = activeDlg.npcName.toUpperCase();
+        const hintText = isTyping
+          ? 'CLICK'
+          : activeDlg.options?.length
+            ? '[1-2]'
+            : '[E]';
+
+        let maxLineW =
+          measureTextCached(headerFont, headerText) +
+          measureTextCached(hintFont, hintText) +
+          18;
+        for (const line of wrappedLines) {
+          const lw = measureTextCached(bodyFont, `${line}_`);
+          if (lw > maxLineW) maxLineW = lw;
+        }
+
+        const padX = 11;
+        const lineH = 16;
+        const headerH = 16;
+        const boxW = Math.min(isMobileScreen ? Math.max(180, cw - 24) : 312, Math.max(156, Math.ceil(maxLineW) + padX * 2));
+        const boxH = 8 + headerH + wrappedLines.length * lineH + 8;
+
+        const screenNpcX = cw / 2 + (activeDlg.x - snappedCamX) * zoom;
+        const screenNpcY = ch / 2 + (activeDlg.y - 46 - snappedCamY) * zoom;
+
+        const margin = 12;
+        const topSafe = isMobileScreen ? 46 : 74;
+        const bottomReserve = activeDlg.options?.length ? 68 : 26;
+        const boxLeft = Math.round(
+          Math.max(margin, Math.min(cw - boxW - margin, screenNpcX - boxW / 2))
+        );
+        const boxTop = Math.round(
+          Math.max(topSafe, Math.min(ch - boxH - bottomReserve, screenNpcY - boxH - 12))
+        );
+        const tailX = Math.round(
+          Math.max(boxLeft + 14, Math.min(boxLeft + boxW - 14, screenNpcX))
+        );
+        const fadeOut =
+          !activeDlg.persistent && activeDlg.ttlMs < 450
+            ? Math.max(0, activeDlg.ttlMs / 450)
+            : 1;
+
+        tw.bubbleRect = {
+          left: boxLeft,
+          top: boxTop,
+          right: boxLeft + boxW,
+          bottom: boxTop + boxH,
+        };
+
+        ctx.save();
+        ctx.globalAlpha = fadeOut;
+
+        // Crisp 2px pixel drop shadow
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.72)';
+        ctx.fillRect(boxLeft + 2, boxTop + 2, boxW, boxH);
+
+        // Dark stone-parchment panel body
+        ctx.fillStyle = '#191824';
+        ctx.fillRect(boxLeft, boxTop, boxW, boxH);
+
+        // Inner header strip
+        ctx.fillStyle = '#242233';
+        ctx.fillRect(boxLeft + 2, boxTop + 2, boxW - 4, headerH);
+        ctx.fillStyle = '#353442';
+        ctx.fillRect(boxLeft + 2, boxTop + 2 + headerH, boxW - 4, 1);
+
+        // 2px crisp gold pixel border + inner corner accents
+        ctx.strokeStyle = '#D9AA52';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(boxLeft + 1, boxTop + 1, boxW - 2, boxH - 2);
+        ctx.fillStyle = '#FEF08A';
+        ctx.fillRect(boxLeft, boxTop, 3, 3);
+        ctx.fillRect(boxLeft + boxW - 3, boxTop, 3, 3);
+        ctx.fillRect(boxLeft, boxTop + boxH - 3, 3, 3);
+        ctx.fillRect(boxLeft + boxW - 3, boxTop + boxH - 3, 3, 3);
+
+        // Speech tail pointing toward the NPC sprite
+        ctx.fillStyle = '#191824';
+        ctx.fillRect(tailX - 4, boxTop + boxH - 2, 8, 4);
+        ctx.fillStyle = '#D9AA52';
+        ctx.fillRect(tailX - 5, boxTop + boxH, 2, 3);
+        ctx.fillRect(tailX + 3, boxTop + boxH, 2, 3);
+        ctx.fillRect(tailX - 3, boxTop + boxH + 3, 6, 2);
+        ctx.fillStyle = '#191824';
+        ctx.fillRect(tailX - 3, boxTop + boxH, 6, 3);
+
+        // NPC name & hint
+        ctx.font = headerFont;
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = '#FCD34D';
+        ctx.fillText(headerText, boxLeft + padX, boxTop + 2 + headerH / 2);
+
+        ctx.font = hintFont;
+        ctx.textAlign = 'right';
+        ctx.fillStyle = '#94A3B8';
+        ctx.fillText(hintText, boxLeft + boxW - padX, boxTop + 2 + headerH / 2);
+
+        // Typewriter lines with blinking pixel cursor
+        ctx.font = bodyFont;
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'top';
+        let charsLeft = revealedChars;
+        const showCursor = isTyping || Math.floor(now / 360) % 2 === 0;
+        let cursorLineIdx = -1;
+        for (let li = 0; li < wrappedLines.length; li++) {
+          const fullLine = wrappedLines[li];
+          if (charsLeft <= fullLine.length) {
+            cursorLineIdx = li;
+            break;
+          }
+          charsLeft -= fullLine.length + 1;
+        }
+        if (cursorLineIdx === -1) {
+          cursorLineIdx = wrappedLines.length - 1;
+        }
+
+        let consumeRemaining = revealedChars;
+        for (let li = 0; li < wrappedLines.length; li++) {
+          const fullLine = wrappedLines[li];
+          const take = Math.max(0, Math.min(fullLine.length, consumeRemaining));
+          consumeRemaining = Math.max(0, consumeRemaining - fullLine.length - 1);
+          const slice = fullLine.slice(0, take);
+          const ly = boxTop + 8 + headerH + li * lineH;
+          if (slice.length > 0) {
+            ctx.fillStyle = '#0B0A10';
+            ctx.fillText(slice, boxLeft + padX + 1, ly + 1);
+            ctx.fillStyle = '#F8FAFC';
+            ctx.fillText(slice, boxLeft + padX, ly);
+          }
+          if (li === cursorLineIdx && isTyping && showCursor) {
+            const cwLine = measureTextCached(bodyFont, slice);
+            ctx.fillStyle = '#FCD34D';
+            ctx.fillRect(boxLeft + padX + cwLine + 2, ly + 10, 6, 2);
+          }
+        }
+        ctx.restore();
+
+        if (activeDlg.options && activeDlg.options.length > 0) {
+          const ax = Math.round(boxLeft + boxW / 2);
+          const ay = Math.round(boxTop + boxH + 10);
+          const nextKey = `${activeDlg.npcId}:${Math.round(ax / 4)}:${Math.round(ay / 4)}`;
+          if (nextKey !== lastDialogueAnchorKeyRef.current) {
+            lastDialogueAnchorKeyRef.current = nextKey;
+            onNpcDialogueAnchorRef.current?.({ npcId: activeDlg.npcId, screenX: ax, screenY: ay });
+          }
+        } else if (lastDialogueAnchorKeyRef.current !== '') {
+          lastDialogueAnchorKeyRef.current = '';
+          onNpcDialogueAnchorRef.current?.(null);
+        }
+      } else {
+        if (npcTypewriterRef.current) {
+          npcTypewriterRef.current = null;
+        }
+        if (lastDialogueAnchorKeyRef.current !== '') {
+          lastDialogueAnchorKeyRef.current = '';
+          onNpcDialogueAnchorRef.current?.(null);
+        }
+      }
+
+      // ——— HIGH-DETAIL STONE RADAR MINIMAP ———
       let mmScale = 2.5;
       if (isMobileScreen) {
         const targetMaxW = Math.min(100, Math.floor(cw * 0.24));
@@ -6432,6 +6987,7 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
     rafId = requestAnimationFrame(render);
     return () => {
       cancelAnimationFrame(rafId);
+      dashAfterimageManager.clear();
       window.removeEventListener('resize', resize);
       window.removeEventListener('scroll', updateCanvasRect);
     };
@@ -6518,6 +7074,26 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
     const rect = getCachedCanvasRect(e.currentTarget);
     const nx = e.clientX - rect.left;
     const ny = e.clientY - rect.top;
+    const tw = npcTypewriterRef.current;
+    if (
+      e.button === 0 &&
+      tw &&
+      tw.bubbleRect &&
+      nx >= tw.bubbleRect.left &&
+      nx <= tw.bubbleRect.right &&
+      ny >= tw.bubbleRect.top &&
+      ny <= tw.bubbleRect.bottom
+    ) {
+      if (!tw.revealedAll) {
+        tw.revealedAll = true;
+        sfx.playUiClick();
+        return;
+      } else {
+        onSendCommandRef.current?.({ type: 'player:dialogue_close' });
+        sfx.playUiClick();
+        return;
+      }
+    }
     mouseScreenRef.current = { x: nx, y: ny };
     hasMouseMovedRef.current = true;
     aimSourceRef.current = 'mouse';

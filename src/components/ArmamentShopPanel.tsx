@@ -238,7 +238,7 @@ export const ArmamentShopPanel: React.FC<ArmamentShopPanelProps> = ({
             Sanctuary Armory Merchant
           </h2>
           <p className="text-xs sm:text-sm text-[#A2A0B4] max-w-2xl leading-relaxed">
-            Purchase permanent Weapons and Vestments using Sanctuary Gold earned from Daily Bounties, clearing Dungeon Floors (+{SANCTUARY_GOLD_REWARDS.floorClearedGold}g), and slaying Floor Bosses (+{SANCTUARY_GOLD_REWARDS.bossKillGold}g).
+            Buy permanent Weapons &amp; Vestments with Gold from Bounties, Floors (+{SANCTUARY_GOLD_REWARDS.floorClearedGold}g), and Bosses (+{SANCTUARY_GOLD_REWARDS.bossKillGold}g).
           </p>
         </div>
 

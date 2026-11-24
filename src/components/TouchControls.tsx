@@ -381,7 +381,12 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
     attackAimingRef.current = true;
     setAttackAiming(true);
     triggerHaptic(18);
-    sfx.playAttack(player.heroClass);
+    sfx.playAttack(player.heroClass, {
+      weaponId: player.equippedWeapon,
+      comboStep: player.attackComboStep,
+      playerId: player.id,
+      isLocal: true,
+    });
     const targetAngle = getAutoTargetAngle();
     lastSentTouchAimRef.current = targetAngle;
     onAttackPress(true, targetAngle);
@@ -486,7 +491,7 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
       livePlayer.equippedScrollId === 'disintegration' &&
       onSendCommand
     ) {
-      sfx.playArcanistSpell('disintegration');
+      sfx.playArcanistSpell('disintegration', { isLocal: true });
       onSendCommand({
         type: 'player:channel_start',
         spellId: 'disintegration',
@@ -668,20 +673,24 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
       : smartQuick.aimDistance;
 
     if (active.action === 'dash') {
-      sfx.playDash();
+      sfx.playDash({ heroClass: livePlayer.heroClass, isLocal: true });
       triggerHaptic(14);
     } else if (active.action === 'tactical') {
       if (livePlayer.heroClass === 'arcanist' && livePlayer.equippedScrollId) {
-        sfx.playArcanistSpell(livePlayer.equippedScrollId);
+        sfx.playArcanistSpell(livePlayer.equippedScrollId, { isLocal: true });
       } else {
-        sfx.playSkill('tactical');
+        sfx.playSkill('tactical', {
+          heroClass: livePlayer.heroClass,
+          skillId: livePlayer.equippedWeapon,
+          isLocal: true,
+        });
       }
       triggerHaptic(16);
     } else {
       if (livePlayer.heroClass === 'arcanist') {
-        sfx.playChronoWell();
+        sfx.playChronoWell({ isLocal: true });
       } else {
-        sfx.playSkill('ult');
+        sfx.playSkill('ult', { heroClass: livePlayer.heroClass, isLocal: true });
       }
       triggerHaptic(25);
     }

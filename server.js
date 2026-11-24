@@ -48,42 +48,42 @@ var HERO_CLASSES = {
     id: "vanguard",
     name: "Vanguard",
     title: "Ironcrest Bastion",
-    role: "Frontline Guardian & Juggernaut",
+    role: "Frontline Tank & Bruiser",
     roleBadge: "TANK",
-    weapon: "Sunforged Claymore & Tower Greatshield",
-    weaponType: "Heavy Cleave & Shield Wall",
+    weapon: "Sunforged Claymore & Tower Shield",
+    weaponType: "Heavy Cleave & Shield",
     passiveName: "Iron Will",
-    passiveDesc: "Absorbs 15% of all incoming damage. Striking stunned or burning foes restores +3 Shield.",
+    passiveDesc: "-15% incoming damage. Hitting stunned or burning foes restores +3 Shield.",
     maxHp: 155,
     speed: 175,
     damage: 28,
-    attackCooldownMs: 400,
+    attackCooldownMs: 670,
     range: 74,
     primaryColor: "#64748B",
     secondaryColor: "#CBD5E1",
     capeColor: "#991B1B",
     accentColor: "#F59E0B",
     glowColor: "#FBBF24",
-    lore: "Sworn knights of the Sunken Bastion who bound their lifeblood into eternal steel. With unbroken wills and towering shields, they stand between ancient horrors and their comrades.",
+    lore: "Oathbound knights of the Sunken Bastion, immovable behind eternal steel.",
     stats: { survivability: 5, damage: 3, range: 1, mobility: 2, utility: 4 },
     resistances: { physical: 0.28, fire: 0.15, frost: 0.15, lightning: 0.1, poison: 0.15, bleed: 0.3 },
     tacticalName: "Bulwark Dash",
-    tacticalDesc: "Slam forward with tower shield, battering through monsters, stunning them for 1.7s and granting +28 Shield to nearby allies.",
+    tacticalDesc: "Dash and slam: Stuns foes 1.7s and grants nearby allies +28 Shield.",
     tacticalCooldownMs: 4800,
     ultName: "Aegis Sanctuary",
-    ultDesc: "Plant your colossal shield into the earth, raising a gleaming dome that deflects projectile barrages and boosts party defense.",
+    ultDesc: "Raise a protective dome that blocks enemy shots and boosts party defense.",
     ultCooldownMs: 13e3
   },
   ranger: {
     id: "ranger",
     name: "Ranger",
     title: "Thornwood Marksman",
-    role: "Long-Range Sniper & Scout",
+    role: "Long-Range Sniper",
     roleBadge: "MARKSMAN",
     weapon: "Ashwood Recurve & Barbed Quiver",
-    weaponType: "Piercing Ranged Bow",
+    weaponType: "Piercing Bow",
     passiveName: "Eagle Keenness",
-    passiveDesc: "Attacks deal +25% Critical damage to targets beyond 180 units. Slaying a foe grants a 2s burst of swiftness.",
+    passiveDesc: "+25% Crit damage beyond 180 range. Kills grant 2s Haste.",
     maxHp: 110,
     speed: 210,
     damage: 24,
@@ -94,74 +94,74 @@ var HERO_CLASSES = {
     capeColor: "#1A3826",
     accentColor: "#FBBF24",
     glowColor: "#34D399",
-    lore: "Sole survivors of the blighted Thornwood groves, master trackers capable of loose-drawing three enchanted shafts in the blink of an eye. Their arrows never falter.",
+    lore: "Master trackers of the Thornwood whose arrows never miss their mark.",
     stats: { survivability: 2, damage: 5, range: 5, mobility: 5, utility: 2 },
     resistances: { physical: 0.1, fire: 0.1, frost: 0.25, lightning: 0.15, poison: 0.45, bleed: 0.2 },
     tacticalName: "Frost Volley",
-    tacticalDesc: "Loose a 5-arrow crystalline fan that pierces foes, slowing enemy advance by 50% and chilling their attacks.",
+    tacticalDesc: "Fire 5 piercing frost arrows that slow enemies by 50%.",
     tacticalCooldownMs: 4200,
     ultName: "Hunter Quarry",
-    ultDesc: "Mark elites and bosses with radiant moonlight hunters-brand, exposing their weak points so all co-op allies deal +35% bonus strike damage.",
+    ultDesc: "Mark bosses and elites so all allies deal +35% damage.",
     ultCooldownMs: 11500
   },
   arcanist: {
     id: "arcanist",
     name: "Arcanist",
     title: "Astral Conduit",
-    role: "AoE Spellweaver & Cosmic Blaster",
+    role: "AoE Spellweaver",
     roleBadge: "CASTER",
-    weapon: "Runebound Spire & Orbiting Astral Orbs",
-    weaponType: "Cosmic Shards & Starlight",
+    weapon: "Runebound Spire & Astral Orbs",
+    weaponType: "Cosmic Shards & Scrolls",
     passiveName: "Astral Resonance",
-    passiveDesc: "Basic attacks loose homing cosmic shards that pierce an additional enemy. Spells leave lingering star rifts.",
+    passiveDesc: "Primary attacks home & pierce +1 foe. Spells spawn star rifts.",
     maxHp: 100,
     speed: 188,
     damage: 24,
-    attackCooldownMs: 420,
+    attackCooldownMs: 720,
     range: 185,
     primaryColor: "#4338CA",
     secondaryColor: "#818CF8",
     capeColor: "#312E81",
     accentColor: "#38BDF8",
     glowColor: "#60A5FA",
-    lore: "Scholars of the shattered celestial spires who channel raw starlight through crystalline conduits. They weave time and void to obliterate dungeon hordes from afar.",
+    lore: "Scholars of shattered celestial spires who bend starlight and time.",
     stats: { survivability: 2, damage: 5, range: 4, mobility: 3, utility: 4 },
     resistances: { physical: 0.05, fire: 0.25, frost: 0.35, lightning: 0.45, poison: 0.15, bleed: 0.1 },
     tacticalName: "Astral Nova",
-    tacticalDesc: "Unleash 8 piercing arcane shards in a starburst. Ancient Scrolls (Fireball, Disintegration, Frost Lance, Chain Lightning, Arcane Meteor, Arcane Orb, Arcane Barrage) replace this Tactical Skill.",
+    tacticalDesc: "Fire 8 piercing shards in a ring. Replaced when an Ancient Scroll is equipped.",
     tacticalCooldownMs: 5e3,
     ultName: "Chrono Well",
-    ultDesc: "Anchor a 3s temporal distortion field that suspends enemies, bosses, allies, and ALL projectiles (including player projectiles) in time while leaving the caster unaffected.",
+    ultDesc: "Freeze foes, allies, and all projectiles for 3s while you act freely.",
     ultCooldownMs: 45e3
   },
   cleric: {
     id: "cleric",
     name: "Cleric",
     title: "Sunbrand Prelate",
-    role: "Radiant Healer & Divine Enchanter",
+    role: "Healer & Support",
     roleBadge: "SUPPORT",
-    weapon: "Dawnstar Flanged Mace & Reliquary",
-    weaponType: "Radiant Smite & Holy Relic",
+    weapon: "Dawnstar Mace & Reliquary",
+    weaponType: "Radiant Smite & Heal",
     passiveName: "Radiant Aura",
-    passiveDesc: "Emits a sacred 140-range warmth that heals wounded party members every 2 seconds (scales with Level & Faith, base 2 HP, +50% when critical), and increases revive speed by 40%.",
+    passiveDesc: "Heals nearby allies every 2s (scales with Level & Faith) and revives 40% faster.",
     maxHp: 128,
     speed: 185,
     damage: 22,
-    attackCooldownMs: 380,
+    attackCooldownMs: 680,
     range: 160,
     primaryColor: "#E2E8F0",
     secondaryColor: "#FDE047",
     capeColor: "#854D0E",
     accentColor: "#FACC15",
     glowColor: "#FEF08A",
-    lore: "Devotees of the Eternal Dawn whose sacred chants can mend the gravest wounds and turn undead to ash. A cornerstone of every surviving expedition into the depths.",
+    lore: "Devotees of the Eternal Dawn whose sacred light mends allies and sears undead.",
     stats: { survivability: 4, damage: 3, range: 3, mobility: 2, utility: 5 },
     resistances: { physical: 0.15, fire: 0.4, frost: 0.2, lightning: 0.15, poison: 0.35, bleed: 0.25 },
     tacticalName: "Sanctified Pulse",
-    tacticalDesc: "Release a blinding wave of golden light, healing you and all nearby party members (scales with Level & Faith, base 24 HP) while searing adjacent undead.",
+    tacticalDesc: "Holy wave: heals nearby allies (scales with Level & Faith) and burns nearby foes.",
     tacticalCooldownMs: 6800,
     ultName: "Solar Beacon",
-    ultDesc: "Consecrate holy ground with an avatar of the Sun that continuously heals all allies (scales with Level & Faith, base 4 HP) and rapidly revives downed teammates who enter.",
+    ultDesc: "Consecrate ground to heal allies over time and rapidly revive downed teammates.",
     ultCooldownMs: 18e3
   }
 };
@@ -170,112 +170,112 @@ var RELIC_CATALOG = [
     id: "crimson_fang",
     name: "Crimson Fang",
     category: "Offense",
-    summary: "Restore +5 HP whenever you slay an enemy.",
+    summary: "Heal +5 HP on each kill.",
     accent: "#D14B4B"
   },
   {
     id: "twinstring_charm",
     name: "Twinstring Charm",
     category: "Offense",
-    summary: "Primary attacks unleash +1 additional projectile or cleave wave, but extra projectiles deal 35% damage.",
+    summary: "+1 extra projectile or wave on primary attacks (35% damage).",
     accent: "#E0A94F"
   },
   {
     id: "zephyr_greaves",
     name: "Zephyr Greaves",
     category: "Mobility",
-    summary: "+15% movement speed across all terrain.",
+    summary: "+15% Movement Speed.",
     accent: "#68B89E"
   },
   {
     id: "sunfire_signet",
     name: "Sunfire Signet",
     category: "Offense",
-    summary: "+12% primary and skill damage.",
+    summary: "+12% attack and skill damage.",
     accent: "#E88348"
   },
   {
     id: "bastion_pauldron",
     name: "Bastion Pauldron",
     category: "Defense",
-    summary: "+30 Max HP and immediate +30 HP recovery.",
+    summary: "+30 Max HP and +30 HP heal on pickup.",
     accent: "#8D9BB5"
   },
   {
     id: "hourglass_shard",
     name: "Hourglass Shard",
     category: "Mobility",
-    summary: "Tactical and Ultimate cooldowns recharge 25% faster.",
+    summary: "+25% Cooldown Recovery on Tactical & Ultimate.",
     accent: "#76B5E8"
   },
   {
     id: "keen_arrowhead",
     name: "Keen Arrowhead",
     category: "Offense",
-    summary: "+20% critical strike chance (up to 45% total crit cap).",
+    summary: "+20% Crit Chance (45% cap).",
     accent: "#DFC15E"
   },
   {
     id: "oathbound_censer",
     name: "Oathbound Censer",
     category: "Co-op",
-    summary: "Using your Tactical skill heals nearby co-op allies for +8 HP.",
+    summary: "Tactical skill heals nearby allies for +8 HP.",
     accent: "#E8CE76"
   },
   {
     id: "runic_carapace",
     name: "Runic Carapace",
     category: "Defense",
-    summary: "Gain +22 Shield upon entering new rooms, and passive +15% Physical Resistance & +20% Status/Elemental Resistances.",
+    summary: "+22 Shield per new room; +15% Phys & +20% Elem/Status Resist.",
     accent: "#6E85C9"
   },
   {
     id: "piercing_prism",
     name: "Piercing Prism",
     category: "Offense",
-    summary: "Projectiles and waves pierce +1 extra enemy target.",
+    summary: "Attacks pierce +1 additional enemy.",
     accent: "#A988E6"
   },
   {
     id: "cinder_heart",
     name: "Cinder Heart",
     category: "Offense",
-    summary: "Critical hits and tactical skills Ignite enemies with Burn DoT for 4.5s (scales with Level & Primary Attribute).",
+    summary: "Crits and Tactical skills Burn foes for 4.5s.",
     accent: "#F97316"
   },
   {
     id: "rimefrost_shard",
     name: "Rimefrost Shard",
     category: "Offense",
-    summary: "Attacks have 35% chance to Chill (3s). Striking a Chilled enemy Freezes them (1.8s base, subject to DR); shattering deals 1.4x hit damage and 35% frost AoE splash.",
+    summary: "35% Chill on hit; hitting Chilled foes Freezes & shatters for 1.4x + frost AoE.",
     accent: "#38BDF8"
   },
   {
     id: "stormcaller_lodestone",
     name: "Stormcaller Lodestone",
     category: "Offense",
-    summary: "Every 3rd strike inflicts Shock for 5s. Damaging a Shocked foe arcs lightning bolts to up to 3 nearby enemies.",
+    summary: "Every 3rd hit Shocks (5s); Shocked hits chain to 3 foes.",
     accent: "#FBBF24"
   },
   {
     id: "viper_crucible",
     name: "Viper Crucible",
     category: "Offense",
-    summary: "Attacks apply virulent Poison for 6s, dealing continuous acid damage and reducing enemy damage output by 30%.",
+    summary: "Attacks Poison foes for 6s (-30% enemy damage).",
     accent: "#22C55E"
   },
   {
     id: "bloodletter_talisman",
     name: "Bloodletter Talisman",
     category: "Offense",
-    summary: "Strikes lacerate targets with Bleed for 5s. Bleeding enemies take damage that doubles whenever they attempt to move.",
+    summary: "Attacks inflict Bleed (5s); damage doubles while moving.",
     accent: "#DC2626"
   },
   {
     id: "thorned_aegis",
     name: "Thorned Aegis",
     category: "Defense",
-    summary: "When your Shield absorbs enemy damage, discharge a concussive shockwave that Stuns adjacent attackers for 1.8s.",
+    summary: "Shield hits discharge a shockwave that Stuns nearby foes for 1.8s.",
     accent: "#A855F7"
   }
 ];
@@ -336,8 +336,8 @@ var ARCANIST_SPELLS = {
     projectileSpeed: 380,
     damageCategory: "fire",
     accentColor: "#F97316",
-    summary: "Replaces Astral Nova [Q]. 0.35s cast; hurls a large fireball that explodes on hit (105u AoE) and leaves a 3.5s burning ground zone.",
-    chronoInteraction: "Fireball projectile and lingering burn zone freeze inside ANY Chrono Well (including caster zones) until time resumes."
+    summary: "0.35s cast; explodes (105u AoE) and leaves a 3.5s burn zone.",
+    chronoInteraction: "Projectile & burn zone freeze inside any Chrono Well."
   },
   disintegration: {
     id: "disintegration",
@@ -358,8 +358,8 @@ var ARCANIST_SPELLS = {
     isChannel: true,
     damageCategory: "arcane",
     accentColor: "#A855F7",
-    summary: "Replaces Astral Nova [Q]. Hold [Q / RMB] to channel a 450u violet beam (5 ticks/s, stationary, 180\xB0/s turn cap; 12s CD starts on end).",
-    chronoInteraction: "Interrupted if caster is suspended by another Chrono Well; own Chrono Well lets caster channel freely."
+    summary: "Hold [Q / RMB] to channel a 450u beam (5 ticks/s, 180\xB0/s turn cap).",
+    chronoInteraction: "Blocked by enemy Chrono Wells; own Chrono Well allows free cast."
   },
   frost_lance: {
     id: "frost_lance",
@@ -376,8 +376,8 @@ var ARCANIST_SPELLS = {
     projectileSpeed: 480,
     damageCategory: "frost",
     accentColor: "#38BDF8",
-    summary: "Replaces Astral Nova [Q]. 0.2s cast; fires a straight crystalline ice lance piercing up to 3 enemies (no homing/freeze).",
-    chronoInteraction: "Ice lance projectile suspends mid-air inside ANY Chrono Well until the field ends."
+    summary: "0.2s cast; fires a straight lance piercing up to 3 foes.",
+    chronoInteraction: "Projectile suspends mid-air inside any Chrono Well."
   },
   chain_lightning: {
     id: "chain_lightning",
@@ -394,8 +394,8 @@ var ARCANIST_SPELLS = {
     // ~±32 deg (64 deg total cone)
     damageCategory: "lightning",
     accentColor: "#FACC15",
-    summary: "Replaces Astral Nova [Q]. Unleashes a 340u cone-shaped lightning blast (64\xB0 arc) shocking all foes inside.",
-    chronoInteraction: "Instant lightning cone hits suspended foes inside Chrono Well; blocked while caster is Chrono-suspended."
+    summary: "Instant 340u lightning cone (64\xB0 arc) shocking all foes inside.",
+    chronoInteraction: "Hits suspended foes inside Chrono Well unless caster is frozen."
   },
   arcane_meteor: {
     id: "arcane_meteor",
@@ -412,8 +412,8 @@ var ARCANIST_SPELLS = {
     maxRange: 280,
     damageCategory: "arcane",
     accentColor: "#E879F9",
-    summary: "Replaces Astral Nova [Q]. 0.5s cast + 1.0s warning delay; drops an arcane meteor for heavy 125u AoE damage (no burn).",
-    chronoInteraction: "Marked meteor impact timer freezes while covered by ANY Chrono Well and detonates once time resumes."
+    summary: "0.5s cast + 1.0s delay; strikes a 125u zone for heavy AoE burst.",
+    chronoInteraction: "Impact timer pauses inside any Chrono Well until time resumes."
   },
   arcane_orb: {
     id: "arcane_orb",
@@ -431,8 +431,8 @@ var ARCANIST_SPELLS = {
     projectileSpeed: 115,
     damageCategory: "arcane",
     accentColor: "#818CF8",
-    summary: "Replaces Astral Nova [Q]. 4s slow sphere damaging enemies every 0.5s (max 2 hits/enemy) without vanishing on hit.",
-    chronoInteraction: "Orb movement and lifetime freeze completely inside ANY Chrono Well without losing hit cooldown timing."
+    summary: "4s drifting orb hitting foes every 0.5s (max 2 hits/enemy).",
+    chronoInteraction: "Freezes motion & timer completely inside any Chrono Well."
   },
   arcane_barrage: {
     id: "arcane_barrage",
@@ -451,8 +451,8 @@ var ARCANIST_SPELLS = {
     maxRange: 450,
     damageCategory: "arcane",
     accentColor: "#60A5FA",
-    summary: "Replaces Astral Nova [Q]. Launches a 4-wave rapid arcane barrage (8 bolts) that streams forward and strikes targets 3-4+ times.",
-    chronoInteraction: "Barrage projectiles suspend inside ANY Chrono Well (including the caster\u2019s own) and burst forward together on resume."
+    summary: "4 rapid waves of arcane bolts (8 bolts total) piercing forward.",
+    chronoInteraction: "Bolts suspend in any Chrono Well and release together on resume."
   }
 };
 var ARCANIST_SCROLLS = ARCANIST_SPELL_ORDER.map(
@@ -529,7 +529,7 @@ var ARMAMENT_TUNING = {
       frenzyDamageBonusPct: 0.25,
       frenzyLifestealPct: 0.14,
       frenzyAttackSpeedBonusPct: 0.25,
-      frenzyMoveSpeedBonusPct: 0.25
+      frenzyMoveSpeedBonusPct: 0.65
     },
     stormbreaker: {
       slamForwardOffsetPx: 54,
@@ -1017,7 +1017,7 @@ var WEAPON_TACTICALS = {
     weaponTacticalId: "bastion_counter",
     name: "Bastion Counter",
     shortTitle: "Bastion Counter",
-    description: `Brace defensively for ${(ARMAMENT_TUNING.weapons.sunforged.bastionBraceMs / 1e3).toFixed(1)}s (-${Math.round(ARMAMENT_TUNING.weapons.sunforged.bastionDamageReduction * 100)}% incoming dmg), then retaliate with a ${ARMAMENT_TUNING.weapons.sunforged.bastionCleaveRadiusPx}px golden cleave (+${Math.round(ARMAMENT_TUNING.weapons.sunforged.bastionBlockedBonusPerHitRatio * 100)}% dmg per blocked hit).`,
+    description: `Brace ${(ARMAMENT_TUNING.weapons.sunforged.bastionBraceMs / 1e3).toFixed(1)}s (-${Math.round(ARMAMENT_TUNING.weapons.sunforged.bastionDamageReduction * 100)}% dmg taken), then cleave ${ARMAMENT_TUNING.weapons.sunforged.bastionCleaveRadiusPx}px (+${Math.round(ARMAMENT_TUNING.weapons.sunforged.bastionBlockedBonusPerHitRatio * 100)}% dmg/block).`,
     cooldownMs: ARMAMENT_TUNING.weapons.sunforged.bastionCooldownMs,
     accentColor: "#FBBF24",
     secondaryColor: "#FEF08A",
@@ -1028,7 +1028,7 @@ var WEAPON_TACTICALS = {
     weaponTacticalId: "crimson_frenzy",
     name: "Crimson Frenzy",
     shortTitle: "Crimson Frenzy",
-    description: `Unleash bloodlust for ${(ARMAMENT_TUNING.weapons.crimson.frenzyDurationMs / 1e3).toFixed(1)}s: +${Math.round(ARMAMENT_TUNING.weapons.crimson.frenzyDamageBonusPct * 100)}% Damage, +${Math.round(ARMAMENT_TUNING.weapons.crimson.frenzyLifestealPct * 100)}% Lifesteal, +${Math.round(ARMAMENT_TUNING.weapons.crimson.frenzyAttackSpeedBonusPct * 100)}% Attack Speed, and a fading +${Math.round(ARMAMENT_TUNING.weapons.crimson.frenzyMoveSpeedBonusPct * 100)}% Movement Speed buff. Shield gain remains permanently locked.`,
+    description: `Frenzy ${(ARMAMENT_TUNING.weapons.crimson.frenzyDurationMs / 1e3).toFixed(1)}s: +${Math.round(ARMAMENT_TUNING.weapons.crimson.frenzyDamageBonusPct * 100)}% DMG, +${Math.round(ARMAMENT_TUNING.weapons.crimson.frenzyLifestealPct * 100)}% Lifesteal, +${Math.round(ARMAMENT_TUNING.weapons.crimson.frenzyAttackSpeedBonusPct * 100)}% Atk Spd, +${Math.round(ARMAMENT_TUNING.weapons.crimson.frenzyMoveSpeedBonusPct * 100)}% Move Spd. Shield gain locked.`,
     cooldownMs: ARMAMENT_TUNING.weapons.crimson.frenzyCooldownMs,
     accentColor: "#EF4444",
     secondaryColor: "#FCA5A5",
@@ -1039,7 +1039,7 @@ var WEAPON_TACTICALS = {
     weaponTacticalId: "cyclone_break",
     name: "Cyclone Break",
     shortTitle: "Cyclone Break",
-    description: `Fire a large Cyclone Greatarrow straight ahead that drags struck foes forward before erupting into a ${ARMAMENT_TUNING.weapons.galewind.cycloneRadiusPx}px whirlwind (${(ARMAMENT_TUNING.weapons.galewind.cycloneDurationMs / 1e3).toFixed(1)}s), violently pulling enemies inward and detonating Galeburst marks.`,
+    description: `Fire a dragging Greatarrow that erupts into a ${ARMAMENT_TUNING.weapons.galewind.cycloneRadiusPx}px whirlwind (${(ARMAMENT_TUNING.weapons.galewind.cycloneDurationMs / 1e3).toFixed(1)}s), pulling foes and popping Galeburst marks.`,
     cooldownMs: ARMAMENT_TUNING.weapons.galewind.cycloneCooldownMs,
     accentColor: "#38BDF8",
     secondaryColor: "#6EE7B7",
@@ -1050,7 +1050,7 @@ var WEAPON_TACTICALS = {
     weaponTacticalId: "black_sun",
     name: "Black Sun",
     shortTitle: "Black Sun",
-    description: `Create a ${ARMAMENT_TUNING.weapons.eclipse.blackSunRadiusPx}px eclipse zone for ${(ARMAMENT_TUNING.weapons.eclipse.blackSunZoneDurationMs / 1e3).toFixed(1)}s pulsing Arcane damage before a celestial arrow strikes and detonates.`,
+    description: `Summon a ${ARMAMENT_TUNING.weapons.eclipse.blackSunRadiusPx}px eclipse zone (${(ARMAMENT_TUNING.weapons.eclipse.blackSunZoneDurationMs / 1e3).toFixed(1)}s Arcane pulses) before a celestial arrow detonates it.`,
     cooldownMs: ARMAMENT_TUNING.weapons.eclipse.blackSunCooldownMs,
     accentColor: "#A855F7",
     secondaryColor: "#FBBF24",
@@ -1061,7 +1061,7 @@ var WEAPON_TACTICALS = {
     weaponTacticalId: "seraphic_judgment",
     name: "Seraphic Judgment",
     shortTitle: "Seraphic Judgment",
-    description: `Targeted ${ARMAMENT_TUNING.weapons.seraphim.tacticalRadiusPx}px AoE Holy Burst dealing immediate Faith-scaled Divine damage (no healing).`,
+    description: `Targeted ${ARMAMENT_TUNING.weapons.seraphim.tacticalRadiusPx}px Divine AoE burst (scales with Faith, no healing).`,
     cooldownMs: ARMAMENT_TUNING.weapons.seraphim.tacticalCooldownMs,
     accentColor: "#FDE047",
     secondaryColor: "#F59E0B",
@@ -3244,7 +3244,7 @@ function generateTavernFloor() {
       name: "Barkeep Lena",
       x: 16.5 * TILE_SIZE,
       y: 6.2 * TILE_SIZE,
-      dialogue: "Welcome to the Rusty Tankard! Care for a glass of honeyed mead?",
+      dialogue: "Honeyed mead or spiced cider? Take a seat.",
       spriteKind: "barkeep"
     },
     {
@@ -3252,7 +3252,7 @@ function generateTavernFloor() {
       name: "Innkeeper Bram",
       x: 8.5 * TILE_SIZE,
       y: 13.5 * TILE_SIZE,
-      dialogue: "Greetings, adventurer! Rest by our warm hearth fireplace.",
+      dialogue: "Warm your hands by the hearth, hero.",
       spriteKind: "innkeeper"
     },
     {
@@ -3260,7 +3260,7 @@ function generateTavernFloor() {
       name: "Veteran Jorah",
       x: 31 * TILE_SIZE,
       y: 18.5 * TILE_SIZE,
-      dialogue: "Test your steel against the training dummies in my arena!",
+      dialogue: "Test your steel on my dummies.",
       spriteKind: "veteran"
     },
     {
@@ -3268,10 +3268,10 @@ function generateTavernFloor() {
       name: "Aleph",
       x: 18 * TILE_SIZE,
       y: 28 * TILE_SIZE,
-      dialogue: "The paths you walk are many, but your soul remains constant. Do you seek a different focus?",
+      dialogue: "Your path shifts. Seek a new focus?",
       spriteKind: "mysterious_cloak",
       options: [
-        { id: "reset_stats", label: "I wish to reset my attributes." },
+        { id: "reset_stats", label: "Reset Stats" },
         { id: "lore", label: "Who are you?" }
       ]
     }
@@ -4851,7 +4851,8 @@ var GameRoom = class _GameRoom {
         starRiftCooldownMs: 0
       } : {},
       chronoSuspendedMs: 0,
-      activeChestPropId: null
+      activeChestPropId: null,
+      npcDialogue: null
     };
     if (state.level >= MAX_LEVEL) {
       state.nextXp = 999999;
@@ -4889,7 +4890,9 @@ var GameRoom = class _GameRoom {
       dummyGaleburstStacks: /* @__PURE__ */ new Map(),
       bastionBlockedHits: 0,
       bastionAimAngle: 0,
-      lastPrimaryAttackAtMs: -99999
+      lastPrimaryAttackAtMs: -99999,
+      npcSpeechIndices: {},
+      dialogueSeq: 0
     });
     if (!this.hostId && this.roomId !== "TAVERN-HUB") {
       this.hostId = playerId;
@@ -6414,62 +6417,72 @@ var GameRoom = class _GameRoom {
       for (const npc of this.npcs) {
         const dist = Math.hypot(npc.x - p.x, npc.y - p.y);
         if (dist <= 110) {
-          const heroClassName = HERO_CLASSES[p.heroClass]?.name || "Adventurer";
           let lines = [];
+          let options2;
           if (npc.id === "npc_bram") {
             lines = [
-              `Welcome to The Rusty Tankard, ${p.username}! Pull up a stool by the hearth and warm your hands.`,
-              "I have seen hundreds of adventurers cross my doorstep. The secret to surviving Beyond is party coordination.",
-              "Rest your legs! Lena just brewed a fresh pot of hearty venison stew over the fireplace.",
-              "Look out for Warden Malakor on Floor 1! His tower shield can crush an unwary warrior in a single blow.",
-              "Don't forget to break every crate and barrel you see down below\u2014relics and gold lie hidden everywhere!",
-              "If your party falls in battle, a Cleric's Solar Beacon or another ally can revive you before time runs out."
+              `Welcome, ${p.username}! Warm yourself by the hearth.`,
+              "Party coordination keeps heroes alive below.",
+              "Lena just brewed fresh stew by the fire.",
+              "Watch Floor 1\u2014Malakor's shield stun hurts.",
+              "Smash every crate for hidden relics and gold.",
+              "Cleric Solar Beacon can revive downed allies fast."
             ];
           } else if (npc.id === "npc_lena") {
-            const classTip = p.heroClass === "vanguard" ? "A Vanguard in heavy plate! Stand in the frontlines and pop your Shield to absorb boss slams." : p.heroClass === "ranger" ? "A Ranger from the Thornwood! Keep your distance and mark targets with Hunter Quarry for big crits." : p.heroClass === "arcanist" ? "An Arcanist! Cast Chrono Well in narrow choke points to slow down swarming monster waves." : "A Sunbrand Prelate! Keep your Solar Beacon ready when the party's health drops low.";
+            const classTip = p.heroClass === "vanguard" ? "Vanguard! Hold the front and shield boss slams." : p.heroClass === "ranger" ? "Ranger! Kite far and mark bosses with Quarry." : p.heroClass === "arcanist" ? "Arcanist! Drop Chrono Well in tight chokes." : "Cleric! Save Solar Beacon for heavy party damage.";
             lines = [
-              `Ah, ${p.username}! Care for a mug of our signature honeyed mead or a glass of spiced cider?`,
+              `Hey ${p.username}! Honeyed mead or spiced cider?`,
               classTip,
-              "Floor 1 is Highkeep Outer Bailey. Watch for Warden Malakor's crushing tower shield!",
-              "Floor 2 is the Sunken Crypt. Archlich Vaelor casts necrotic soul frost that freezes anyone standing still.",
-              "Floor 3 is Cindervault Bastion\u2014a searing inferno ruled by Ignis, Cinder Sovereign! Equip Cinder Heart and Runic Carapace relics if you find them.",
-              "Floor 4 is the Abyssal Shadow Chasm! Void-Eater Malice opens black holes that pull heroes into oblivion.",
-              "Floor 5 reaches the Aetherial Void Spire! The Archon of Nothingness unleashes devastating astral starlight novas.",
-              "Floor 6 enters the Hall of Forgotten Hymns, guarded by Elyndor, Keeper of the Last Hymn.",
-              "Floor 7 holds the Reliquary of the Departed where Zadkiel shields sacred ancestral relics.",
-              "Floor 8 leads to the Chapel of Severed Light, where Sariel guards the sealed scriptures.",
-              "Floor 9 ascends to the Celestial Nave before Seraphel, Sentinel of the Final Seal.",
-              "Floor 10 marks the Warden's Gate! Defeat Oriphiel, The Last Warden, to unseal the path deeper into the Sanctuary.",
-              "Need to blow off steam after a tough run? Practice your combo strikes on the dummies in the East wing!"
+              "F1 Highkeep: Warden Malakor guards with his shield.",
+              "F2 Crypt: Archlich Vaelor casts freezing frost.",
+              "F3 Cindervault: Ignis burns everything\u2014pack resistance.",
+              "F4 Abyss: Malice spawns gravity black holes.",
+              "F5 Spire: The Archon unleashes starlight novas.",
+              "F6 Hymns: Elyndor weaves lethal sound lanes.",
+              "F7 Reliquary: Zadkiel guards with ashen curses.",
+              "F8 Chapel: Sariel silences unwary casters.",
+              "F9 Nave: Seraphel rains divine lances.",
+              "F10 Gate: Defeat Oriphiel to claim the Warden key.",
+              "Warm up on the training dummies to the East!"
             ];
           } else if (npc.id === "npc_aleph") {
             lines = [
-              "The paths you walk are many, but your soul remains constant. Do you seek a different focus?",
-              "True strength comes not from the sword, but from knowing how to wield it.",
-              "The stars whispered of your coming. I offer you the chance to begin anew."
+              "Your path shifts. Seek a new focus?",
+              "Know your build, and steel obeys.",
+              "Begin anew whenever you are ready."
             ];
-            if (!npc.options || npc.options.length === 0) {
-              npc.options = [
-                { id: "reset_stats", label: "I wish to reset my attributes." },
-                { id: "lore", label: "Who are you?" }
-              ];
-            }
+            options2 = [
+              { id: "reset_stats", label: "Reset Stats" },
+              { id: "lore", label: "Who are you?" }
+            ];
           } else {
-            const combatTip = p.heroClass === "vanguard" ? "Vanguard, your Shield Bash stuns elites for 1.7s! Use it to interrupt heavy boss attacks." : p.heroClass === "ranger" ? "Ranger, your Frost Volley pierces up to 5 foes at once. Keep kiting to control the room." : p.heroClass === "arcanist" ? "Arcanist, your Astral Nova releases an 8-way starburst that clears enemies surrounding you." : "Cleric, your Dawnstar Smite heals nearby allies while damaging surrounding foes simultaneously.";
+            const combatTip = p.heroClass === "vanguard" ? "Vanguard: Bulwark Dash stuns elites for 1.7s." : p.heroClass === "ranger" ? "Ranger: Frost Volley slows packs by 50%." : p.heroClass === "arcanist" ? "Arcanist: Astral Nova clears surrounding swarms." : "Cleric: Sanctified Pulse heals allies and burns undead.";
             lines = [
-              `Halt, ${p.username}! Keep your guard high and your weapon polished. Indecision gets heroes killed.`,
+              `Stay sharp, ${p.username}. Hesitation kills.`,
               combatTip,
-              "When an enemy glows orange, they are winding up a heavy attack. Step out of the danger zone immediately!",
-              "Relic synergies are key! Combining Stormcaller Lodestone with Viper Crucible inflicts Shock and Poison at once.",
-              "Step into my training ring over there and test your DPS against my straw dummies anytime."
+              "Orange glow = heavy windup. Dodge clear!",
+              "Pair Stormcaller Lodestone with Viper Crucible.",
+              "Test your DPS on my dummies anytime."
             ];
           }
-          npc.speechIndex = ((npc.speechIndex ?? -1) + 1) % lines.length;
-          const spoken = lines[npc.speechIndex];
-          npc.dialogue = spoken;
-          npc.speakingMs = npc.options && npc.options.length > 0 ? 9999999 : 5e3;
-          this.emitEvent("status", npc.x, npc.y - 28, `"${spoken}"`, "#FDE68A");
-          this.pushSystemChat(` ${npc.name}: "${spoken}"`);
+          const nextIdx = ((pr.npcSpeechIndices[npc.id] ?? -1) + 1) % lines.length;
+          pr.npcSpeechIndices[npc.id] = nextIdx;
+          const spoken = lines[nextIdx];
+          const persistent = Boolean(options2 && options2.length > 0);
+          const ttlMs = persistent ? 6e5 : 5200;
+          p.npcDialogue = {
+            npcId: npc.id,
+            npcName: npc.name,
+            x: npc.x,
+            y: npc.y,
+            text: spoken,
+            ttlMs,
+            maxTtlMs: ttlMs,
+            persistent,
+            seq: ++pr.dialogueSeq,
+            ...options2 ? { options: options2 } : {}
+          };
+          return {};
         }
       }
       for (const dummy of this.trainingDummies) {
@@ -6486,8 +6499,17 @@ var GameRoom = class _GameRoom {
         if (prop.kind === "warden_gate") {
           const dist2 = Math.hypot(prop.x - p.x, prop.y - p.y);
           if (dist2 <= 65) {
-            this.emitEvent("status", prop.x, prop.y - 45, '"You are not worthy!"', "#EF4444");
-            this.pushSystemChat(`Warden's Gate: "You are not worthy!"`);
+            p.npcDialogue = {
+              npcId: prop.id,
+              npcName: "Warden's Gate",
+              x: prop.x,
+              y: prop.y,
+              text: "You are not worthy.",
+              ttlMs: 3600,
+              maxTtlMs: 3600,
+              persistent: false,
+              seq: ++pr.dialogueSeq
+            };
             return {};
           }
         }
@@ -7036,6 +7058,20 @@ var GameRoom = class _GameRoom {
     for (const npc of this.npcs) {
       if (npc.speakingMs && npc.speakingMs > 0) {
         npc.speakingMs = Math.max(0, npc.speakingMs - dtMs);
+      }
+    }
+    for (const pr of this.players.values()) {
+      const dlg = pr.state.npcDialogue;
+      if (!dlg) continue;
+      if (!pr.state.connected || Math.hypot(dlg.x - pr.state.x, dlg.y - pr.state.y) > 190) {
+        pr.state.npcDialogue = null;
+        continue;
+      }
+      if (!dlg.persistent) {
+        dlg.ttlMs = Math.max(0, dlg.ttlMs - dtMs);
+        if (dlg.ttlMs <= 0) {
+          pr.state.npcDialogue = null;
+        }
       }
     }
     for (const dummy of this.trainingDummies) {
@@ -11792,15 +11828,18 @@ var GameRoom = class _GameRoom {
     const base = this.buildSnapshot();
     const r1 = (n) => Math.round(n * 10) / 10;
     const r2 = (n) => Math.round(n * 100) / 100;
-    const netPlayers = base.players.map((p) => ({
-      ...p,
-      x: r1(p.x),
-      y: r1(p.y),
-      vx: r1(p.vx),
-      vy: r1(p.vy),
-      aimAngle: r2(p.aimAngle),
-      reviveProgress: r2(p.reviveProgress)
-    }));
+    const netPlayers = base.players.map((p) => {
+      const { npcDialogue: _omitPrivateDialogue, ...rest } = p;
+      return {
+        ...rest,
+        x: r1(p.x),
+        y: r1(p.y),
+        vx: r1(p.vx),
+        vy: r1(p.vy),
+        aimAngle: r2(p.aimAngle),
+        reviveProgress: r2(p.reviveProgress)
+      };
+    });
     const netEnemies = base.enemies.map((e) => {
       const projected = {
         id: e.id,
@@ -11902,6 +11941,70 @@ var GameRoom = class _GameRoom {
       props: netProps,
       zones: netZones,
       npcs: netNpcs
+    };
+  }
+  getPlayerNpcDialogue(playerId) {
+    return this.players.get(playerId)?.state.npcDialogue ?? null;
+  }
+  handleDialogueClose(playerId) {
+    const pr = this.players.get(playerId);
+    if (!pr) return;
+    pr.state.npcDialogue = null;
+  }
+  handleDialoguePick(playerId, optionId) {
+    const pr = this.players.get(playerId);
+    if (!pr) return;
+    const current = pr.state.npcDialogue;
+    if (!current || current.npcId !== "npc_aleph") return;
+    if (optionId === "lore") {
+      pr.state.npcDialogue = {
+        ...current,
+        text: "I am Aleph, weaver of dormant spirits. Reclaim your points and forge a new path.",
+        ttlMs: 6e5,
+        maxTtlMs: 6e5,
+        persistent: true,
+        seq: ++pr.dialogueSeq,
+        options: [
+          { id: "reset_stats", label: "Reset Stats" },
+          { id: "back", label: "Back" }
+        ]
+      };
+    } else if (optionId === "back") {
+      pr.state.npcDialogue = {
+        ...current,
+        text: "Your path shifts. Seek a new focus?",
+        ttlMs: 6e5,
+        maxTtlMs: 6e5,
+        persistent: true,
+        seq: ++pr.dialogueSeq,
+        options: [
+          { id: "reset_stats", label: "Reset Stats" },
+          { id: "lore", label: "Who are you?" }
+        ]
+      };
+    } else if (optionId === "goodbye") {
+      pr.state.npcDialogue = null;
+    }
+  }
+  handleAlephResetDialogue(playerId, spent) {
+    const pr = this.players.get(playerId);
+    if (!pr) return;
+    const aleph = this.npcs.find((n) => n.id === "npc_aleph");
+    if (!aleph) return;
+    pr.state.npcDialogue = {
+      npcId: aleph.id,
+      npcName: aleph.name,
+      x: aleph.x,
+      y: aleph.y,
+      text: spent > 0 ? `Reclaimed ${spent} Stat Pts. Forge your build anew.` : "No spent points to reclaim yet.",
+      ttlMs: 6e5,
+      maxTtlMs: 6e5,
+      persistent: true,
+      seq: ++pr.dialogueSeq,
+      options: [
+        { id: "lore", label: "Who are you?" },
+        { id: "goodbye", label: "Close" }
+      ]
     };
   }
 };
@@ -14017,6 +14120,19 @@ function generateRoomCode() {
 function sendJson(ws, msg, options) {
   sendJsonMessage(ws, msg, options);
 }
+function getDialogueKey(dialogue) {
+  if (!dialogue) return "";
+  return `${dialogue.npcId}:${dialogue.seq}:${dialogue.text}`;
+}
+function syncClientNpcDialogue(c, room) {
+  if (c.ws.readyState !== WebSocket.OPEN) return;
+  const dlg = room.getPlayerNpcDialogue(c.userId);
+  const nextKey = getDialogueKey(dlg);
+  if (nextKey !== (c.lastSentDialogueKey ?? "")) {
+    c.lastSentDialogueKey = nextKey;
+    sendJson(c.ws, { type: "npc:dialogue", dialogue: dlg });
+  }
+}
 function broadcastRoomList() {
   const lobbyTargets = [];
   for (const c of clients) {
@@ -15070,10 +15186,15 @@ async function startServer() {
         return;
       }
       if (msg.type === "room:join") {
-        partyCoordinator.joinOrReconnectRoom(client, toPartyAccount(acc), String(msg.roomId || ""));
+        client.lastSentDialogueKey = "";
+        const res = partyCoordinator.joinOrReconnectRoom(client, toPartyAccount(acc), String(msg.roomId || ""));
+        if (res.ok) {
+          syncClientNpcDialogue(client, res.room);
+        }
         return;
       }
       if (msg.type === "room:leave") {
+        client.lastSentDialogueKey = "";
         partyCoordinator.leaveRoomExplicit(client);
         sendJson(ws, { type: "room:left" });
         return;
@@ -15100,6 +15221,9 @@ async function startServer() {
             map: res.floorChanged
           });
           broadcastRoomList();
+        }
+        if (msg.action === "interact") {
+          syncClientNpcDialogue(client, room);
         }
       } else if (msg.type === "player:channel_start") {
         room.startDisintegrationChannel(acc.id, msg.aimAngle);
@@ -15454,43 +15578,14 @@ async function startServer() {
             sendJson(ws, { type: "error", message: "Failed to reset attributes. Please try again." });
           }
         })();
-        const aleph = room.npcs.find((n) => n.id === "npc_aleph");
-        if (aleph) {
-          aleph.dialogue = spent > 0 ? `Your spirit is purified. Reclaimed ${spent} attribute points. Forge your destiny anew.` : "Your attributes are already at balance. Earn greater experience to hone your spirit.";
-          aleph.speakingMs = 9999999;
-          aleph.options = [
-            { id: "lore", label: "Who are you?" },
-            { id: "goodbye", label: "Thank you, Aleph. (Close)" }
-          ];
-        }
+        room.handleAlephResetDialogue(acc.id, spent);
+        syncClientNpcDialogue(client, room);
       } else if (msg.type === "player:dialogue_close") {
-        const speakingNpc = room.npcs.find((n) => (n.speakingMs ?? 0) > 0);
-        if (speakingNpc) {
-          speakingNpc.speakingMs = 0;
-        }
+        room.handleDialogueClose(acc.id);
+        syncClientNpcDialogue(client, room);
       } else if (msg.type === "player:dialogue_pick") {
-        const speakingNpc = room.npcs.find((n) => (n.speakingMs ?? 0) > 0);
-        if (speakingNpc) {
-          if (speakingNpc.id === "npc_aleph") {
-            if (msg.optionId === "lore") {
-              speakingNpc.dialogue = "I am Aleph, weaver of dormant spirits. In this Sanctuary, I return what you have sown so you may reap a new path.";
-              speakingNpc.speakingMs = 9999999;
-              speakingNpc.options = [
-                { id: "reset_stats", label: "I wish to reset my attributes." },
-                { id: "back", label: "I see. (Back)" }
-              ];
-            } else if (msg.optionId === "back") {
-              speakingNpc.dialogue = "The paths you walk are many, but your soul remains constant. Do you seek a different focus?";
-              speakingNpc.speakingMs = 9999999;
-              speakingNpc.options = [
-                { id: "reset_stats", label: "I wish to reset my attributes." },
-                { id: "lore", label: "Who are you?" }
-              ];
-            } else if (msg.optionId === "goodbye") {
-              speakingNpc.speakingMs = 0;
-            }
-          }
-        }
+        room.handleDialoguePick(acc.id, msg.optionId);
+        syncClientNpcDialogue(client, room);
       }
     });
     ws.on("close", () => {
@@ -15596,6 +15691,9 @@ async function startServer() {
         deltaState.seq = nextSeq;
         deltaState.lastBaseline = cloneSnapshotBaseline(snapshot);
         dirtyNonPlayingRooms.delete(roomId);
+        for (const c of roomClientsIter) {
+          syncClientNpcDialogue(c, room);
+        }
       }
       if (statusTransitioned) {
         anyStatusChanged = true;

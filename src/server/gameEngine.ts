@@ -7,6 +7,7 @@ import {
   TILE_SIZE,
   type ChatMessage,
   type DamageCategory,
+  type DialogueOption,
   type DifficultyTier,
   type DungeonMap,
   type EnemyKind,
@@ -23,6 +24,7 @@ import {
   type LastRunSummary,
   type NpcState,
   type PlayerInputState,
+  type PlayerNpcDialogueState,
   type PlayerState,
   type PlayerStatusEffect,
   type PlayerStatusType,
@@ -133,6 +135,8 @@ interface PlayerRuntime {
   bastionBlockedHits: number;
   bastionAimAngle: number;
   lastPrimaryAttackAtMs: number;
+  npcSpeechIndices: Record<string, number>;
+  dialogueSeq: number;
 }
 
 interface EnemyRuntimeMeta {
@@ -1710,6 +1714,7 @@ export class GameRoom {
         : {}),
       chronoSuspendedMs: 0,
       activeChestPropId: null,
+      npcDialogue: null,
     };
 
     if (state.level >= MAX_LEVEL) {
@@ -1751,6 +1756,8 @@ export class GameRoom {
       bastionBlockedHits: 0,
       bastionAimAngle: 0,
       lastPrimaryAttackAtMs: -99999,
+      npcSpeechIndices: {},
+      dialogueSeq: 0,
     });
 
     if (!this.hostId && this.roomId !== 'TAVERN-HUB') {
@@ -3504,87 +3511,95 @@ export class GameRoom {
     }
 
     if (action === 'interact') {
-      // 1. NPC Conversations
+      // 1. Per-player isolated NPC Conversations (never shared or broadcast)
       for (const npc of this.npcs) {
         const dist = Math.hypot(npc.x - p.x, npc.y - p.y);
         if (dist <= 110) {
-          const heroClassName = HERO_CLASSES[p.heroClass]?.name || 'Adventurer';
-
           let lines: string[] = [];
+          let options: DialogueOption[] | undefined;
+
           if (npc.id === 'npc_bram') {
             lines = [
-              `Welcome to The Rusty Tankard, ${p.username}! Pull up a stool by the hearth and warm your hands.`,
-              'I have seen hundreds of adventurers cross my doorstep. The secret to surviving Beyond is party coordination.',
-              'Rest your legs! Lena just brewed a fresh pot of hearty venison stew over the fireplace.',
-              'Look out for Warden Malakor on Floor 1! His tower shield can crush an unwary warrior in a single blow.',
-              'Don\'t forget to break every crate and barrel you see down below—relics and gold lie hidden everywhere!',
-              'If your party falls in battle, a Cleric\'s Solar Beacon or another ally can revive you before time runs out.',
+              `Welcome, ${p.username}! Warm yourself by the hearth.`,
+              'Party coordination keeps heroes alive below.',
+              'Lena just brewed fresh stew by the fire.',
+              "Watch Floor 1—Malakor's shield stun hurts.",
+              'Smash every crate for hidden relics and gold.',
+              'Cleric Solar Beacon can revive downed allies fast.',
             ];
           } else if (npc.id === 'npc_lena') {
             const classTip =
               p.heroClass === 'vanguard'
-                ? 'A Vanguard in heavy plate! Stand in the frontlines and pop your Shield to absorb boss slams.'
+                ? 'Vanguard! Hold the front and shield boss slams.'
                 : p.heroClass === 'ranger'
-                  ? 'A Ranger from the Thornwood! Keep your distance and mark targets with Hunter Quarry for big crits.'
+                  ? 'Ranger! Kite far and mark bosses with Quarry.'
                   : p.heroClass === 'arcanist'
-                    ? 'An Arcanist! Cast Chrono Well in narrow choke points to slow down swarming monster waves.'
-                    : 'A Sunbrand Prelate! Keep your Solar Beacon ready when the party\'s health drops low.';
+                    ? 'Arcanist! Drop Chrono Well in tight chokes.'
+                    : 'Cleric! Save Solar Beacon for heavy party damage.';
 
             lines = [
-              `Ah, ${p.username}! Care for a mug of our signature honeyed mead or a glass of spiced cider?`,
+              `Hey ${p.username}! Honeyed mead or spiced cider?`,
               classTip,
-              'Floor 1 is Highkeep Outer Bailey. Watch for Warden Malakor\'s crushing tower shield!',
-              'Floor 2 is the Sunken Crypt. Archlich Vaelor casts necrotic soul frost that freezes anyone standing still.',
-              'Floor 3 is Cindervault Bastion—a searing inferno ruled by Ignis, Cinder Sovereign! Equip Cinder Heart and Runic Carapace relics if you find them.',
-              'Floor 4 is the Abyssal Shadow Chasm! Void-Eater Malice opens black holes that pull heroes into oblivion.',
-              'Floor 5 reaches the Aetherial Void Spire! The Archon of Nothingness unleashes devastating astral starlight novas.',
-              'Floor 6 enters the Hall of Forgotten Hymns, guarded by Elyndor, Keeper of the Last Hymn.',
-              'Floor 7 holds the Reliquary of the Departed where Zadkiel shields sacred ancestral relics.',
-              'Floor 8 leads to the Chapel of Severed Light, where Sariel guards the sealed scriptures.',
-              'Floor 9 ascends to the Celestial Nave before Seraphel, Sentinel of the Final Seal.',
-              'Floor 10 marks the Warden\'s Gate! Defeat Oriphiel, The Last Warden, to unseal the path deeper into the Sanctuary.',
-              'Need to blow off steam after a tough run? Practice your combo strikes on the dummies in the East wing!',
+              'F1 Highkeep: Warden Malakor guards with his shield.',
+              'F2 Crypt: Archlich Vaelor casts freezing frost.',
+              'F3 Cindervault: Ignis burns everything—pack resistance.',
+              'F4 Abyss: Malice spawns gravity black holes.',
+              'F5 Spire: The Archon unleashes starlight novas.',
+              'F6 Hymns: Elyndor weaves lethal sound lanes.',
+              'F7 Reliquary: Zadkiel guards with ashen curses.',
+              'F8 Chapel: Sariel silences unwary casters.',
+              'F9 Nave: Seraphel rains divine lances.',
+              'F10 Gate: Defeat Oriphiel to claim the Warden key.',
+              'Warm up on the training dummies to the East!',
             ];
           } else if (npc.id === 'npc_aleph') {
             lines = [
-              'The paths you walk are many, but your soul remains constant. Do you seek a different focus?',
-              'True strength comes not from the sword, but from knowing how to wield it.',
-              'The stars whispered of your coming. I offer you the chance to begin anew.',
+              'Your path shifts. Seek a new focus?',
+              'Know your build, and steel obeys.',
+              'Begin anew whenever you are ready.',
             ];
-            // Ensure options are restored if they were cleared by a dialogue pick
-            if (!npc.options || npc.options.length === 0) {
-              npc.options = [
-                { id: 'reset_stats', label: 'I wish to reset my attributes.' },
-                { id: 'lore', label: 'Who are you?' }
-              ];
-            }
+            options = [
+              { id: 'reset_stats', label: 'Reset Stats' },
+              { id: 'lore', label: 'Who are you?' },
+            ];
           } else {
             const combatTip =
               p.heroClass === 'vanguard'
-                ? 'Vanguard, your Shield Bash stuns elites for 1.7s! Use it to interrupt heavy boss attacks.'
+                ? 'Vanguard: Bulwark Dash stuns elites for 1.7s.'
                 : p.heroClass === 'ranger'
-                  ? 'Ranger, your Frost Volley pierces up to 5 foes at once. Keep kiting to control the room.'
+                  ? 'Ranger: Frost Volley slows packs by 50%.'
                   : p.heroClass === 'arcanist'
-                    ? 'Arcanist, your Astral Nova releases an 8-way starburst that clears enemies surrounding you.'
-                    : 'Cleric, your Dawnstar Smite heals nearby allies while damaging surrounding foes simultaneously.';
+                    ? 'Arcanist: Astral Nova clears surrounding swarms.'
+                    : 'Cleric: Sanctified Pulse heals allies and burns undead.';
 
             lines = [
-              `Halt, ${p.username}! Keep your guard high and your weapon polished. Indecision gets heroes killed.`,
+              `Stay sharp, ${p.username}. Hesitation kills.`,
               combatTip,
-              'When an enemy glows orange, they are winding up a heavy attack. Step out of the danger zone immediately!',
-              'Relic synergies are key! Combining Stormcaller Lodestone with Viper Crucible inflicts Shock and Poison at once.',
-              'Step into my training ring over there and test your DPS against my straw dummies anytime.',
+              'Orange glow = heavy windup. Dodge clear!',
+              'Pair Stormcaller Lodestone with Viper Crucible.',
+              'Test your DPS on my dummies anytime.',
             ];
           }
 
-          npc.speechIndex = ((npc.speechIndex ?? -1) + 1) % lines.length;
-          const spoken = lines[npc.speechIndex];
-          npc.dialogue = spoken;
-          // Aleph stays open indefinitely if he has options
-          npc.speakingMs = (npc.options && npc.options.length > 0) ? 9999999 : 5000;
+          const nextIdx = ((pr.npcSpeechIndices[npc.id] ?? -1) + 1) % lines.length;
+          pr.npcSpeechIndices[npc.id] = nextIdx;
+          const spoken = lines[nextIdx];
+          const persistent = Boolean(options && options.length > 0);
+          const ttlMs = persistent ? 600000 : 5200;
 
-          this.emitEvent('status', npc.x, npc.y - 28, `"${spoken}"`, '#FDE68A');
-          this.pushSystemChat(` ${npc.name}: "${spoken}"`);
+          p.npcDialogue = {
+            npcId: npc.id,
+            npcName: npc.name,
+            x: npc.x,
+            y: npc.y,
+            text: spoken,
+            ttlMs,
+            maxTtlMs: ttlMs,
+            persistent,
+            seq: ++pr.dialogueSeq,
+            ...(options ? { options } : {}),
+          };
+          return {};
         }
       }
 
@@ -3603,9 +3618,17 @@ export class GameRoom {
         if (prop.kind === 'warden_gate') {
           const dist = Math.hypot(prop.x - p.x, prop.y - p.y);
           if (dist <= 65) {
-            this.emitEvent('status', prop.x, prop.y - 45, '"You are not worthy!"', '#EF4444');
-            this.pushSystemChat(`Warden's Gate: "You are not worthy!"`);
-            // Trigger temporary floating dialogue via status event and system chat
+            p.npcDialogue = {
+              npcId: prop.id,
+              npcName: "Warden's Gate",
+              x: prop.x,
+              y: prop.y,
+              text: 'You are not worthy.',
+              ttlMs: 3600,
+              maxTtlMs: 3600,
+              persistent: false,
+              seq: ++pr.dialogueSeq,
+            };
             return {};
           }
         }
@@ -4180,6 +4203,21 @@ export class GameRoom {
     for (const npc of this.npcs) {
       if (npc.speakingMs && npc.speakingMs > 0) {
         npc.speakingMs = Math.max(0, npc.speakingMs - dtMs);
+      }
+    }
+
+    for (const pr of this.players.values()) {
+      const dlg = pr.state.npcDialogue;
+      if (!dlg) continue;
+      if (!pr.state.connected || Math.hypot(dlg.x - pr.state.x, dlg.y - pr.state.y) > 250) {
+        pr.state.npcDialogue = null;
+        continue;
+      }
+      if (!dlg.persistent) {
+        dlg.ttlMs = Math.max(0, dlg.ttlMs - dtMs);
+        if (dlg.ttlMs <= 0) {
+          pr.state.npcDialogue = null;
+        }
       }
     }
 
@@ -9674,15 +9712,18 @@ export class GameRoom {
     const r1 = (n: number): number => Math.round(n * 10) / 10;
     const r2 = (n: number): number => Math.round(n * 100) / 100;
 
-    const netPlayers: PlayerState[] = base.players.map((p) => ({
-      ...p,
-      x: r1(p.x),
-      y: r1(p.y),
-      vx: r1(p.vx),
-      vy: r1(p.vy),
-      aimAngle: r2(p.aimAngle),
-      reviveProgress: r2(p.reviveProgress),
-    }));
+    const netPlayers: PlayerState[] = base.players.map((p) => {
+      const { npcDialogue: _omitPrivateDialogue, ...rest } = p;
+      return {
+        ...rest,
+        x: r1(p.x),
+        y: r1(p.y),
+        vx: r1(p.vx),
+        vy: r1(p.vy),
+        aimAngle: r2(p.aimAngle),
+        reviveProgress: r2(p.reviveProgress),
+      };
+    });
 
     const netEnemies: EnemyState[] = base.enemies.map((e) => {
       const projected: EnemyState = {
@@ -9792,6 +9833,78 @@ export class GameRoom {
       props: netProps,
       zones: netZones,
       npcs: netNpcs,
+    };
+  }
+
+  public getPlayerNpcDialogue(playerId: string): PlayerNpcDialogueState | null {
+    return this.players.get(playerId)?.state.npcDialogue ?? null;
+  }
+
+  public handleDialogueClose(playerId: string): void {
+    const pr = this.players.get(playerId);
+    if (!pr) return;
+    pr.state.npcDialogue = null;
+  }
+
+  public handleDialoguePick(playerId: string, optionId: string): void {
+    const pr = this.players.get(playerId);
+    if (!pr) return;
+    const current = pr.state.npcDialogue;
+    if (!current || current.npcId !== 'npc_aleph') return;
+
+    if (optionId === 'lore') {
+      pr.state.npcDialogue = {
+        ...current,
+        text: 'I am Aleph, weaver of dormant spirits. Reclaim your points and forge a new path.',
+        ttlMs: 600000,
+        maxTtlMs: 600000,
+        persistent: true,
+        seq: ++pr.dialogueSeq,
+        options: [
+          { id: 'reset_stats', label: 'Reset Stats' },
+          { id: 'back', label: 'Back' },
+        ],
+      };
+    } else if (optionId === 'back') {
+      pr.state.npcDialogue = {
+        ...current,
+        text: 'Your path shifts. Seek a new focus?',
+        ttlMs: 600000,
+        maxTtlMs: 600000,
+        persistent: true,
+        seq: ++pr.dialogueSeq,
+        options: [
+          { id: 'reset_stats', label: 'Reset Stats' },
+          { id: 'lore', label: 'Who are you?' },
+        ],
+      };
+    } else if (optionId === 'goodbye') {
+      pr.state.npcDialogue = null;
+    }
+  }
+
+  public handleAlephResetDialogue(playerId: string, spent: number): void {
+    const pr = this.players.get(playerId);
+    if (!pr) return;
+    const aleph = this.npcs.find((n) => n.id === 'npc_aleph');
+    if (!aleph) return;
+    pr.state.npcDialogue = {
+      npcId: aleph.id,
+      npcName: aleph.name,
+      x: aleph.x,
+      y: aleph.y,
+      text:
+        spent > 0
+          ? `Reclaimed ${spent} Stat Pts. Forge your build anew.`
+          : 'No spent points to reclaim yet.',
+      ttlMs: 600000,
+      maxTtlMs: 600000,
+      persistent: true,
+      seq: ++pr.dialogueSeq,
+      options: [
+        { id: 'lore', label: 'Who are you?' },
+        { id: 'goodbye', label: 'Close' },
+      ],
     };
   }
 }
