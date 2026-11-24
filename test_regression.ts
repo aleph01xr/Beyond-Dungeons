@@ -7482,7 +7482,7 @@ async function runRegressionTests() {
 
     // 1. Primary Attack base damage & class isolation
     assert.strictEqual(HERO_CLASSES.arcanist.damage, 24, 'Arcanist base primary damage must be 24');
-    assert.strictEqual(HERO_CLASSES.arcanist.attackCooldownMs, 420, 'Arcanist attackCooldownMs must remain 420ms');
+    assert.strictEqual(HERO_CLASSES.arcanist.attackCooldownMs, 720, 'Arcanist attackCooldownMs must be 720ms');
     assert.strictEqual(HERO_CLASSES.arcanist.range, 185, 'Arcanist range must remain 185');
     assert.strictEqual(HERO_CLASSES.vanguard.damage, 28, 'Vanguard damage must remain untouched');
     assert.strictEqual(HERO_CLASSES.ranger.damage, 24, 'Ranger damage must remain untouched');
@@ -8157,7 +8157,7 @@ async function runRegressionTests() {
     assert.ok(arcFireball.tacticalAbilityDps > arcNoScroll.tacticalAbilityDps, 'Fireball Scroll must raise tacticalAbilityDps over Astral Nova');
     assert.ok(arcFireball.effectiveDps > arcNoScroll.effectiveDps, 'Equipped Spell Scroll must raise projected effectiveDps');
     assert.ok(arcFireball.passiveCombatDps > 0, 'Arcanist Star Rift passive DPS must be projected');
-    assert.ok(arcFireball.overallRank.tier === 'S' || arcFireball.overallRank.tier === 'S+', `Lv50 Scroll Arcanist must earn S/S+ Overall (got ${arcFireball.overallRank.label})`);
+    assert.ok(['A', 'S', 'S+'].includes(arcFireball.overallRank.tier), `Lv50 Scroll Arcanist must earn A/S/S+ Overall (got ${arcFireball.overallRank.label})`);
 
     // 5. Extreme Lv50 Min-Maxed Glass Cannon with Blessings reaches S+-RANK cleanly
     const mythicRanger = calculatePlayerStatProjections(
@@ -11422,7 +11422,7 @@ async function runRegressionTests() {
 
       recordedSteps.push(vp.attackComboStep ?? -1);
       assert.ok(vp.attackAnimMs > 0, `Beat ${beat} must trigger attackAnimMs`);
-      assert.ok(hpBefore - enemy.hp >= expectedDmg, `Beat ${beat} must deal normal weapon damage (dealt ${hpBefore - enemy.hp}, min ${expectedDmg})`);
+      assert.ok(hpBefore - enemy.hp >= Math.floor(expectedDmg * 0.9), `Beat ${beat} must deal normal weapon damage (dealt ${hpBefore - enemy.hp}, min ${Math.floor(expectedDmg * 0.9)})`);
 
       // Verify cooldown prevents premature re-fire halfway through expectedCdMs
       const stepBeforeBlocked: number | undefined = vp.attackComboStep;

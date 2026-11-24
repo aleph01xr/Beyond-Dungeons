@@ -421,20 +421,20 @@ export function calculatePlayerStatProjections(p: PlayerState, floor = 1): Playe
     rawTacticalAbilityDps = activeTacticalHitDamage / safeTacCdSec;
   } else if (heroClass === 'arcanist') {
     activeTacticalLabel = def.tacticalName;
-    activeTacticalHitDamage = Math.round(24 * tacticalDamageMult);
-    rawTacticalAbilityDps = (activeTacticalHitDamage * 2.5) / safeTacCdSec;
+    activeTacticalHitDamage = Math.round(36 * tacticalDamageMult);
+    rawTacticalAbilityDps = (activeTacticalHitDamage * 3.0) / safeTacCdSec;
   } else if (heroClass === 'vanguard') {
     activeTacticalLabel = def.tacticalName;
-    activeTacticalHitDamage = Math.round(32 * tacticalDamageMult);
-    rawTacticalAbilityDps = activeTacticalHitDamage / safeTacCdSec;
+    activeTacticalHitDamage = Math.round(45 * tacticalDamageMult);
+    rawTacticalAbilityDps = (activeTacticalHitDamage * 1.5) / safeTacCdSec;
   } else if (heroClass === 'ranger') {
     activeTacticalLabel = def.tacticalName;
     activeTacticalHitDamage = Math.round(18 * tacticalDamageMult);
     rawTacticalAbilityDps = (activeTacticalHitDamage * 2.5) / safeTacCdSec;
   } else {
     activeTacticalLabel = def.tacticalName;
-    activeTacticalHitDamage = Math.round(28 * tacticalDamageMult);
-    rawTacticalAbilityDps = activeTacticalHitDamage / safeTacCdSec;
+    activeTacticalHitDamage = Math.round(38 * tacticalDamageMult);
+    rawTacticalAbilityDps = (activeTacticalHitDamage * 1.8) / safeTacCdSec;
   }
 
   let rawPassiveCombatDps = 0;
@@ -522,7 +522,7 @@ export function calculatePlayerStatProjections(p: PlayerState, floor = 1): Playe
     (hasTwinPierceSynergy ? 5 : 0);
   let aoeOffenseMult = 1.0;
   if (heroClass === 'arcanist') {
-    aoeOffenseMult = activeScroll ? 1.16 : 1.08;
+    aoeOffenseMult = activeScroll ? 1.25 : 1.15;
   } else if (heroClass === 'vanguard') {
     aoeOffenseMult = 1.06;
   } else if (pierceCount >= 2 || extraProjectileCount > 0) {
@@ -531,7 +531,7 @@ export function calculatePlayerStatProjections(p: PlayerState, floor = 1): Playe
 
   const offenseScore = Math.min(
     115,
-    100 * Math.pow(Math.max(1, effectiveDps * aoeOffenseMult) / 780, 0.62) + offenseSynergyBonus
+    100 * Math.pow(Math.max(1, effectiveDps * aoeOffenseMult) / 740, 0.62) + offenseSynergyBonus
   );
 
   const defPower = effectiveHp + (hpRegenPerSec + selfShieldPerSec * 0.85) * 16;
