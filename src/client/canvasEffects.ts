@@ -3129,6 +3129,31 @@ export class ParticleManager {
         glow: biome !== 'reliquary',
         priority: 'low',
       });
+    } else if (biome === 'overworld') {
+      // Verdant Borderlands open world: warm sunlit pollen motes & gentle emerald leaf drift
+      const roll = Math.random();
+      const isLeaf = roll > 0.72;
+      const isPetal = !isLeaf && roll > 0.54;
+      this.acquireParticle({
+        x: rx,
+        y: ry,
+        vx: isLeaf || isPetal ? 16 + Math.random() * 14 : (Math.random() - 0.35) * 10,
+        vy: isLeaf || isPetal ? 8 + Math.random() * 9 : -8 - Math.random() * 9,
+        color: isLeaf ? '#34D399' : isPetal ? '#FDE047' : '#FEF08A',
+        secondaryColor: isLeaf ? '#A7F3D0' : '#FFFFFF',
+        size: isLeaf ? 2.2 : isPetal ? 1.8 : 1.5 + Math.random() * 0.9,
+        bornAt: now,
+        maxAgeMs: 1650 + Math.random() * 550,
+        fadeInRatio: 0.25,
+        turbulence: 20,
+        flutterAmplitude: isLeaf || isPetal ? 7 : 3,
+        flutterFrequency: 1.7,
+        alphaStart: isLeaf || isPetal ? 0.65 : 0.52,
+        alphaEnd: 0,
+        shape: isLeaf ? 'leaf' : isPetal ? 'petal' : 'dust',
+        glow: !isLeaf && !isPetal,
+        priority: 'low',
+      });
     } else {
       // 'courtyard' (Tavern / Floor 1 Sunken Courtyard): drifting green leaves, sunlit petals & dust motes
       const roll = Math.random();

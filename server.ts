@@ -24,7 +24,9 @@ import {
 import {
   cloneSnapshotBaseline,
   computeSnapshotDelta,
+  isSnapshotDeltaEmpty,
 } from './src/shared/snapshotDelta.ts';
+import { projectOpenWorldSnapshotForClient } from './src/server/openWorldNetwork.ts';
 import { SERVER_TICK_MS } from './src/client/networkStats.ts';
 import type {
   AccountRecord,
@@ -647,6 +649,7 @@ interface ConnectedClient extends ManagedWsClient {
   totalDroppedTicks: number;
   needsKeyframe?: boolean;
   lastSentDialogueKey?: string;
+  clientDelta?: RoomDeltaState;
 }
 
 interface RoomDeltaState {
@@ -675,7 +678,8 @@ function sendJson(ws: WebSocket, msg: ServerMessage, options?: SendFrameOptions)
 
 function getDialogueKey(dialogue: PlayerNpcDialogueState | null | undefined): string {
   if (!dialogue) return '';
-  return `${dialogue.npcId}:${dialogue.seq}:${dialogue.text}`;
+  const optsKey = dialogue.options?.map((o) => o.id).join(',') ?? '';
+  return `${dialogue.npcId}:${dialogue.seq}:${dialogue.text}:${optsKey}`;
 }
 
 function syncClientNpcDialogue(c: ConnectedClient, room: GameRoom): void {
@@ -691,14 +695,14 @@ function syncClientNpcDialogue(c: ConnectedClient, room: GameRoom): void {
 function broadcastRoomList(): void {
   const lobbyTargets: ConnectedClient[] = [];
   for (const c of clients) {
-    if (!c.roomId || c.roomId === 'TAVERN-HUB') {
+    if (!c.roomId || c.roomId === 'TAVERN-HUB' || c.roomId === 'OPEN-WORLD') {
       lobbyTargets.push(c);
     }
   }
   if (lobbyTargets.length === 0) return;
 
   const summaries = Array.from(rooms.values())
-    .filter((r) => r.roomId !== 'TAVERN-HUB')
+    .filter((r) => r.roomId !== 'TAVERN-HUB' && r.roomId !== 'OPEN-WORLD')
     .map((r) => r.getSummary());
   const payload: ServerMessage = {
     type: 'lobby:rooms',
@@ -721,7 +725,7 @@ function broadcastToRoom(roomId: string, msg: ServerMessage, options: SendFrameO
 }
 
 function attachRoomPersistenceCallbacks(room: GameRoom): void {
-  const isExpeditionRoom = room.roomId !== 'TAVERN-HUB';
+  const isExpeditionRoom = room.roomId !== 'TAVERN-HUB' && room.roomId !== 'OPEN-WORLD';
   room.onFloorClearedCallback = async (playerIds, floor) => {
     for (const pid of playerIds) {
       const acc = accountsById.get(pid);
@@ -1888,7 +1892,7 @@ async function startServer() {
         sendJson(ws, {
           type: 'lobby:rooms',
           rooms: Array.from(rooms.values())
-            .filter((r) => r.roomId !== 'TAVERN-HUB')
+            .filter((r) => r.roomId !== 'TAVERN-HUB' && r.roomId !== 'OPEN-WORLD')
             .map((r) => r.getSummary()),
           onlineCount: clients.size,
         });
@@ -1917,6 +1921,7 @@ async function startServer() {
 
       if (msg.type === 'room:join') {
         client.lastSentDialogueKey = '';
+        client.clientDelta = undefined;
         const res = partyCoordinator.joinOrReconnectRoom(client, toPartyAccount(acc), String(msg.roomId || ''));
         if (res.ok) {
           syncClientNpcDialogue(client, res.room);
@@ -1926,6 +1931,7 @@ async function startServer() {
 
       if (msg.type === 'room:leave') {
         client.lastSentDialogueKey = '';
+        client.clientDelta = undefined;
         partyCoordinator.leaveRoomExplicit(client);
         sendJson(ws, { type: 'room:left' });
         return;
@@ -2288,8 +2294,8 @@ async function startServer() {
           return;
         }
 
-        // Verify that the player is within interaction range of Aleph
-        if (!room.isPlayerNearNpc(acc.id, 'npc_aleph', 180)) {
+        // Verify that the player is within interaction/dialogue range of Aleph
+        if (!room.isPlayerNearNpc(acc.id, 'npc_aleph', 260)) {
           sendJson(ws, { type: 'error', message: 'You must be near Aleph to reset your attributes.' });
           return;
         }
@@ -2354,11 +2360,13 @@ async function startServer() {
     });
 
     ws.on('close', () => {
+      client.clientDelta = undefined;
       clients.delete(client);
       partyCoordinator.handleSocketDisconnect(client);
     });
 
     ws.on('error', () => {
+      client.clientDelta = undefined;
       clients.delete(client);
       partyCoordinator.handleSocketDisconnect(client);
     });
@@ -2366,16 +2374,18 @@ async function startServer() {
 
   const TICK_MS = SERVER_TICK_MS; // 40 Hz (25ms) drift-free authoritative simulation loop
   let nextTickAt = performance.now() + TICK_MS;
+  let serverTickCounter = 0;
   const keyframeTargets: ConnectedClient[] = [];
   const deltaTargets: ConnectedClient[] = [];
 
   const runServerTick = () => {
+    serverTickCounter++;
     const tickStart = performance.now();
     let anyStatusChanged = false;
 
     for (const [roomId, room] of rooms.entries()) {
       if (room.getPlayerCount() === 0) {
-        if (roomId !== 'TAVERN-HUB') {
+        if (roomId !== 'TAVERN-HUB' && roomId !== 'OPEN-WORLD') {
           partyCoordinator.clearRoomTimers(roomId);
           rooms.delete(roomId);
           roomDeltaStates.delete(roomId);
@@ -2409,72 +2419,136 @@ async function startServer() {
 
       if (shouldBroadcast && roomClientsIter) {
         const snapshot = room.buildNetworkSnapshot();
-        let deltaState = roomDeltaStates.get(roomId);
-        if (!deltaState) {
-          deltaState = { seq: 0, lastBaseline: null };
-          roomDeltaStates.set(roomId, deltaState);
-        }
-        const nextSeq = deltaState.seq + 1;
-
-        keyframeTargets.length = 0;
-        deltaTargets.length = 0;
-
-        if (!deltaState.lastBaseline) {
-          for (const c of roomClientsIter) keyframeTargets.push(c);
-        } else {
-          for (const c of roomClientsIter) {
-            if (c.needsKeyframe) keyframeTargets.push(c);
-            else deltaTargets.push(c);
-          }
-        }
-
-        if (keyframeTargets.length > 0) {
-          const rawKeyframe = JSON.stringify({
-            type: 'room:tick',
-            snapshot,
-            seq: nextSeq,
-          } satisfies ServerMessage);
-          for (let i = 0; i < keyframeTargets.length; i++) {
-            const c = keyframeTargets[i];
-            const outcome = sendRawFrame(c, rawKeyframe, { droppable: true });
-            if (outcome === 'sent') {
-              c.needsKeyframe = false;
-            } else if (outcome === 'closed_overflow') {
-              roomClientIndex.removeFromRoom(c, roomId);
-              clients.delete(c);
+        if (room.roomMode === 'open_world') {
+          for (const c of Array.from(roomClientsIter)) {
+            const prevState = c.clientDelta;
+            const projected = projectOpenWorldSnapshotForClient(
+              snapshot,
+              c.userId,
+              serverTickCounter,
+              prevState?.lastBaseline
+            );
+            if (c.needsKeyframe || !prevState || !prevState.lastBaseline) {
+              const nextSeq = (prevState?.seq ?? 0) + 1;
+              const rawKeyframe = JSON.stringify({
+                type: 'room:tick',
+                snapshot: projected,
+                seq: nextSeq,
+              } satisfies ServerMessage);
+              const outcome = sendRawFrame(c, rawKeyframe, { droppable: true });
+              if (outcome === 'sent') {
+                c.needsKeyframe = false;
+                c.clientDelta = {
+                  seq: nextSeq,
+                  lastBaseline: cloneSnapshotBaseline(projected),
+                };
+              } else if (outcome === 'closed_overflow') {
+                c.clientDelta = undefined;
+                roomClientIndex.removeFromRoom(c, roomId);
+                clients.delete(c);
+              }
+            } else {
+              const nextSeq = prevState.seq + 1;
+              const delta = computeSnapshotDelta(
+                prevState.lastBaseline,
+                projected,
+                prevState.seq,
+                nextSeq
+              );
+              if (!isSnapshotDeltaEmpty(delta)) {
+                const rawDelta = JSON.stringify({
+                  type: 'room:delta',
+                  delta,
+                } satisfies ServerMessage);
+                const outcome = sendRawFrame(c, rawDelta, { droppable: true });
+                if (outcome === 'sent') {
+                  prevState.seq = nextSeq;
+                  prevState.lastBaseline = cloneSnapshotBaseline(projected);
+                } else if (outcome === 'closed_overflow') {
+                  c.clientDelta = undefined;
+                  roomClientIndex.removeFromRoom(c, roomId);
+                  clients.delete(c);
+                }
+              }
             }
           }
-        }
+          dirtyNonPlayingRooms.delete(roomId);
+        } else {
+          let deltaState = roomDeltaStates.get(roomId);
+          if (!deltaState) {
+            deltaState = { seq: 0, lastBaseline: null };
+            roomDeltaStates.set(roomId, deltaState);
+          }
+          const nextSeq = deltaState.seq + 1;
 
-        if (deltaTargets.length > 0 && deltaState.lastBaseline) {
-          const delta = computeSnapshotDelta(
-            deltaState.lastBaseline,
-            snapshot,
-            deltaState.seq,
-            nextSeq
-          );
-          const stats = broadcastSerialized(
-            deltaTargets,
-            { type: 'room:delta', delta },
-            { droppable: true }
-          );
-          if (stats.closedCount > 0) {
-            for (let i = 0; i < deltaTargets.length; i++) {
-              const c = deltaTargets[i];
-              if (c.ws.readyState !== WebSocket.OPEN) {
+          keyframeTargets.length = 0;
+          deltaTargets.length = 0;
+
+          if (!deltaState.lastBaseline) {
+            for (const c of roomClientsIter) keyframeTargets.push(c);
+          } else {
+            for (const c of roomClientsIter) {
+              if (c.needsKeyframe) keyframeTargets.push(c);
+              else deltaTargets.push(c);
+            }
+          }
+
+          let sentAnyFrame = false;
+
+          if (keyframeTargets.length > 0) {
+            sentAnyFrame = true;
+            const rawKeyframe = JSON.stringify({
+              type: 'room:tick',
+              snapshot,
+              seq: nextSeq,
+            } satisfies ServerMessage);
+            for (let i = 0; i < keyframeTargets.length; i++) {
+              const c = keyframeTargets[i];
+              const outcome = sendRawFrame(c, rawKeyframe, { droppable: true });
+              if (outcome === 'sent') {
+                c.needsKeyframe = false;
+              } else if (outcome === 'closed_overflow') {
                 roomClientIndex.removeFromRoom(c, roomId);
                 clients.delete(c);
               }
             }
           }
-        }
 
-        deltaState.seq = nextSeq;
-        deltaState.lastBaseline = cloneSnapshotBaseline(snapshot);
-        dirtyNonPlayingRooms.delete(roomId);
+          if (deltaTargets.length > 0 && deltaState.lastBaseline) {
+            const delta = computeSnapshotDelta(
+              deltaState.lastBaseline,
+              snapshot,
+              deltaState.seq,
+              nextSeq
+            );
+            if (!isSnapshotDeltaEmpty(delta) || sentAnyFrame) {
+              sentAnyFrame = true;
+              const stats = broadcastSerialized(
+                deltaTargets,
+                { type: 'room:delta', delta },
+                { droppable: true }
+              );
+              if (stats.closedCount > 0) {
+                for (let i = 0; i < deltaTargets.length; i++) {
+                  const c = deltaTargets[i];
+                  if (c.ws.readyState !== WebSocket.OPEN) {
+                    roomClientIndex.removeFromRoom(c, roomId);
+                    clients.delete(c);
+                  }
+                }
+              }
+            }
+          }
 
-        for (const c of roomClientsIter) {
-          syncClientNpcDialogue(c, room);
+          if (sentAnyFrame) {
+            deltaState.seq = nextSeq;
+            deltaState.lastBaseline = cloneSnapshotBaseline(snapshot);
+          }
+          dirtyNonPlayingRooms.delete(roomId);
+
+          for (const c of roomClientsIter) {
+            syncClientNpcDialogue(c, room);
+          }
         }
       }
 

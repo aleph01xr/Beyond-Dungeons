@@ -115,6 +115,15 @@ export function resolveFootstepSurface(
     return 'wood'; // Polished oak planks
   }
 
+  const biome = map.biome as BiomeId;
+
+  // Open World Overworld: meadow grass, packed dirt roads, sand clearings, cobblestone bridges
+  if (biome === 'overworld') {
+    if (code === 5) return 'stone';
+    if (code === 4 || code === 6) return 'dirt';
+    return 'grass';
+  }
+
   // Grand descent portal dais always features runic metalwork
   if (map.portalPos) {
     const portalDist = Math.hypot(worldX - map.portalPos.x, worldY - map.portalPos.y);
@@ -133,8 +142,6 @@ export function resolveFootstepSurface(
   if (room?.type === 'shrine' && hash % 4 === 0) {
     return 'metal';
   }
-
-  const biome = map.biome as BiomeId;
 
   if (code === 5) {
     if (biome === 'ember' || biome === 'reliquary' || biome === 'wardengate') {
@@ -2518,6 +2525,7 @@ class RetroAudioEngine {
       scripture: { type: 'bandpass', freq: 620, q: 1.1 },
       nave: { type: 'bandpass', freq: 780, q: 0.9 },
       wardengate: { type: 'lowpass', freq: 390, q: 1.1 },
+      overworld: { type: 'bandpass', freq: 480, q: 0.65 },
     };
     const fSpec = filterMap[resolvedBiome] || filterMap.courtyard;
     filter.type = fSpec.type;
@@ -2553,6 +2561,7 @@ class RetroAudioEngine {
       scripture: [146.83, 220.0, 311.13],
       nave: [261.63, 392.0, 587.33],
       wardengate: [82.41, 123.47, 164.81],
+      overworld: [146.83, 220.0, 293.66],
     };
     const chord = padFreqs[resolvedBiome] || [146.83, 220.0];
     chord.forEach((freq, idx) => {

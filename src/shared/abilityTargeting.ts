@@ -390,6 +390,7 @@ export function findBestAutoTarget(opts: {
   map?: DungeonMap;
   props?: readonly PropState[];
   enemies: readonly AutoTargetCandidate[];
+  pvpPlayers?: readonly AutoTargetCandidate[];
   trainingDummies?: readonly AutoTargetCandidate[];
 }): { target: AutoTargetCandidate; angle: number; distance: number } | null {
   const hasPref =
@@ -453,6 +454,10 @@ export function findBestAutoTarget(opts: {
 
   const enemyMatch = pickFrom(opts.enemies);
   if (enemyMatch) return enemyMatch;
+  if (opts.pvpPlayers && opts.pvpPlayers.length > 0) {
+    const pvpMatch = pickFrom(opts.pvpPlayers);
+    if (pvpMatch) return pvpMatch;
+  }
   if (opts.trainingDummies && opts.trainingDummies.length > 0) {
     return pickFrom(opts.trainingDummies);
   }
@@ -460,7 +465,7 @@ export function findBestAutoTarget(opts: {
 }
 
 /**
- * Smart skill targeting: when an enemy (or dummy fallback) is within or near
+ * Smart skill targeting: when an enemy, rival PvP player, or dummy fallback is within or near
  * an ability's effective range and unobstructed by walls, immediately target them.
  */
 export function resolveSkillSmartTarget(opts: {
@@ -476,6 +481,7 @@ export function resolveSkillSmartTarget(opts: {
   map?: DungeonMap;
   props?: readonly PropState[];
   enemies: readonly AutoTargetCandidate[];
+  pvpPlayers?: readonly AutoTargetCandidate[];
   trainingDummies?: readonly AutoTargetCandidate[];
 }): {
   target: AutoTargetCandidate | null;
@@ -519,7 +525,7 @@ export function resolveSkillSmartTarget(opts: {
     const cursorDist = Math.hypot(cx - playerX, cy - playerY);
     const cursorAngle = cursorDist > 1 ? Math.atan2(cy - playerY, cx - playerX) : fallbackAngle;
 
-    // 1. Check enemies near cursor world position first (for ground_aoe or cursor hover)
+    // 1. Check enemies or PvP players near cursor world position first (for ground_aoe or cursor hover)
     let closestNearCursor: AutoTargetCandidate | null = null;
     let closestCursorDist = Math.max(96, spec.aoeRadius * 0.9);
     const scanList = (list: readonly AutoTargetCandidate[]) => {
@@ -542,6 +548,9 @@ export function resolveSkillSmartTarget(opts: {
       }
     };
     scanList(opts.enemies);
+    if (!closestNearCursor && opts.pvpPlayers) {
+      scanList(opts.pvpPlayers);
+    }
     if (!closestNearCursor && opts.trainingDummies) {
       scanList(opts.trainingDummies);
     }
@@ -560,6 +569,7 @@ export function resolveSkillSmartTarget(opts: {
         map: opts.map,
         props: opts.props,
         enemies: opts.enemies,
+        pvpPlayers: opts.pvpPlayers,
         trainingDummies: opts.trainingDummies,
       });
     }
@@ -575,6 +585,7 @@ export function resolveSkillSmartTarget(opts: {
       map: opts.map,
       props: opts.props,
       enemies: opts.enemies,
+      pvpPlayers: opts.pvpPlayers,
       trainingDummies: opts.trainingDummies,
     });
   }

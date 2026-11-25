@@ -167,6 +167,14 @@ export function drawAbilityTargetingIndicator(
           drawTargetBracket(ctx, en.x, en.y, en.radius, secondary, now);
         }
       }
+      if (snap.pvpEnabled) {
+        for (const rival of snap.players) {
+          if (rival.id === player.id || !rival.connected || rival.downed || (rival.spawnProtectionMs || 0) > 0) continue;
+          if (Math.hypot(rival.x - end.x, rival.y - end.y) <= spec.aoeRadius + 12) {
+            drawTargetBracket(ctx, rival.x, rival.y, 14, '#F43F5E', now);
+          }
+        }
+      }
     }
 
     // Landing destination marker
@@ -282,6 +290,23 @@ export function drawAbilityTargetingIndicator(
         }
       }
     }
+    if (snap.pvpEnabled) {
+      for (const rival of snap.players) {
+        if (rival.id === player.id || !rival.connected || rival.downed || (rival.spawnProtectionMs || 0) > 0) continue;
+        const dx = rival.x - playerX;
+        const dy = rival.y - playerY;
+        const d = Math.hypot(dx, dy);
+        if (d <= spec.range + 14) {
+          const diff = Math.atan2(
+            Math.sin(Math.atan2(dy, dx) - aim.aimAngle),
+            Math.cos(Math.atan2(dy, dx) - aim.aimAngle)
+          );
+          if (Math.abs(diff) <= halfSpread) {
+            drawTargetBracket(ctx, rival.x, rival.y, 14, '#F43F5E', now);
+          }
+        }
+      }
+    }
   } else if (spec.kind === 'cone') {
     const halfSpread = spec.coneHalfAngleRad ?? 0.56;
     const minAng = aim.aimAngle - halfSpread;
@@ -366,6 +391,23 @@ export function drawAbilityTargetingIndicator(
         }
       }
     }
+    if (snap.pvpEnabled) {
+      for (const rival of snap.players) {
+        if (rival.id === player.id || !rival.connected || rival.downed || (rival.spawnProtectionMs || 0) > 0) continue;
+        const dx = rival.x - playerX;
+        const dy = rival.y - playerY;
+        const d = Math.hypot(dx, dy);
+        if (d <= spec.range + 10) {
+          const diff = Math.atan2(
+            Math.sin(Math.atan2(dy, dx) - aim.aimAngle),
+            Math.cos(Math.atan2(dy, dx) - aim.aimAngle)
+          );
+          if (Math.abs(diff) <= halfSpread) {
+            drawTargetBracket(ctx, rival.x, rival.y, 14, '#F43F5E', now);
+          }
+        }
+      }
+    }
   } else if (spec.kind === 'ground_aoe') {
     const target = computeGroundTargetPosition(
       playerX,
@@ -436,6 +478,7 @@ export function drawAbilityTargetingIndicator(
         : null;
     if (player.heroClass === 'cleric' && activeTac?.id !== 'seraphic_judgment') {
       for (const ally of snap.players) {
+        if (snap.pvpEnabled && ally.id !== player.id) continue;
         if (Math.hypot(ally.x - target.x, ally.y - target.y) <= spec.aoeRadius) {
           drawTargetBracket(
             ctx,
@@ -452,6 +495,14 @@ export function drawAbilityTargetingIndicator(
       if (en.hp <= 0) continue;
       if (Math.hypot(en.x - target.x, en.y - target.y) <= spec.aoeRadius) {
         drawTargetBracket(ctx, en.x, en.y, en.radius, secondary, now);
+      }
+    }
+    if (snap.pvpEnabled && (player.heroClass !== 'cleric' || activeTac?.id === 'seraphic_judgment' || aim.action === 'ult')) {
+      for (const rival of snap.players) {
+        if (rival.id === player.id || !rival.connected || rival.downed || (rival.spawnProtectionMs || 0) > 0) continue;
+        if (Math.hypot(rival.x - target.x, rival.y - target.y) <= spec.aoeRadius + 12) {
+          drawTargetBracket(ctx, rival.x, rival.y, 14, '#F43F5E', now);
+        }
       }
     }
   } else if (spec.kind === 'self_aoe') {
@@ -539,14 +590,24 @@ export function drawAbilityTargetingIndicator(
           drawTargetBracket(ctx, en.x, en.y, en.radius, primary, now);
         }
       }
+      if (snap.pvpEnabled) {
+        for (const rival of snap.players) {
+          if (rival.id === player.id || !rival.connected || rival.downed || (rival.spawnProtectionMs || 0) > 0) continue;
+          if (Math.hypot(rival.x - playerX, rival.y - playerY) <= spec.aoeRadius + 12) {
+            drawTargetBracket(ctx, rival.x, rival.y, 14, '#F43F5E', now);
+          }
+        }
+      }
     } else if (player.heroClass === 'vanguard') {
       for (const ally of snap.players) {
+        if (snap.pvpEnabled && ally.id !== player.id) continue;
         if (!ally.downed && Math.hypot(ally.x - playerX, ally.y - playerY) <= spec.aoeRadius) {
           drawTargetBracket(ctx, ally.x, ally.y, 14, secondary, now);
         }
       }
     } else if (player.heroClass === 'cleric') {
       for (const ally of snap.players) {
+        if (snap.pvpEnabled && ally.id !== player.id) continue;
         if (!ally.downed && Math.hypot(ally.x - playerX, ally.y - playerY) <= spec.aoeRadius) {
           drawTargetBracket(ctx, ally.x, ally.y, 14, primary, now);
         }
@@ -558,11 +619,27 @@ export function drawAbilityTargetingIndicator(
           drawTargetBracket(ctx, en.x, en.y, en.radius, secondary, now);
         }
       }
+      if (snap.pvpEnabled) {
+        for (const rival of snap.players) {
+          if (rival.id === player.id || !rival.connected || rival.downed || (rival.spawnProtectionMs || 0) > 0) continue;
+          if (Math.hypot(rival.x - playerX, rival.y - playerY) <= searR + 12) {
+            drawTargetBracket(ctx, rival.x, rival.y, 14, '#F43F5E', now);
+          }
+        }
+      }
     } else {
       for (const en of snap.enemies) {
         if (en.hp <= 0) continue;
         if (Math.hypot(en.x - playerX, en.y - playerY) <= spec.aoeRadius) {
           drawTargetBracket(ctx, en.x, en.y, en.radius, secondary, now);
+        }
+      }
+      if (snap.pvpEnabled) {
+        for (const rival of snap.players) {
+          if (rival.id === player.id || !rival.connected || rival.downed || (rival.spawnProtectionMs || 0) > 0) continue;
+          if (Math.hypot(rival.x - playerX, rival.y - playerY) <= spec.aoeRadius + 12) {
+            drawTargetBracket(ctx, rival.x, rival.y, 14, '#F43F5E', now);
+          }
         }
       }
     }
@@ -630,6 +707,20 @@ export function drawAbilityTargetingIndicator(
           }
         }
       }
+      if (snap.pvpEnabled) {
+        for (const rival of snap.players) {
+          if (rival.id === player.id || !rival.connected || rival.downed || (rival.spawnProtectionMs || 0) > 0) continue;
+          if (distancePointToSegment(rival.x, rival.y, playerX, playerY, endX, endY) <= halfW + 14) {
+            const d = Math.hypot(rival.x - playerX, rival.y - playerY);
+            if (d < closestHitDist) {
+              closestHitDist = d;
+              const carryDist = isCyclone ? Math.min(lineLen, d + 96) : d;
+              blastX = playerX + Math.cos(aim.aimAngle) * carryDist;
+              blastY = playerY + Math.sin(aim.aimAngle) * carryDist;
+            }
+          }
+        }
+      }
       ctx.fillStyle = hexToRgba(primary, 0.14 * pulse);
       ctx.beginPath();
       ctx.arc(blastX, blastY, spec.aoeRadius, 0, Math.PI * 2);
@@ -661,6 +752,14 @@ export function drawAbilityTargetingIndicator(
       if (en.hp <= 0) continue;
       if (distancePointToSegment(en.x, en.y, playerX, playerY, endX, endY) <= halfW + en.radius) {
         drawTargetBracket(ctx, en.x, en.y, en.radius, secondary, now);
+      }
+    }
+    if (snap.pvpEnabled) {
+      for (const rival of snap.players) {
+        if (rival.id === player.id || !rival.connected || rival.downed || (rival.spawnProtectionMs || 0) > 0) continue;
+        if (distancePointToSegment(rival.x, rival.y, playerX, playerY, endX, endY) <= halfW + 14) {
+          drawTargetBracket(ctx, rival.x, rival.y, 14, '#F43F5E', now);
+        }
       }
     }
   }

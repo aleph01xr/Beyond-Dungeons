@@ -18,6 +18,7 @@ interface GameMenuModalProps {
   floor?: number;
   mapBiome: string;
   isTavern: boolean;
+  isOpenWorld?: boolean;
   onClose: () => void;
   onOpenInventory: () => void;
   onOpenAttributes: () => void;
@@ -36,6 +37,7 @@ export const GameMenuModal: React.FC<GameMenuModalProps> = ({
   floor = 1,
   mapBiome,
   isTavern,
+  isOpenWorld = false,
   onClose,
   onOpenInventory,
   onOpenAttributes,
@@ -74,7 +76,7 @@ export const GameMenuModal: React.FC<GameMenuModalProps> = ({
                 Sanctuary Master Menu
               </h2>
               <p className="text-[10px] sm:text-xs text-[#A19FAF] font-mono mt-0.5 truncate">
-                Expedition Hub · {player.username} ({heroDef.name})
+                {isOpenWorld ? 'Open World PvP' : isTavern ? 'Tavern Hub' : 'Dungeon Expedition'} · {player.username} ({heroDef.name})
               </p>
             </div>
           </div>
@@ -241,7 +243,7 @@ export const GameMenuModal: React.FC<GameMenuModalProps> = ({
                     }}
                     className="stone-button stone-button-red py-3"
                   >
-                    {isTavern ? 'Exit to Lobby' : 'Leave Party & Return to Lobby'}
+                    {isTavern ? 'Exit to Lobby' : isOpenWorld ? 'Leave Open World' : 'Leave Party & Return to Lobby'}
                   </button>
 
                   {isAdmin && onOpenAdminPanel && (

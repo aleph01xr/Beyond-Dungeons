@@ -32,6 +32,8 @@ export type SnapshotScalarFields = Partial<
     | 'combatRoomsTotal'
     | 'floorMasteryAwarded'
     | 'portalReadyCount'
+    | 'roomMode'
+    | 'pvpEnabled'
   >
 >;
 
@@ -51,6 +53,12 @@ export interface SnapshotDelta {
   enemiesAdded?: EnemyState[];
   enemiesUpdated?: EntityPatch<EnemyState>[];
   enemiesRemoved?: string[];
+  projectilesAdded?: GameSnapshot['projectiles'];
+  projectilesUpdated?: EntityPatch<GameSnapshot['projectiles'][number]>[];
+  projectilesRemoved?: string[];
+  zonesAdded?: FieldZoneState[];
+  zonesUpdated?: EntityPatch<FieldZoneState>[];
+  zonesRemoved?: string[];
   projectiles?: GameSnapshot['projectiles'];
   zones?: FieldZoneState[];
   props?: PropState[];
@@ -275,6 +283,8 @@ const SCALAR_KEYS = [
   'combatRoomsTotal',
   'floorMasteryAwarded',
   'portalReadyCount',
+  'roomMode',
+  'pvpEnabled',
 ] as const;
 
 /**
@@ -390,13 +400,15 @@ export function computeSnapshotDelta(
   if (enemyDiff.updated) delta.enemiesUpdated = enemyDiff.updated;
   if (enemyDiff.removed) delta.enemiesRemoved = enemyDiff.removed;
 
-  if (!shallowEqualValues(prev.projectiles, next.projectiles)) {
-    delta.projectiles = next.projectiles;
-  }
+  const projDiff = diffEntityArray(prev.projectiles, next.projectiles);
+  if (projDiff.added) delta.projectilesAdded = projDiff.added;
+  if (projDiff.updated) delta.projectilesUpdated = projDiff.updated;
+  if (projDiff.removed) delta.projectilesRemoved = projDiff.removed;
 
-  if (!shallowEqualValues(prev.zones, next.zones)) {
-    delta.zones = next.zones;
-  }
+  const zoneDiff = diffEntityArray(prev.zones, next.zones);
+  if (zoneDiff.added) delta.zonesAdded = zoneDiff.added;
+  if (zoneDiff.updated) delta.zonesUpdated = zoneDiff.updated;
+  if (zoneDiff.removed) delta.zonesRemoved = zoneDiff.removed;
 
   if (!shallowEqualValues(prev.props, next.props)) {
     delta.props = next.props;
@@ -427,6 +439,32 @@ export function computeSnapshotDelta(
   return delta;
 }
 
+export function isSnapshotDeltaEmpty(delta: SnapshotDelta): boolean {
+  return (
+    delta.scalars === undefined &&
+    delta.playersAdded === undefined &&
+    delta.playersUpdated === undefined &&
+    delta.playersRemoved === undefined &&
+    delta.enemiesAdded === undefined &&
+    delta.enemiesUpdated === undefined &&
+    delta.enemiesRemoved === undefined &&
+    delta.projectilesAdded === undefined &&
+    delta.projectilesUpdated === undefined &&
+    delta.projectilesRemoved === undefined &&
+    delta.zonesAdded === undefined &&
+    delta.zonesUpdated === undefined &&
+    delta.zonesRemoved === undefined &&
+    delta.projectiles === undefined &&
+    delta.zones === undefined &&
+    delta.props === undefined &&
+    delta.npcs === undefined &&
+    delta.trainingDummies === undefined &&
+    delta.roomClearedFlags === undefined &&
+    delta.events === undefined &&
+    delta.lastRunSummary === undefined
+  );
+}
+
 export function applySnapshotDelta(prev: GameSnapshot, delta: SnapshotDelta): GameSnapshot {
   const players = applyEntityDiff(
     prev.players,
@@ -440,14 +478,32 @@ export function applySnapshotDelta(prev: GameSnapshot, delta: SnapshotDelta): Ga
     delta.enemiesUpdated,
     delta.enemiesRemoved
   );
+  const projectiles =
+    delta.projectiles !== undefined
+      ? delta.projectiles
+      : applyEntityDiff(
+          prev.projectiles,
+          delta.projectilesAdded,
+          delta.projectilesUpdated,
+          delta.projectilesRemoved
+        );
+  const zones =
+    delta.zones !== undefined
+      ? delta.zones
+      : applyEntityDiff(
+          prev.zones,
+          delta.zonesAdded,
+          delta.zonesUpdated,
+          delta.zonesRemoved
+        );
 
   const next: GameSnapshot = {
     ...prev,
     ...(delta.scalars ?? {}),
     players,
     enemies,
-    projectiles: delta.projectiles !== undefined ? delta.projectiles : prev.projectiles,
-    zones: delta.zones !== undefined ? delta.zones : prev.zones,
+    projectiles,
+    zones,
     props: delta.props !== undefined ? delta.props : prev.props,
     npcs: delta.npcs !== undefined ? delta.npcs : prev.npcs,
     trainingDummies:

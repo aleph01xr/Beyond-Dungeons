@@ -158,6 +158,24 @@ export class PartyCoordinator<TClient extends ManagedPartyClient> {
     return tavern;
   }
 
+  public ensureOpenWorldRoom(): GameRoom {
+    let openWorld = this.rooms.get('OPEN-WORLD');
+    if (!openWorld) {
+      openWorld = new GameRoom({
+        roomId: 'OPEN-WORLD',
+        name: 'Verdant Borderlands (Open World)',
+        hostName: 'Frontier',
+        difficulty: 'Normal',
+        seed: 777,
+        initialFloor: 1,
+        initialStatus: 'playing',
+      });
+      this.wireRoomCallbacks(openWorld);
+      this.rooms.set('OPEN-WORLD', openWorld);
+    }
+    return openWorld;
+  }
+
   public createParty(
     client: TClient,
     account: PartyAccountInput,
@@ -199,7 +217,7 @@ export class PartyCoordinator<TClient extends ManagedPartyClient> {
       roomId: room.roomId,
       playerId: account.id,
       map: room.map,
-      snapshot: room.buildSnapshot(),
+      snapshot: room.buildNetworkSnapshot(),
       chat: room.chat,
     });
     this.broadcastRoomList();
@@ -217,7 +235,9 @@ export class PartyCoordinator<TClient extends ManagedPartyClient> {
     const room =
       normalizedCode === 'TAVERN-HUB'
         ? this.ensureTavernRoom()
-        : this.rooms.get(normalizedCode);
+        : normalizedCode === 'OPEN-WORLD'
+          ? this.ensureOpenWorldRoom()
+          : this.rooms.get(normalizedCode);
 
     if (!room) {
       const reason = `Room "${normalizedCode}" was not found or has closed.`;
@@ -264,7 +284,7 @@ export class PartyCoordinator<TClient extends ManagedPartyClient> {
       roomId: room.roomId,
       playerId: account.id,
       map: room.map,
-      snapshot: room.buildSnapshot(),
+      snapshot: room.buildNetworkSnapshot(),
       chat: room.chat,
     });
     this.broadcastRoomList();
@@ -279,7 +299,7 @@ export class PartyCoordinator<TClient extends ManagedPartyClient> {
       return { ok: false, reason: 'You are not in a party room.' };
     }
     const room = this.rooms.get(client.roomId);
-    if (!room || room.roomId === 'TAVERN-HUB') {
+    if (!room || room.roomId === 'TAVERN-HUB' || room.roomId === 'OPEN-WORLD') {
       return { ok: false, reason: 'Invalid party room.' };
     }
     if (!room.isHost(client.userId)) {
@@ -324,7 +344,7 @@ export class PartyCoordinator<TClient extends ManagedPartyClient> {
       return { ok: false, reason: 'You are not in a party room.' };
     }
     const room = this.rooms.get(client.roomId);
-    if (!room || room.roomId === 'TAVERN-HUB') {
+    if (!room || room.roomId === 'TAVERN-HUB' || room.roomId === 'OPEN-WORLD') {
       const reason = 'Ready status is only used in expedition party lobbies.';
       this.sendJson(client.ws, { type: 'error', message: reason });
       return { ok: false, reason };
@@ -348,12 +368,12 @@ export class PartyCoordinator<TClient extends ManagedPartyClient> {
     if (!room) {
       return { ok: false, reason: 'Room not found.' };
     }
-    if (room.roomId !== 'TAVERN-HUB' && !room.isHost(client.userId)) {
+    if (room.roomId !== 'TAVERN-HUB' && room.roomId !== 'OPEN-WORLD' && !room.isHost(client.userId)) {
       const reason = 'Only the party host can restart the expedition.';
       this.sendJson(client.ws, { type: 'error', message: reason });
       return { ok: false, reason };
     }
-    if (room.roomId !== 'TAVERN-HUB' && room.status === 'waiting') {
+    if (room.roomId !== 'TAVERN-HUB' && room.roomId !== 'OPEN-WORLD' && room.status === 'waiting') {
       const reason = 'Start the expedition from the waiting lobby first.';
       this.sendJson(client.ws, { type: 'error', message: reason });
       return { ok: false, reason };
@@ -378,7 +398,7 @@ export class PartyCoordinator<TClient extends ManagedPartyClient> {
       return { ok: false, reason: 'You are not in a party room.' };
     }
     const room = this.rooms.get(client.roomId);
-    if (!room || room.roomId === 'TAVERN-HUB') {
+    if (!room || room.roomId === 'TAVERN-HUB' || room.roomId === 'OPEN-WORLD') {
       return { ok: false, reason: 'Invalid party room.' };
     }
     if (!room.isHost(client.userId)) {
@@ -424,7 +444,7 @@ export class PartyCoordinator<TClient extends ManagedPartyClient> {
 
       if (!stillConnected) {
         room.removePlayer(client.userId);
-        if (room.getPlayerCount() === 0 && oldRoomId !== 'TAVERN-HUB') {
+        if (room.getPlayerCount() === 0 && oldRoomId !== 'TAVERN-HUB' && oldRoomId !== 'OPEN-WORLD') {
           this.clearRoomTimers(oldRoomId);
           this.rooms.delete(oldRoomId);
           this.roomDeltaStates.delete(oldRoomId);
@@ -459,10 +479,10 @@ export class PartyCoordinator<TClient extends ManagedPartyClient> {
       return;
     }
 
-    // Tavern or waiting lobby: remove immediately and transfer host if needed
-    if (oldRoomId === 'TAVERN-HUB' || room.status === 'waiting') {
+    // Tavern, Open World, or waiting lobby: remove immediately and transfer host if needed
+    if (oldRoomId === 'TAVERN-HUB' || oldRoomId === 'OPEN-WORLD' || room.status === 'waiting') {
       room.removePlayer(client.userId);
-      if (room.getPlayerCount() === 0 && oldRoomId !== 'TAVERN-HUB') {
+      if (room.getPlayerCount() === 0 && oldRoomId !== 'TAVERN-HUB' && oldRoomId !== 'OPEN-WORLD') {
         this.clearRoomTimers(oldRoomId);
         this.rooms.delete(oldRoomId);
         this.roomDeltaStates.delete(oldRoomId);

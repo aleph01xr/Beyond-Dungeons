@@ -346,6 +346,19 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
     const isQuickHudTap = Boolean(curAimOverride && curAimOverride.hasDragged === false);
     const isKeyboardTrigger = source === 'keyboard' && !curAimOverride?.hasDragged;
 
+    const pvpTargetsForAim =
+      snap?.pvpEnabled && me
+        ? snap.players
+            .filter(
+              (p) =>
+                p.id !== me.id &&
+                p.connected &&
+                !p.downed &&
+                (p.spawnProtectionMs || 0) <= 0
+            )
+            .map((p) => ({ id: p.id, x: p.x, y: p.y, radius: 14 }))
+        : undefined;
+
     if (pos && snap && (isQuickHudTap || isKeyboardTrigger)) {
       const fallbackAngle = isQuickHudTap
         ? curAimOverride!.aimAngle
@@ -365,6 +378,7 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
         map,
         props: snap.props,
         enemies: snap.enemies,
+        pvpPlayers: pvpTargetsForAim,
         trainingDummies: snap.trainingDummies,
       });
       const magnitude =
@@ -408,6 +422,7 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
           map,
           props: snap.props,
           enemies: snap.enemies,
+          pvpPlayers: pvpTargetsForAim,
           trainingDummies: snap.trainingDummies,
         });
         const finalDist =
@@ -539,6 +554,7 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
     ctx.imageSmoothingEnabled = false;
 
     const isTavern = map.floor === 0;
+    const isOverworld = map.biome === 'overworld';
 
     const palette = isTavern
       ? {
@@ -550,6 +566,16 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
           wallFace: '#382216',
           pillar: '#4A2C1A',
         }
+      : isOverworld
+        ? {
+            voidBg: '#0E1418',
+            floorA: '#2D6A3E',
+            floorB: '#275E36',
+            moss: '#3E8E4E',
+            wallTop: '#166534',
+            wallFace: '#0F3D22',
+            pillar: '#64748B',
+          }
       : map.biome === 'courtyard'
         ? {
             voidBg: '#12131A',
@@ -656,12 +682,254 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
     for (let ty = 0; ty < map.height; ty++) {
       for (let tx = 0; tx < map.width; tx++) {
         const code = map.tiles[ty * map.width + tx];
-        if (code === 0) continue;
+        if (code === 0 && !isOverworld) continue;
         const px = tx * TILE_SIZE;
         const py = ty * TILE_SIZE;
         const hash = ((tx * 73856093) ^ (ty * 19349663)) >>> 0;
 
-        if (isTavern) {
+        if (isOverworld) {
+          const tileAt = (cx: number, cy: number): number => {
+            if (cx < 0 || cx >= map.width || cy < 0 || cy >= map.height) return 0;
+            return map.tiles[cy * map.width + cx];
+          };
+          const isOuterBorder = tx < 2 || tx >= map.width - 2 || ty < 2 || ty >= map.height - 2;
+          const n = tileAt(tx, ty - 1);
+          const s = tileAt(tx, ty + 1);
+          const w = tileAt(tx - 1, ty);
+          const e = tileAt(tx + 1, ty);
+
+          if (code === 0) {
+            if (isOuterBorder) {
+              // Stepped outer chasm cliff edge
+              ctx.fillStyle = '#0A1014';
+              ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
+              if (tx === 1 || tx === map.width - 2 || ty === 1 || ty === map.height - 2) {
+                ctx.fillStyle = '#152028';
+                ctx.fillRect(px + (tx === 1 ? 24 : 0), py + (ty === 1 ? 24 : 0), tx === 1 || tx === map.width - 2 ? 8 : TILE_SIZE, ty === 1 || ty === map.height - 2 ? 8 : TILE_SIZE);
+              }
+              if (hash % 5 === 0) {
+                ctx.fillStyle = '#18242B';
+                ctx.fillRect(px + 6, py + 8, 10, 4);
+              }
+            } else {
+              // Whispering Lake 3-tone bathymetry + shoreline foam + bridge shadows
+              const touchesLand = n !== 0 || s !== 0 || w !== 0 || e !== 0;
+              const touchesBridge = n === 5 || s === 5 || w === 5 || e === 5;
+              const diagLand =
+                tileAt(tx - 1, ty - 1) !== 0 ||
+                tileAt(tx + 1, ty - 1) !== 0 ||
+                tileAt(tx - 1, ty + 1) !== 0 ||
+                tileAt(tx + 1, ty + 1) !== 0;
+              if (touchesLand) {
+                ctx.fillStyle = (tx + ty) % 2 === 0 ? '#286FB4' : '#2466A6';
+              } else if (diagLand) {
+                ctx.fillStyle = (tx + ty) % 2 === 0 ? '#1E5494' : '#1B4D88';
+              } else {
+                ctx.fillStyle = (tx + ty) % 2 === 0 ? '#163D6E' : '#143764';
+              }
+              ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
+
+              // Subtle wave ripples
+              ctx.fillStyle = touchesLand ? '#3B82C4' : '#2563EB';
+              if (hash % 3 === 0) {
+                ctx.fillRect(px + 6, py + 10, 11, 2);
+                ctx.fillRect(px + 15, py + 22, 9, 2);
+              }
+
+              // Bridge shadow cast onto water
+              if (touchesBridge) {
+                ctx.fillStyle = 'rgba(8, 18, 36, 0.36)';
+                if (n === 5) ctx.fillRect(px, py, TILE_SIZE, 7);
+                if (s === 5) ctx.fillRect(px, py + TILE_SIZE - 5, TILE_SIZE, 5);
+                if (w === 5) ctx.fillRect(px, py, 7, TILE_SIZE);
+                if (e === 5) ctx.fillRect(px + TILE_SIZE - 5, py, 5, TILE_SIZE);
+              }
+
+              // Shoreline seafoam along non-bridge land edges
+              ctx.fillStyle = '#BAE6FD';
+              if (n !== 0 && n !== 5) ctx.fillRect(px + 2, py, TILE_SIZE - 4, 3);
+              if (s !== 0 && s !== 5) ctx.fillRect(px + 2, py + TILE_SIZE - 3, TILE_SIZE - 4, 3);
+              if (w !== 0 && w !== 5) ctx.fillRect(px, py + 2, 3, TILE_SIZE - 4);
+              if (e !== 0 && e !== 5) ctx.fillRect(px + TILE_SIZE - 3, py + 2, 3, TILE_SIZE - 4);
+            }
+          } else if (code === 1) {
+            // Emerald meadow grass with subtle blades, clover patches & wildflowers
+            ctx.fillStyle = (tx + ty) % 2 === 0 ? '#2D6A3E' : '#286038';
+            ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
+            if (hash % 5 === 0) {
+              ctx.fillStyle = '#337A47';
+              ctx.fillRect(px + 3, py + 3, 10, 8);
+            }
+            if (hash % 4 === 0) {
+              ctx.fillStyle = '#429659';
+              ctx.fillRect(px + (hash % 18) + 4, py + ((hash >>> 3) % 18) + 4, 2, 4);
+              ctx.fillRect(px + (hash % 18) + 7, py + ((hash >>> 3) % 18) + 6, 2, 3);
+            }
+            if (hash % 19 === 0) {
+              ctx.fillStyle = hash % 3 === 0 ? '#FDE047' : hash % 3 === 1 ? '#F472B6' : '#E0F2FE';
+              ctx.fillRect(px + 12 + (hash % 6), py + 12 + ((hash >>> 4) % 6), 3, 3);
+              ctx.fillRect(px + 16 + (hash % 5), py + 15 + ((hash >>> 2) % 5), 2, 2);
+            }
+            // Soft edge shading near forest ridge or water
+            if (n === 2 || n === 0) {
+              ctx.fillStyle = 'rgba(0,0,0,0.14)';
+              ctx.fillRect(px, py, TILE_SIZE, 3);
+            }
+          } else if (code === 4) {
+            // Packed dirt roads & organic trails with grass-overhang edges & cart ruts
+            ctx.fillStyle = (tx + ty) % 2 === 0 ? '#7C5A3C' : '#725236';
+            ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
+            // Faint cart tracks & warm pebbles
+            ctx.fillStyle = '#62452C';
+            if (hash % 3 === 0) ctx.fillRect(px + 4, py + 9, 10, 2);
+            if (hash % 4 === 0) ctx.fillRect(px + 15, py + 21, 11, 2);
+            ctx.fillStyle = '#96704D';
+            if (hash % 5 === 0) ctx.fillRect(px + 6, py + 13, 4, 3);
+            if (hash % 9 === 0) ctx.fillRect(px + 20, py + 22, 3, 2);
+            // Organic grass-edge overlap along neighboring meadow tiles
+            ctx.fillStyle = '#2D6A3E';
+            if (n === 1) {
+              ctx.fillRect(px + 2, py, 7, 3);
+              ctx.fillRect(px + 17, py, 9, 2);
+            }
+            if (s === 1) {
+              ctx.fillRect(px + 5, py + TILE_SIZE - 3, 8, 3);
+              ctx.fillRect(px + 20, py + TILE_SIZE - 2, 7, 2);
+            }
+            if (w === 1) {
+              ctx.fillRect(px, py + 4, 3, 8);
+              ctx.fillRect(px, py + 18, 2, 9);
+            }
+            if (e === 1) {
+              ctx.fillRect(px + TILE_SIZE - 3, py + 6, 3, 8);
+              ctx.fillRect(px + TILE_SIZE - 2, py + 20, 2, 7);
+            }
+          } else if (code === 5) {
+            // Ancient cobblestone plaza, ruin dais & stone bridges
+            const distCenter = Math.hypot(tx - 60, ty - 45);
+            const isCenterInlay = distCenter <= 4.3 && (Math.abs(tx - 60) === Math.abs(ty - 45) || tx === 60 || ty === 45);
+            ctx.fillStyle = isCenterInlay
+              ? '#6A6558'
+              : (tx + ty) % 2 === 0
+                ? '#585D6E'
+                : '#4E5363';
+            ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
+            ctx.fillStyle = isCenterInlay ? '#B8954A' : '#2E313D';
+            ctx.fillRect(px, py + 15, TILE_SIZE, 2);
+            ctx.fillRect(px + 15, py, 2, TILE_SIZE);
+            ctx.fillStyle = isCenterInlay ? 'rgba(253, 224, 71, 0.25)' : 'rgba(255,255,255,0.09)';
+            ctx.fillRect(px + 2, py + 2, 12, 2);
+            ctx.fillRect(px + 18, py + 18, 12, 2);
+
+            // Stone bridge parapet curb edges wherever bordering inland water (0)
+            const isLakeEdge = (c: number, ox: number, oy: number) =>
+              c === 0 && ox >= 2 && ox < map.width - 2 && oy >= 2 && oy < map.height - 2;
+            if (isLakeEdge(n, tx, ty - 1)) {
+              ctx.fillStyle = '#334155';
+              ctx.fillRect(px, py, TILE_SIZE, 4);
+              ctx.fillStyle = '#94A3B8';
+              ctx.fillRect(px + 1, py + 1, TILE_SIZE - 2, 2);
+            }
+            if (isLakeEdge(s, tx, ty + 1)) {
+              ctx.fillStyle = '#334155';
+              ctx.fillRect(px, py + TILE_SIZE - 4, TILE_SIZE, 4);
+              ctx.fillStyle = '#94A3B8';
+              ctx.fillRect(px + 1, py + TILE_SIZE - 3, TILE_SIZE - 2, 2);
+            }
+            if (isLakeEdge(w, tx - 1, ty)) {
+              ctx.fillStyle = '#334155';
+              ctx.fillRect(px, py, 4, TILE_SIZE);
+              ctx.fillStyle = '#94A3B8';
+              ctx.fillRect(px + 1, py + 1, 2, TILE_SIZE - 2);
+            }
+            if (isLakeEdge(e, tx + 1, ty)) {
+              ctx.fillStyle = '#334155';
+              ctx.fillRect(px + TILE_SIZE - 4, py, 4, TILE_SIZE);
+              ctx.fillStyle = '#94A3B8';
+              ctx.fillRect(px + TILE_SIZE - 3, py + 1, 2, TILE_SIZE - 2);
+            }
+          } else if (code === 6) {
+            // Sunlit sand & wet lake shoreline
+            ctx.fillStyle = (tx + ty) % 2 === 0 ? '#BA975D' : '#AE8D55';
+            ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
+            // Wet sand band along water edge
+            ctx.fillStyle = '#8F7143';
+            if (n === 0) ctx.fillRect(px, py, TILE_SIZE, 4);
+            if (s === 0) ctx.fillRect(px, py + TILE_SIZE - 4, TILE_SIZE, 4);
+            if (w === 0) ctx.fillRect(px, py, 4, TILE_SIZE);
+            if (e === 0) ctx.fillRect(px + TILE_SIZE - 4, py, 4, TILE_SIZE);
+            if (hash % 5 === 0) {
+              ctx.fillStyle = '#D2B277';
+              ctx.fillRect(px + 7, py + 14, 9, 2);
+            }
+          } else if (code === 2) {
+            // Alternating Evergreen Pine & Broadleaf Ancient Oak trees over rich undergrowth
+            ctx.fillStyle = '#22512F';
+            ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
+            // Ground shadow
+            ctx.fillStyle = 'rgba(8, 22, 12, 0.42)';
+            ctx.fillRect(px + 4, py + 23, TILE_SIZE - 8, 7);
+            // Trunk
+            ctx.fillStyle = '#4A2C1A';
+            ctx.fillRect(px + 13, py + 20, 6, 9);
+            if (hash % 2 === 0) {
+              // Layered Evergreen Pine silhouette
+              ctx.fillStyle = '#0F3F22';
+              ctx.fillRect(px + 4, py + 14, TILE_SIZE - 8, 9);
+              ctx.fillStyle = '#14532D';
+              ctx.fillRect(px + 6, py + 9, TILE_SIZE - 12, 10);
+              ctx.fillStyle = '#15803D';
+              ctx.fillRect(px + 9, py + 4, TILE_SIZE - 18, 9);
+              ctx.fillStyle = '#22C55E';
+              ctx.fillRect(px + 12, py + 3, 8, 5);
+            } else {
+              // Broadleaf Ancient Oak (occasional golden-sunlit autumn/spring crown)
+              const sunlit = hash % 7 === 0;
+              ctx.fillStyle = sunlit ? '#3F6212' : '#14532D';
+              ctx.fillRect(px + 3, py + 6, TILE_SIZE - 6, 17);
+              ctx.fillStyle = sunlit ? '#65A30D' : '#16803C';
+              ctx.fillRect(px + 5, py + 3, TILE_SIZE - 10, 14);
+              ctx.fillStyle = sunlit ? '#A3E635' : '#22C55E';
+              ctx.fillRect(px + 8, py + 4, 11, 5);
+            }
+          } else if (code === 3) {
+            // Location-aware Quarry Boulders (NE) vs Ivy-draped Rune Monoliths (Crossroads/SE/Sylvan Ring)
+            const isQuarryRock = tx >= 64 && ty < 45;
+            if (isQuarryRock) {
+              ctx.fillStyle = '#8F734D';
+              ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
+              ctx.fillStyle = 'rgba(0,0,0,0.34)';
+              ctx.fillRect(px + 3, py + 23, TILE_SIZE - 6, 7);
+              ctx.fillStyle = '#574636';
+              ctx.fillRect(px + 4, py + 6, TILE_SIZE - 8, TILE_SIZE - 10);
+              ctx.fillStyle = '#7C654F';
+              ctx.fillRect(px + 6, py + 4, TILE_SIZE - 12, 12);
+              ctx.fillStyle = '#A68B6D';
+              ctx.fillRect(px + 8, py + 5, TILE_SIZE - 16, 3);
+              // Amber mineral vein
+              ctx.fillStyle = '#F59E0B';
+              ctx.fillRect(px + 9, py + 15, 6, 2);
+              ctx.fillRect(px + 14, py + 17, 4, 2);
+            } else {
+              ctx.fillStyle = '#3B4252';
+              ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
+              ctx.fillStyle = 'rgba(0,0,0,0.36)';
+              ctx.fillRect(px + 3, py + 23, TILE_SIZE - 6, 7);
+              ctx.fillStyle = '#475569';
+              ctx.fillRect(px + 4, py + 5, TILE_SIZE - 8, TILE_SIZE - 9);
+              ctx.fillStyle = '#64748B';
+              ctx.fillRect(px + 5, py + 3, TILE_SIZE - 10, 13);
+              ctx.fillStyle = '#94A3B8';
+              ctx.fillRect(px + 7, py + 5, TILE_SIZE - 14, 3);
+              // Ivy & glowing rune inlay
+              ctx.fillStyle = '#15803D';
+              ctx.fillRect(px + 4, py + 18, 6, 6);
+              ctx.fillStyle = hash % 2 === 0 ? '#34D399' : '#38BDF8';
+              ctx.fillRect(px + 13, py + 13, 6, 4);
+              ctx.fillRect(px + 15, py + 11, 2, 8);
+            }
+          }
+        } else if (isTavern) {
           if (code === 1) {
             // Polished Oak Wooden Planks
             ctx.fillStyle = (ty % 2 === 0) ? '#5C3A21' : '#52331C';
@@ -1013,6 +1281,9 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
         if (e.repeat) return;
         const snap = latestSnapshotRef.current;
         const me = snap?.players.find((p) => p.id === playerId) || snap?.players[0];
+        if (k === '1' && me?.npcDialogue?.options && me.npcDialogue.options.length > 0) {
+          return;
+        }
         if (me && !me.downed && me.potions > 0 && me.hp < me.maxHp) {
           sfx.playHeal({ isLocal: true });
         }
@@ -1934,7 +2205,11 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
         let detectedSwingKind: HeroSwingKind | null = null;
         let detectedSwingDur = 220;
 
-        if (prev) {
+        const isAudibleNearby =
+          p.id === playerId ||
+          Math.hypot(p.x - cameraRef.current.x, p.y - cameraRef.current.y) <= 1100;
+
+        if (prev && isAudibleNearby) {
           if (p.dashCooldownMs > prev.dashCooldownMs + 300) {
             const dx = p.x - prev.x;
             const dy = p.y - prev.y;
@@ -2714,13 +2989,33 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
         }
       }
 
-      // Grand Descent Portal
-      const portalSealText =
-        snap.bossRoomCleared && (snap.guardiansRemaining ?? 0) > 0
-          ? `SEALED · GUARDIANS (${snap.guardiansRemaining})`
-          : 'SEALED · BOSS AWAKE';
-      drawDungeonPortal(ctx, map.portalPos.x, map.portalPos.y, snap.bossDefeated, now, map.biome, snap.floor, portalSealText);
-      particleManager.spawnPortalWisps(map.portalPos.x, map.portalPos.y, snap.bossDefeated, now);
+      // Grand Descent Portal (hidden in Open World) & Live Overworld Water Shimmer
+      const isOverworldMap = map.biome === 'overworld' || snap.roomMode === 'open_world';
+      if (isOverworldMap) {
+        const minTx = Math.max(2, Math.floor(worldView.left / TILE_SIZE));
+        const maxTx = Math.min(map.width - 3, Math.ceil(worldView.right / TILE_SIZE));
+        const minTy = Math.max(2, Math.floor(worldView.top / TILE_SIZE));
+        const maxTy = Math.min(map.height - 3, Math.ceil(worldView.bottom / TILE_SIZE));
+        for (let ty = minTy; ty <= maxTy; ty++) {
+          for (let tx = minTx; tx <= maxTx; tx++) {
+            if (map.tiles[ty * map.width + tx] !== 0) continue;
+            const wave = Math.sin(now * 0.0028 + tx * 0.9 + ty * 0.7);
+            if (wave > 0.35) {
+              const wx = tx * TILE_SIZE + 6 + Math.floor((wave - 0.35) * 14);
+              const wy = ty * TILE_SIZE + 8 + ((tx * 7 + ty * 13) % 16);
+              ctx.fillStyle = wave > 0.78 ? 'rgba(186, 230, 253, 0.55)' : 'rgba(125, 211, 252, 0.32)';
+              ctx.fillRect(wx, wy, wave > 0.78 ? 5 : 8, 1.5);
+            }
+          }
+        }
+      } else {
+        const portalSealText =
+          snap.bossRoomCleared && (snap.guardiansRemaining ?? 0) > 0
+            ? `SEALED · GUARDIANS (${snap.guardiansRemaining})`
+            : 'SEALED · BOSS AWAKE';
+        drawDungeonPortal(ctx, map.portalPos.x, map.portalPos.y, snap.bossDefeated, now, map.biome, snap.floor, portalSealText);
+        particleManager.spawnPortalWisps(map.portalPos.x, map.portalPos.y, snap.bossDefeated, now);
+      }
       particleManager.spawnBiomeAmbientMotes(map.biome, worldView, now);
 
       // Torches
@@ -4813,6 +5108,20 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
         ) {
           const maxDist = getPrimaryAttackRange(me.heroClass);
           const isMouseAim = aimSourceRef.current === 'mouse';
+          const pvpPlayers = snap.pvpEnabled
+            ? snap.players
+                .filter(
+                  (p) =>
+                    p.id !== me.id &&
+                    p.connected &&
+                    !p.downed &&
+                    (p.spawnProtectionMs || 0) <= 0
+                )
+                .map((p) => {
+                  const s = smoothedPlayers.get(p.id);
+                  return { id: p.id, x: s?.x ?? p.x, y: s?.y ?? p.y, radius: 14 };
+                })
+            : undefined;
           const lockMatch = findBestAutoTarget({
             playerX: mySmoothPos.x,
             playerY: mySmoothPos.y,
@@ -4822,6 +5131,7 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
             map,
             props: snap.props,
             enemies: snap.enemies,
+            pvpPlayers,
             trainingDummies: snap.trainingDummies,
           });
           cachedAutoTargetId = lockMatch?.target.id ?? null;
@@ -6084,8 +6394,51 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
           dashFlashAlpha: dashVisual?.rimFlashAlpha,
         });
 
-        // Player Name Tag (Username Lvl X without border box; Green for players, Purple for admin)
+        // Spawn Protection Golden Aura (Open World respawn grace)
+        if ((p.spawnProtectionMs || 0) > 0) {
+          const spPulse = 0.55 + 0.3 * Math.sin(now * 0.015);
+          ctx.save();
+          ctx.fillStyle = `rgba(250, 204, 21, ${(0.12 * spPulse).toFixed(2)})`;
+          ctx.beginPath();
+          ctx.arc(hx, hy, 22, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = `rgba(253, 224, 71, ${(0.75 * spPulse).toFixed(2)})`;
+          ctx.lineWidth = 1.6;
+          ctx.setLineDash([4, 3]);
+          ctx.beginPath();
+          ctx.arc(hx, hy, 22, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.restore();
+        }
+
+        // PvP Target Lock Reticle around targeted rival hero
+        if (snap.pvpEnabled && !isLocalPlayer && p.id === lockedEnemyId) {
+          ctx.save();
+          ctx.strokeStyle = '#F43F5E';
+          ctx.lineWidth = 1.6;
+          const r = 20;
+          const len = 5;
+          ctx.beginPath();
+          ctx.moveTo(hx - r, hy - r + len);
+          ctx.lineTo(hx - r, hy - r);
+          ctx.lineTo(hx - r + len, hy - r);
+          ctx.moveTo(hx + r - len, hy - r);
+          ctx.lineTo(hx + r, hy - r);
+          ctx.lineTo(hx + r, hy - r + len);
+          ctx.moveTo(hx - r, hy + r - len);
+          ctx.lineTo(hx - r, hy + r);
+          ctx.lineTo(hx - r + len, hy + r);
+          ctx.moveTo(hx + r - len, hy + r);
+          ctx.lineTo(hx + r, hy + r);
+          ctx.lineTo(hx + r, hy + r - len);
+          ctx.stroke();
+          ctx.restore();
+        }
+
+        // Player Name Tag (Username Lvl X without border box; Crimson for PvP rivals, Green for allies, Purple for admin)
         const isPlayerAdmin = Boolean(p.isAdmin);
+        const isPvpRival = Boolean(snap.pvpEnabled && !isLocalPlayer);
         const displayLevel = Math.max(1, p.level || 1);
         const displayLabel = `${p.username} Lvl ${displayLevel}`;
 
@@ -6108,8 +6461,8 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
         ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
         ctx.fillText(displayLabel, hx + 1, badgeY + 2);
 
-        // Name text: Purple for admin, Green for default players
-        ctx.fillStyle = isPlayerAdmin ? '#C084FC' : '#34D399';
+        // Name text: Crimson for PvP rivals, Purple for admin, Green for allies/local
+        ctx.fillStyle = isPvpRival ? '#FB7185' : isPlayerAdmin ? '#C084FC' : '#34D399';
         ctx.fillText(displayLabel, hx, badgeY + 1);
 
         // Live Proximity Voice Speaking Indicator beside player nameplate
@@ -6134,7 +6487,7 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
           const pHpRatio = Math.max(0, p.hp / Math.max(1, p.maxHp));
           ctx.fillStyle = '#0F172A';
           ctx.fillRect(hx - pBarW / 2 - 1, hy - 18, pBarW + 2, 5);
-          ctx.fillStyle = '#38BDF8';
+          ctx.fillStyle = isPvpRival ? '#EF4444' : '#38BDF8';
           ctx.fillRect(hx - pBarW / 2, hy - 17, Math.round(pBarW * pHpRatio), 3);
           if (p.shield > 0) {
             const pShieldRatio = Math.min(1, p.shield / 60);
@@ -6635,7 +6988,7 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
 
         const margin = 12;
         const topSafe = isMobileScreen ? 46 : 74;
-        const bottomReserve = activeDlg.options?.length ? 68 : 26;
+        const bottomReserve = 68;
         const boxLeft = Math.round(
           Math.max(margin, Math.min(cw - boxW - margin, screenNpcX - boxW / 2))
         );
@@ -6746,17 +7099,12 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
         }
         ctx.restore();
 
-        if (activeDlg.options && activeDlg.options.length > 0) {
-          const ax = Math.round(boxLeft + boxW / 2);
-          const ay = Math.round(boxTop + boxH + 10);
-          const nextKey = `${activeDlg.npcId}:${Math.round(ax / 4)}:${Math.round(ay / 4)}`;
-          if (nextKey !== lastDialogueAnchorKeyRef.current) {
-            lastDialogueAnchorKeyRef.current = nextKey;
-            onNpcDialogueAnchorRef.current?.({ npcId: activeDlg.npcId, screenX: ax, screenY: ay });
-          }
-        } else if (lastDialogueAnchorKeyRef.current !== '') {
-          lastDialogueAnchorKeyRef.current = '';
-          onNpcDialogueAnchorRef.current?.(null);
+        const ax = Math.round(boxLeft + boxW / 2);
+        const ay = Math.round(boxTop + boxH + 10);
+        const nextKey = `${activeDlg.npcId}:${Math.round(ax / 4)}:${Math.round(ay / 4)}`;
+        if (nextKey !== lastDialogueAnchorKeyRef.current) {
+          lastDialogueAnchorKeyRef.current = nextKey;
+          onNpcDialogueAnchorRef.current?.({ npcId: activeDlg.npcId, screenX: ax, screenY: ay });
         }
       } else {
         if (npcTypewriterRef.current) {
@@ -6769,8 +7117,14 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
       }
 
       // ——— HIGH-DETAIL STONE RADAR MINIMAP ———
+      const isOverworldMinimap = map.biome === 'overworld' || snap.roomMode === 'open_world';
       let mmScale = 2.5;
-      if (isMobileScreen) {
+      if (isOverworldMinimap || map.width > 80) {
+        const targetMaxW = isMobileScreen
+          ? Math.min(108, Math.floor(cw * 0.25))
+          : Math.min(180, Math.floor(cw * 0.16));
+        mmScale = Math.max(1.0, Math.min(1.6, targetMaxW / Math.max(1, map.width)));
+      } else if (isMobileScreen) {
         const targetMaxW = Math.min(100, Math.floor(cw * 0.24));
         mmScale = Math.max(1.0, Math.min(1.5, targetMaxW / Math.max(1, map.width)));
       }
@@ -6802,7 +7156,12 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
       ctx.font = 'bold 9px "JetBrains Mono", monospace';
       ctx.textAlign = 'left';
       ctx.textBaseline = 'middle';
-      const headerTitle = map.floor === 0 ? 'TAVERN HUB' : `F${map.floor}: ${map.biomeTitle.toUpperCase()}`;
+      const headerTitle =
+        map.floor === 0
+          ? 'TAVERN HUB'
+          : isOverworldMinimap
+            ? 'OPEN WORLD PVP'
+            : `F${map.floor}: ${map.biomeTitle.toUpperCase()}`;
       ctx.fillText(headerTitle.slice(0, 16), mmX - pad + 5, mmY - pad - 6);
 
       // Compass Indicator "N"
@@ -6810,7 +7169,7 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
       ctx.textAlign = 'right';
       ctx.fillText('N ▲', mmX + mmW + pad - 5, mmY - pad - 6);
 
-      // 3 & 4. Cached Inner Map Viewport + Corridor Pathways (1 drawImage vs 3,072 fillRect calls/frame)
+      // 3 & 4. Cached Inner Map Viewport + Corridor/Overworld Terrain
       if (!minimapTilesCanvas || minimapCachedScale !== mmScale) {
         minimapCachedScale = mmScale;
         const offscreen = document.createElement('canvas');
@@ -6818,12 +7177,44 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
         offscreen.height = Math.max(1, Math.ceil(mmH));
         const offCtx = offscreen.getContext('2d');
         if (offCtx) {
-          offCtx.fillStyle = '#111018';
+          offCtx.fillStyle = isOverworldMinimap ? '#0E1418' : '#111018';
           offCtx.fillRect(0, 0, mmW, mmH);
-          offCtx.fillStyle = '#1E1D2A';
           for (let ty = 0; ty < map.height; ty++) {
             for (let tx = 0; tx < map.width; tx++) {
-              if (map.tiles[ty * map.width + tx] > 0) {
+              const code = map.tiles[ty * map.width + tx];
+              if (isOverworldMinimap) {
+                const isOuter = tx < 2 || tx >= map.width - 2 || ty < 2 || ty >= map.height - 2;
+                if (code === 0) {
+                  if (isOuter) {
+                    offCtx.fillStyle = '#0A1014';
+                  } else {
+                    const isShallow =
+                      map.tiles[(ty - 1) * map.width + tx] !== 0 ||
+                      map.tiles[(ty + 1) * map.width + tx] !== 0 ||
+                      map.tiles[ty * map.width + (tx - 1)] !== 0 ||
+                      map.tiles[ty * map.width + (tx + 1)] !== 0;
+                    offCtx.fillStyle = isShallow ? '#2563EB' : '#163D6E';
+                  }
+                } else if (code === 1) {
+                  offCtx.fillStyle = '#255B34';
+                } else if (code === 2) {
+                  offCtx.fillStyle = '#143820';
+                } else if (code === 3) {
+                  offCtx.fillStyle = tx >= 64 && ty < 45 ? '#7C654F' : '#64748B';
+                } else if (code === 4) {
+                  offCtx.fillStyle = '#7C5A3C';
+                } else if (code === 5) {
+                  offCtx.fillStyle = '#585D6E';
+                } else {
+                  offCtx.fillStyle = '#B5935A';
+                }
+                offCtx.fillRect(tx * mmScale, ty * mmScale, mmScale + 0.4, mmScale + 0.4);
+                if (tx === 60 && ty === 45) {
+                  offCtx.fillStyle = 'rgba(250, 204, 21, 0.7)';
+                  offCtx.fillRect((tx - 1) * mmScale, (ty - 1) * mmScale, mmScale * 3, mmScale * 3);
+                }
+              } else if (code > 0) {
+                offCtx.fillStyle = '#1E1D2A';
                 offCtx.fillRect(tx * mmScale, ty * mmScale, mmScale, mmScale);
               }
             }
@@ -6922,8 +7313,8 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
         }
       }
 
-      // 6. Dungeon Portal Indicator
-      if (map.portalPos) {
+      // 6. Dungeon Portal Indicator (hidden in Open World)
+      if (map.portalPos && !isOverworldMinimap) {
         const px = mmX + Math.floor(map.portalPos.x / TILE_SIZE) * mmScale;
         const py = mmY + Math.floor(map.portalPos.y / TILE_SIZE) * mmScale;
         const portalPulse = Math.sin(now / 200) * 1.5 + 3.5;
@@ -6974,7 +7365,7 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
           ctx.arc(px, py, 2, 0, Math.PI * 2);
           ctx.fill();
         } else {
-          ctx.fillStyle = '#38BDF8';
+          ctx.fillStyle = snap.pvpEnabled ? '#F43F5E' : '#38BDF8';
           ctx.fillRect(px - 1.5, py - 1.5, 3, 3);
         }
       }

@@ -222,6 +222,19 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
     }
   };
 
+  const getPvpTargetsForTouch = (liveSnap: GameSnapshot | null | undefined, myId: string) =>
+    liveSnap?.pvpEnabled
+      ? liveSnap.players
+          .filter(
+            (p) =>
+              p.id !== myId &&
+              p.connected &&
+              !p.downed &&
+              (p.spawnProtectionMs || 0) <= 0
+          )
+          .map((p) => ({ id: p.id, x: p.x, y: p.y, radius: 14 }))
+      : undefined;
+
   const getAutoTarget = (maxRangeOverride?: number) => {
     const liveSnap = latestSnapshotRef?.current;
     const fallbackPlayer = playerRef.current;
@@ -229,6 +242,7 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
       liveSnap?.players.find((p) => p.id === fallbackPlayer.id) ?? fallbackPlayer;
     const liveEnemies = liveSnap?.enemies ?? enemiesRef.current;
     const liveDummies = liveSnap?.trainingDummies;
+    const pvpPlayers = getPvpTargetsForTouch(liveSnap, livePlayer.id);
     const baseAngle = lastStickAngleRef.current;
     const maxDist =
       typeof maxRangeOverride === 'number'
@@ -244,6 +258,7 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
       map: mapRef.current,
       props: liveSnap?.props,
       enemies: liveEnemies,
+      pvpPlayers,
       trainingDummies: liveDummies,
     });
   };
@@ -265,6 +280,7 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
     );
     const liveEnemies = liveSnap?.enemies ?? enemiesRef.current;
     const liveDummies = liveSnap?.trainingDummies;
+    const pvpPlayers = getPvpTargetsForTouch(liveSnap, livePlayer.id);
     const smart = resolveSkillSmartTarget({
       spec,
       playerX: livePlayer.x,
@@ -276,6 +292,7 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
       map: mapRef.current,
       props: liveSnap?.props,
       enemies: liveEnemies,
+      pvpPlayers,
       trainingDummies: liveDummies,
     });
     return { spec, ...smart };

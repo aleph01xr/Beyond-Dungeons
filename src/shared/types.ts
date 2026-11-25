@@ -33,7 +33,8 @@ export type BiomeId =
   | 'reliquary'
   | 'scripture'
   | 'nave'
-  | 'wardengate';
+  | 'wardengate'
+  | 'overworld';
 export const MAX_LEVEL = 50;
 export const MAX_ATTRIBUTE = 100;
 export const CRIT_DAMAGE_MULTIPLIER = 1.25;
@@ -552,6 +553,16 @@ export interface RoomNode {
   guardian?: boolean;
 }
 
+export interface OverworldRegion {
+  id: string;
+  name: string;
+  subtitle: string;
+  x: number;
+  y: number;
+  radius: number;
+  accentColor: string;
+}
+
 export interface DungeonMap {
   floor: number;
   seed: number;
@@ -564,6 +575,8 @@ export interface DungeonMap {
   torches: { x: number; y: number }[];
   portalPos: { x: number; y: number };
   portalActive: boolean;
+  spawnPoints?: { x: number; y: number }[];
+  regions?: OverworldRegion[];
 }
 
 export interface PlayerInputState {
@@ -663,6 +676,7 @@ export interface PlayerState {
   bastionCounterMaxMs?: number;
   crimsonFrenzyMs?: number;
   crimsonFrenzyMaxMs?: number;
+  spawnProtectionMs?: number;
   npcDialogue?: PlayerNpcDialogueState | null;
 }
 
@@ -917,6 +931,8 @@ export interface LastRunSummary {
   players: LastRunPlayerSummary[];
 }
 
+export type RoomMode = 'dungeon' | 'tavern' | 'open_world';
+
 export interface RoomSummary {
   roomId: string;
   name: string;
@@ -928,6 +944,8 @@ export interface RoomSummary {
   playerCount: number;
   maxPlayers: number;
   status: RoomStatus;
+  roomMode?: RoomMode;
+  pvpEnabled?: boolean;
 }
 
 export interface DialogueOption {
@@ -961,6 +979,8 @@ export interface TrainingDummyState {
 export interface GameSnapshot {
   roomId: string;
   roomName: string;
+  roomMode?: RoomMode;
+  pvpEnabled?: boolean;
   hostId?: string;
   hostName?: string;
   difficulty: DifficultyTier;

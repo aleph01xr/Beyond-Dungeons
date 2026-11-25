@@ -7063,7 +7063,7 @@ var GameRoom = class _GameRoom {
     for (const pr of this.players.values()) {
       const dlg = pr.state.npcDialogue;
       if (!dlg) continue;
-      if (!pr.state.connected || Math.hypot(dlg.x - pr.state.x, dlg.y - pr.state.y) > 190) {
+      if (!pr.state.connected || Math.hypot(dlg.x - pr.state.x, dlg.y - pr.state.y) > 250) {
         pr.state.npcDialogue = null;
         continue;
       }
@@ -12117,7 +12117,7 @@ var PartyCoordinator = class {
       roomId: room.roomId,
       playerId: account.id,
       map: room.map,
-      snapshot: room.buildSnapshot(),
+      snapshot: room.buildNetworkSnapshot(),
       chat: room.chat
     });
     this.broadcastRoomList();
@@ -12162,7 +12162,7 @@ var PartyCoordinator = class {
       roomId: room.roomId,
       playerId: account.id,
       map: room.map,
-      snapshot: room.buildSnapshot(),
+      snapshot: room.buildNetworkSnapshot(),
       chat: room.chat
     });
     this.broadcastRoomList();
@@ -14122,7 +14122,8 @@ function sendJson(ws, msg, options) {
 }
 function getDialogueKey(dialogue) {
   if (!dialogue) return "";
-  return `${dialogue.npcId}:${dialogue.seq}:${dialogue.text}`;
+  const optsKey = dialogue.options?.map((o) => o.id).join(",") ?? "";
+  return `${dialogue.npcId}:${dialogue.seq}:${dialogue.text}:${optsKey}`;
 }
 function syncClientNpcDialogue(c, room) {
   if (c.ws.readyState !== WebSocket.OPEN) return;
@@ -15541,7 +15542,7 @@ async function startServer() {
           sendJson(ws, { type: "error", message: "Attributes can only be reset in the Sanctuary Tavern." });
           return;
         }
-        if (!room.isPlayerNearNpc(acc.id, "npc_aleph", 180)) {
+        if (!room.isPlayerNearNpc(acc.id, "npc_aleph", 260)) {
           sendJson(ws, { type: "error", message: "You must be near Aleph to reset your attributes." });
           return;
         }

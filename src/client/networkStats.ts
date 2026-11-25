@@ -222,10 +222,12 @@ export function buildSnapshotHudKey(
     bossKey = `${boss.id}:${boss.hp}:${boss.maxHp}:${boss.enraged ? 1 : 0}:${bossVisible ? 1 : 0}`;
   }
 
+  const isOpenWorld = snap.roomMode === 'open_world';
   const partyKey = snap.players
-    .map(
-      (p) =>
-        `${p.id}:${p.hp}:${p.maxHp}:${p.shield}:${p.downed ? 1 : 0}:${p.kills}:${p.revives}:${p.heroClass}:${p.connected ? 1 : 0}:${p.ready ? 1 : 0}`
+    .map((p) =>
+      isOpenWorld
+        ? `${p.id}:${p.downed ? 1 : 0}:${p.kills}:${p.level}:${p.heroClass}:${p.connected ? 1 : 0}:${(p.spawnProtectionMs || 0) > 0 ? 1 : 0}`
+        : `${p.id}:${p.hp}:${p.maxHp}:${p.shield}:${p.downed ? 1 : 0}:${p.kills}:${p.revives}:${p.heroClass}:${p.connected ? 1 : 0}:${p.ready ? 1 : 0}`
     )
     .join(',');
 
@@ -245,7 +247,7 @@ export function buildSnapshotHudKey(
     snap.status,
     snap.floor,
     snap.seed,
-    snap.elapsedSec,
+    isOpenWorld ? 0 : snap.elapsedSec,
     snap.lastRunSummary?.outcome ?? '',
     snap.bossDefeated ? 1 : 0,
     snap.bossRoomCleared ? 1 : 0,

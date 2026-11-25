@@ -16,6 +16,9 @@ export interface MovablePlayerLike {
   relics: readonly string[];
   equippedVestment?: string | null;
   hasteMs?: number;
+  slowedMs?: number;
+  stunnedMs?: number;
+  frozenMs?: number;
   crimsonFrenzyMs?: number;
   crimsonFrenzyMaxMs?: number;
   floorBlessings?: readonly FloorBlessingId[];
@@ -229,6 +232,13 @@ export function computePlayerMoveSpeed(player: MovablePlayerLike): number {
   }
 
   if (player.speedBoost) moveSpeed *= 1.8;
+
+  if ((player.stunnedMs || 0) > 0 || (player.frozenMs || 0) > 0) {
+    return 0;
+  }
+  if ((player.slowedMs || 0) > 0) {
+    moveSpeed *= 0.68;
+  }
 
   if (player.statuses && player.statuses.length > 0) {
     if (player.statuses.some((s) => s.type === 'frostbite')) {

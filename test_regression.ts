@@ -12956,6 +12956,382 @@ async function runRegressionTests() {
     assert.ok(lobbySrc.includes('PRIMARY_STAT_THEME') && lobbySrc.includes('RELIC_CATALOG.length'));
   });
 
+  await test('142. Open World Foundation: Overworld Map, Shared Multiplayer Room, Authoritative PvP, Spawn Protection & Auto-Respawn', async () => {
+    const { generateOpenWorldMap } = await import('./src/server/overworldGenerator.ts');
+    const { PartyCoordinator } = await import('./src/server/partyCoordinator.ts');
+    const { RoomClientIndex } = await import('./src/server/wsTransport.ts');
+
+    // 1. Overworld generator geometry, zero PvE/NPC content, solid borders, walkable spawns
+    const gen = generateOpenWorldMap(777);
+    assert.strictEqual(gen.map.width, 120);
+    assert.strictEqual(gen.map.height, 90);
+    assert.strictEqual(gen.map.biome, 'overworld');
+    assert.strictEqual(gen.map.biomeTitle, 'Verdant Borderlands');
+    assert.strictEqual(gen.enemies.length, 0, 'Open World must contain 0 enemies');
+    assert.strictEqual(gen.npcs.length, 0, 'Open World must contain 0 NPCs');
+    assert.strictEqual(gen.props.length, 0, 'Open World must contain 0 props');
+    assert.strictEqual(gen.trainingDummies.length, 0, 'Open World must contain 0 dummies');
+    assert.strictEqual(gen.map.tiles[0], 0, 'Outer border tile must be void cliff (0)');
+    assert.strictEqual(gen.map.tiles[2 * gen.map.width + 2], 2, 'Inner perimeter ring must be dense ridge/forest (2)');
+    assert.ok(gen.map.spawnPoints && gen.map.spawnPoints.length === 8, 'Expected 8 distributed Open World spawn points');
+    for (const sp of gen.map.spawnPoints!) {
+      assert.strictEqual(
+        isWallAtWorld(gen.map, [], sp.x, sp.y),
+        false,
+        `Open World spawn point (${sp.x}, ${sp.y}) must be walkable`
+      );
+    }
+
+    // 2. PartyCoordinator Open World room lifecycle & isolation from Dungeon lobbies
+    type MockClient = {
+      ws: { readyState: number; bufferedAmount: number; send: (data: string) => void; close: () => void };
+      userId: string;
+      username: string;
+      roomId: string | null;
+      needsKeyframe?: boolean;
+      messages: any[];
+    };
+    const rooms = new Map<string, GameRoom>();
+    const roomClientIndex = new RoomClientIndex<MockClient>();
+    const coordinator = new PartyCoordinator<MockClient>({
+      rooms,
+      roomClientIndex,
+      roomDeltaStates: new Map(),
+      dirtyNonPlayingRooms: new Set(),
+      generateRoomCode: () => 'BYND-OW1',
+      sendJson: (ws, msg) => ws.send(JSON.stringify(msg)),
+      broadcastToRoom: () => {},
+      broadcastRoomList: () => {},
+    });
+    const mkClient = (id: string, username: string): MockClient => {
+      const messages: any[] = [];
+      return {
+        userId: id,
+        username,
+        roomId: null,
+        messages,
+        ws: { readyState: 1, bufferedAmount: 0, send: (d: string) => messages.push(JSON.parse(d)), close: () => {} },
+      };
+    };
+
+    const owRoom = coordinator.ensureOpenWorldRoom();
+    assert.strictEqual(owRoom.roomId, 'OPEN-WORLD');
+    assert.strictEqual(owRoom.roomMode, 'open_world');
+    assert.strictEqual(owRoom.pvpEnabled, true);
+    assert.strictEqual(owRoom.maxPlayers, 50);
+    assert.strictEqual(owRoom.status, 'playing');
+
+    const c1 = mkClient('ow_u1', 'VanguardOne');
+    const c2 = mkClient('ow_u2', 'RangerTwo');
+    const j1 = coordinator.joinOrReconnectRoom(c1, { id: 'ow_u1', username: 'VanguardOne', heroClass: 'vanguard' }, 'OPEN-WORLD');
+    const j2 = coordinator.joinOrReconnectRoom(c2, { id: 'ow_u2', username: 'RangerTwo', heroClass: 'ranger' }, 'OPEN-WORLD');
+    assert.strictEqual(j1.ok, true);
+    assert.strictEqual(j2.ok, true);
+    assert.strictEqual(owRoom.getPlayerCount(), 2);
+    assert.strictEqual(coordinator.startExpedition(c1).ok, false, 'Open World must reject startExpedition');
+    assert.strictEqual(coordinator.setPlayerReady(c1, true).ok, false, 'Open World must reject setPlayerReady');
+
+    coordinator.leaveRoomExplicit(c1);
+    coordinator.leaveRoomExplicit(c2);
+    assert.ok(rooms.has('OPEN-WORLD'), 'OPEN-WORLD persistent room must remain active when empty');
+
+    // 3. Server-authoritative PvP combat, spawn protection, 0.55x scaling, CC, & Cleric/Vanguard buff isolation
+    const pvpRoom = new GameRoom({
+      roomId: 'OPEN-WORLD',
+      name: 'Verdant Borderlands (Open World)',
+      hostName: 'Frontier',
+      difficulty: 'Normal',
+      seed: 777,
+      initialFloor: 1,
+      initialStatus: 'playing',
+    });
+    pvpRoom.addOrReconnectPlayer('p_van', 'Vanguard', 'vanguard');
+    pvpRoom.addOrReconnectPlayer('p_arc', 'Arcanist', 'arcanist');
+    pvpRoom.addOrReconnectPlayer('p_clr', 'Cleric', 'cleric');
+    pvpRoom.addOrReconnectPlayer('p_rng', 'Ranger', 'ranger');
+
+    const van = pvpRoom.getPlayerState('p_van')!;
+    const arc = pvpRoom.getPlayerState('p_arc')!;
+    const clr = pvpRoom.getPlayerState('p_clr')!;
+    const rng = pvpRoom.getPlayerState('p_rng')!;
+
+    assert.strictEqual(van.spawnProtectionMs, 2500, 'Newly spawned Open World players must have 2.5s spawn protection');
+
+    // Position players in a clear plaza area near center crossroads (60.5*32, 45.5*32)
+    const cx = 60.5 * TILE_SIZE;
+    const cy = 45.5 * TILE_SIZE;
+    van.x = cx; van.y = cy;
+    rng.x = cx + 45; rng.y = cy;
+    arc.x = cx + 110; arc.y = cy;
+    clr.x = cx + 180; clr.y = cy;
+
+    // Protected player takes 0 PvP damage
+    const blockedDmg = pvpRoom.damagePlayer(rng, 100, 'physical', van);
+    assert.strictEqual(blockedDmg, 0, 'Spawn protection must block incoming PvP damage');
+    assert.strictEqual(rng.hp, rng.maxHp);
+
+    // Clear spawn protection and test PvP 0.55x scaling & primary attack hit
+    van.spawnProtectionMs = 0;
+    rng.spawnProtectionMs = 0;
+    arc.spawnProtectionMs = 0;
+    clr.spawnProtectionMs = 0;
+
+    const scaledDealt = pvpRoom.damagePlayer(arc, 100, 'physical', van);
+    assert.ok(scaledDealt > 0 && scaledDealt <= 55, `PvP damage should scale by 0.55x before resist (got ${scaledDealt})`);
+
+    // Vanguard primary attack hits nearby Ranger
+    van.aimAngle = 0;
+    const rngHpBeforePrimary = rng.hp;
+    pvpRoom.firePrimaryAttack(van);
+    pvpRoom.tick(50);
+    assert.ok(rng.hp < rngHpBeforePrimary, 'Vanguard primary attack must hit rival player in Open World');
+
+    // Vanguard Bulwark Dash damages & stuns rival, grants shield ONLY to Vanguard
+    van.equippedWeapon = null;
+    van.x = cx; van.y = cy;
+    rng.x = cx + 92; rng.y = cy;
+    rng.shield = 0;
+    van.shield = 0;
+    const rngHpBeforeDash = rng.hp;
+    pvpRoom.performAction('p_van', 'tactical', 0, { explicitAim: true });
+    assert.ok(rng.hp < rngHpBeforeDash, 'Bulwark Dash must damage rival in PvP');
+    assert.ok((rng.stunnedMs || 0) > 0, 'Bulwark Dash must stun rival in PvP');
+    assert.ok(van.shield > 0, 'Bulwark Dash must shield caster');
+    assert.strictEqual(rng.shield, 0, 'Bulwark Dash must NOT shield rival in PvP');
+
+    // Arcanist Chain Lightning hits nearby Ranger
+    arc.equippedScrollId = 'chain_lightning';
+    arc.skillCooldownMs = 0;
+    arc.stunnedMs = 0;
+    arc.downed = false;
+    arc.hp = arc.maxHp;
+    arc.x = cx + 92; arc.y = cy + 35;
+    rng.stunnedMs = 0;
+    const rngHpBeforeChain = rng.hp;
+    pvpRoom.performAction('p_arc', 'tactical', -Math.PI / 2, { explicitAim: true });
+    assert.ok(rng.hp < rngHpBeforeChain, 'Arcanist Chain Lightning must strike rival in PvP');
+
+    // Cleric Radiant Pulse heals ONLY Cleric, NOT nearby rival, and damages rival
+    clr.x = cx + 92; clr.y = cy;
+    clr.hp = Math.max(10, clr.maxHp - 40);
+    rng.hp = Math.max(10, rng.maxHp - 40);
+    const clrHpBefore = clr.hp;
+    const rngHpBeforePulse = rng.hp;
+    pvpRoom.performAction('p_clr', 'tactical', 0, { explicitAim: true });
+    assert.ok(clr.hp > clrHpBefore, 'Cleric Radiant Pulse must still heal caster in PvP');
+    assert.ok(rng.hp < rngHpBeforePulse, 'Cleric Radiant Pulse must damage (not heal) nearby rival in PvP');
+
+    // Ranger primary arrow projectile damages rival after tick
+    rng.x = cx + 220; rng.y = cy;
+    arc.x = cx + 280; arc.y = cy;
+    rng.aimAngle = 0;
+    const arcHpBeforeArrow = arc.hp;
+    pvpRoom.firePrimaryAttack(rng);
+    for (let i = 0; i < 6; i++) pvpRoom.tick(50);
+    assert.ok(arc.hp < arcHpBeforeArrow, 'Ranger arrow projectile must damage rival player in Open World');
+
+    // Dungeon mode remains strictly PvE (no friendly fire)
+    const dungeonRoom = new GameRoom({
+      roomId: 'DUN-PVE1',
+      name: 'Dungeon PvE',
+      hostName: 'Hero',
+      difficulty: 'Normal',
+      seed: 101,
+      initialFloor: 1,
+      initialStatus: 'playing',
+    });
+    dungeonRoom.addOrReconnectPlayer('d1', 'D1', 'vanguard');
+    dungeonRoom.addOrReconnectPlayer('d2', 'D2', 'cleric');
+    const d1 = dungeonRoom.getPlayerState('d1')!;
+    const d2 = dungeonRoom.getPlayerState('d2')!;
+    assert.strictEqual(dungeonRoom.pvpEnabled, false);
+    assert.strictEqual(dungeonRoom.damagePlayer(d2, 100, 'physical', d1), 0, 'Dungeon must never allow PvP friendly fire');
+
+    // 4. PvP Kill -> 3.5s Downed -> Auto-Respawn with 2.5s Spawn Protection
+    const killsBefore = van.kills;
+    pvpRoom.damagePlayer(arc, 99999, 'physical', van);
+    assert.strictEqual(arc.hp, 0);
+    assert.strictEqual(arc.downed, true);
+    assert.strictEqual(arc.downedTimerMs, 3500);
+    assert.strictEqual(van.kills, killsBefore + 1, 'Lethal PvP hit must increment killer kill count');
+
+    pvpRoom.tick(1000);
+    assert.strictEqual(arc.downed, true, 'Victim must stay downed before 3.5s expires');
+    assert.strictEqual(arc.downedTimerMs, 2500);
+
+    for (let i = 0; i < 26; i++) pvpRoom.tick(100);
+    assert.strictEqual(arc.downed, false, 'Victim must auto-respawn after 3.5s in Open World');
+    assert.strictEqual(arc.hp, arc.maxHp, 'Respawned Open World player must return at full HP');
+    assert.ok((arc.spawnProtectionMs || 0) > 2000, 'Respawned Open World player must receive 2.5s spawn protection');
+    assert.strictEqual(isWallAtWorld(pvpRoom.map, pvpRoom.props, arc.x, arc.y), false, 'Respawn position must be walkable');
+
+    // 5. Client Open World UI & rendering wiring check
+    const worldSnap = pvpRoom.buildNetworkSnapshot();
+    assert.strictEqual(worldSnap.roomMode, 'open_world');
+    assert.strictEqual(worldSnap.pvpEnabled, true);
+    assert.strictEqual(worldSnap.enemies.length, 0);
+    assert.strictEqual(worldSnap.npcs.length, 0);
+
+    const canvasSrc = fs.readFileSync(path.join(process.cwd(), 'src/components/GameCanvas.tsx'), 'utf8');
+    const lobbySrc = fs.readFileSync(path.join(process.cwd(), 'src/components/SanctuaryLobby.tsx'), 'utf8');
+    const runViewSrc = fs.readFileSync(path.join(process.cwd(), 'src/components/DungeonRunView.tsx'), 'utf8');
+    assert.ok(canvasSrc.includes("biome === 'overworld'") && canvasSrc.includes('spawnProtectionMs'));
+    assert.ok(lobbySrc.includes('handleEnterOpenWorld') && lobbySrc.includes('OPEN-WORLD'));
+    assert.ok(runViewSrc.includes('isOpenWorld') && runViewSrc.includes('Respawning in'));
+  });
+
+  await test('143. Open World Network Optimization & Redesigned Borderlands Landmarks', async () => {
+    const {
+      OPEN_WORLD_ENTITY_INTEREST_RADIUS,
+      OPEN_WORLD_FAR_SYNC_INTERVAL_TICKS,
+      projectOpenWorldSnapshotForClient,
+    } = await import('./src/server/openWorldNetwork.ts');
+    const {
+      applySnapshotDelta,
+      cloneSnapshotBaseline,
+      computeSnapshotDelta,
+      isSnapshotDeltaEmpty,
+    } = await import('./src/shared/snapshotDelta.ts');
+    const { generateOpenWorldMap } = await import('./src/server/overworldGenerator.ts');
+    const { buildSnapshotHudKey } = await import('./src/client/networkStats.ts');
+
+    // 1. Redesigned overworld generator landmarks, regions & zero PvE/NPC content
+    const gen = generateOpenWorldMap(777);
+    assert.ok(gen.map.regions && gen.map.regions.length === 5, 'Expected 5 named Overworld landmark regions');
+    const regionNames = new Set(gen.map.regions!.map((r) => r.name));
+    for (const expectedName of [
+      'Crossroads Bastion',
+      'Emerald Woods',
+      'Sunlit Quarry',
+      'Whispering Lake',
+      'Shattered Sanctum',
+    ]) {
+      assert.ok(regionNames.has(expectedName), `Missing overworld region ${expectedName}`);
+    }
+    // Bastion Island inside Whispering Lake (30.5 * 32, 66.5 * 32) must be walkable
+    assert.strictEqual(
+      isWallAtWorld(gen.map, [], 30.5 * TILE_SIZE, 66.5 * TILE_SIZE),
+      false,
+      'Whispering Lake Bastion Island center must be walkable'
+    );
+    for (const sp of gen.map.spawnPoints!) {
+      assert.strictEqual(isWallAtWorld(gen.map, [], sp.x, sp.y), false, 'All 8 Open World spawns must stay walkable');
+    }
+
+    // 2. Per-entity projectile/zone delta compression & empty-delta suppression
+    const owRoom = new GameRoom({
+      roomId: 'OPEN-WORLD',
+      name: 'Verdant Borderlands (Open World)',
+      hostName: 'Frontier',
+      difficulty: 'Normal',
+      seed: 777,
+      initialFloor: 1,
+      initialStatus: 'playing',
+    });
+    const viewer = owRoom.addOrReconnectPlayer('net_v', 'Viewer', 'ranger');
+    const nearRival = owRoom.addOrReconnectPlayer('net_near', 'NearRival', 'vanguard');
+    const farRival = owRoom.addOrReconnectPlayer('net_far', 'FarRival', 'arcanist');
+    viewer.storage = ['iron_heart'];
+    nearRival.storage = ['shadow_cape', 'sunfire_signet'];
+    nearRival.pendingRelicChoices = ['chronoshard'];
+    nearRival.ownedWeapons = ['blade_of_embers'];
+    nearRival.ownedVestments = ['titan_plate'];
+
+    const cx = 60.5 * TILE_SIZE;
+    const cy = 45.5 * TILE_SIZE;
+    viewer.x = cx; viewer.y = cy;
+    nearRival.x = cx + 300; nearRival.y = cy;
+    farRival.x = cx + OPEN_WORLD_ENTITY_INTEREST_RADIUS + 420; farRival.y = cy + 300;
+
+    // Add nearby + distant projectiles and zones
+    owRoom.projectiles.push(
+      { id: 'pr_near', ownerType: 'player', ownerId: nearRival.id, x: cx + 250, y: cy, vx: 300, vy: 0, angle: 0, damage: 20, pierce: 0, radius: 6, ttlMs: 900, style: 'arrow' },
+      { id: 'pr_far', ownerType: 'player', ownerId: farRival.id, x: farRival.x, y: farRival.y, vx: 300, vy: 0, angle: 0, damage: 20, pierce: 0, radius: 6, ttlMs: 900, style: 'arcane' }
+    );
+    owRoom.zones.push(
+      { id: 'zn_near', kind: 'solar_beacon', ownerId: nearRival.id, x: cx + 200, y: cy, radius: 90, ttlMs: 4200, maxTtlMs: 5000, damage: 10 },
+      { id: 'zn_far', kind: 'chrono_well', ownerId: farRival.id, x: farRival.x, y: farRival.y, radius: 100, ttlMs: 4200, maxTtlMs: 5000, damage: 10 }
+    );
+    owRoom.pendingEvents.push(
+      { id: 'ev_near', kind: 'damage', text: '24', x: cx + 100, y: cy, color: '#FCA5A5' },
+      { id: 'ev_far', kind: 'damage', text: '99', x: farRival.x, y: farRival.y, color: '#FCA5A5' }
+    );
+
+    // Trigger remote cooldown -> quantized upward to nearest 500ms step
+    nearRival.skillCooldownMs = 6820;
+
+    const rawNetSnap = owRoom.buildNetworkSnapshot();
+    const projected0 = projectOpenWorldSnapshotForClient(rawNetSnap, viewer.id, 0, null);
+
+    // Local viewer keeps full state; remote private arrays stripped; cooldown quantized
+    const pViewer = projected0.players.find((p) => p.id === viewer.id)!;
+    const pNear = projected0.players.find((p) => p.id === nearRival.id)!;
+    const pFar = projected0.players.find((p) => p.id === farRival.id)!;
+    assert.deepStrictEqual(pViewer.storage, ['iron_heart']);
+    assert.strictEqual(pNear.storage.length, 0, 'Nearby remote private storage must be stripped');
+    assert.strictEqual(pNear.pendingRelicChoices.length, 0, 'Nearby remote relic choices must be stripped');
+    assert.strictEqual(pNear.ownedWeapons, undefined, 'Nearby remote weapon catalog must be omitted');
+    assert.strictEqual(pNear.skillCooldownMs, 7000, 'Nearby remote cooldown should quantize in 500ms steps');
+    assert.strictEqual(pFar.x % 16, 0, 'Distant rival radar X must be 16px-quantized');
+    assert.strictEqual(pFar.y % 16, 0, 'Distant rival radar Y must be 16px-quantized');
+    assert.strictEqual(pFar.skillCooldownMs, 0, 'Distant rival cooldowns must be zeroed');
+
+    // Spatial culling of projectiles, zones & events
+    assert.strictEqual(projected0.projectiles.map((pr) => pr.id).join(','), 'pr_near');
+    assert.strictEqual(projected0.zones.map((z) => z.id).join(','), 'zn_near');
+    assert.strictEqual(projected0.events.map((ev) => ev.id).join(','), 'ev_near');
+
+    // Far rival movement on non-refresh tick should NOT alter projected baseline (empty delta!)
+    farRival.x += 40;
+    const rawTick1 = owRoom.buildNetworkSnapshot();
+    const projected1 = projectOpenWorldSnapshotForClient(rawTick1, viewer.id, 1, projected0);
+    const delta01 = computeSnapshotDelta(projected0, projected1, 1, 2);
+    assert.strictEqual(isSnapshotDeltaEmpty(delta01), true, 'Moving distant rival on non-4Hz tick must produce empty delta');
+
+    // On 4 Hz refresh tick, distant rival movement propagates cleanly
+    const projected10 = projectOpenWorldSnapshotForClient(
+      rawTick1,
+      viewer.id,
+      OPEN_WORLD_FAR_SYNC_INTERVAL_TICKS,
+      projected1
+    );
+    const delta110 = computeSnapshotDelta(projected1, projected10, 2, 3);
+    assert.strictEqual(isSnapshotDeltaEmpty(delta110), false, '4 Hz refresh tick must sync distant rival quantized move');
+
+    // Per-entity projectile/zone diff parity & client apply
+    let clientSnap = cloneSnapshotBaseline(projected0);
+    owRoom.projectiles[0].x += 12;
+    owRoom.projectiles.push({
+      id: 'pr_near_2',
+      ownerType: 'player',
+      ownerId: viewer.id,
+      x: cx + 40,
+      y: cy,
+      vx: 300,
+      vy: 0,
+      angle: 0,
+      damage: 20,
+      pierce: 0,
+      radius: 6,
+      ttlMs: 850,
+      style: 'arrow',
+    });
+    const projected2 = projectOpenWorldSnapshotForClient(owRoom.buildNetworkSnapshot(), viewer.id, 1, projected0);
+    const deltaPr = computeSnapshotDelta(projected0, projected2, 1, 4);
+    assert.ok(deltaPr.projectilesAdded?.some((p) => p.id === 'pr_near_2'), 'Delta must use incremental projectilesAdded');
+    assert.ok(deltaPr.projectilesUpdated?.some((p) => p.id === 'pr_near'), 'Delta must use incremental projectilesUpdated');
+    assert.strictEqual(deltaPr.projectiles, undefined, 'Legacy full projectiles array must not be sent');
+    clientSnap = applySnapshotDelta(clientSnap, JSON.parse(JSON.stringify(deltaPr)));
+    assert.deepStrictEqual(clientSnap, projected2, 'Per-entity projectile/zone delta apply must reconstruct snapshot identically');
+
+    // Open World HUD key ignores distant rival HP & elapsedSec churn
+    const hudKeyA = buildSnapshotHudKey(projected0, viewer.id, gen.map);
+    projected0.elapsedSec += 1;
+    pFar.hp = Math.max(1, pFar.hp - 35);
+    const hudKeyB = buildSnapshotHudKey(projected0, viewer.id, gen.map);
+    assert.strictEqual(hudKeyA, hudKeyB, 'Open World HUD key must not re-render React HUD on elapsedSec or distant HP ticks');
+  });
+
   console.log(`\nAll regression tests completed: ${passed}/${total} passed.`);
   if (passed !== total) {
     throw new Error(`Some regression tests failed: ${passed}/${total}`);

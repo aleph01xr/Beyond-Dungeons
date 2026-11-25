@@ -204,12 +204,18 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
   const hasSeenChapter1Ref = useRef<boolean>(false);
 
   const currentFloor = snapshot.floor !== undefined ? snapshot.floor : map.floor;
+  const isTavern =
+    map.floor === 0 || snapshot.floor === 0 || snapshot.roomId === 'TAVERN-HUB';
+  const isOpenWorld =
+    snapshot.roomMode === 'open_world' ||
+    snapshot.roomId === 'OPEN-WORLD' ||
+    map.biome === 'overworld';
 
   useEffect(() => {
-    if (currentFloor === 0) {
-      // In Tavern Hub: reset chapter 1 seen flag
+    if (currentFloor === 0 || isOpenWorld) {
+      // In Tavern Hub or Open World: do not show dungeon Chapter 1 intro
       hasSeenChapter1Ref.current = false;
-      lastSeenFloorRef.current = 0;
+      lastSeenFloorRef.current = currentFloor;
       setCinematicIntro(null);
       return;
     }
@@ -230,7 +236,7 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
         isInitialChapterEntry: false,
       });
     }
-  }, [currentFloor, map.biomeTitle]);
+  }, [currentFloor, isOpenWorld, map.biomeTitle]);
 
   const handleDismissIntro = useCallback(() => {
     setCinematicIntro(null);
@@ -251,6 +257,19 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
     snapshot.players.find((p) => p.id === playerId) || snapshot.players[0];
   const meXQuantized = me ? Math.round(me.x / 16) * 16 : 0;
   const meYQuantized = me ? Math.round(me.y / 16) * 16 : 0;
+  const currentOverworldRegion = useMemo(() => {
+    if (!isOpenWorld || !me || !map.regions || map.regions.length === 0) return null;
+    let best: (typeof map.regions)[number] | null = null;
+    let bestDist = Infinity;
+    for (const r of map.regions) {
+      const d = Math.hypot(me.x - r.x, me.y - r.y);
+      if (d <= r.radius && d < bestDist) {
+        best = r;
+        bestDist = d;
+      }
+    }
+    return best;
+  }, [isOpenWorld, meXQuantized, meYQuantized, me, map.regions]);
   const voiceMyPos = useMemo(
     () => ({ x: meXQuantized, y: meYQuantized }),
     [meXQuantized, meYQuantized]
@@ -284,16 +303,6 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
 
   const handleCloseLootChestRef = useRef(handleCloseLootChest);
   handleCloseLootChestRef.current = handleCloseLootChest;
-
-  const optimisticCloseDialogue = () => {
-    const curSnap = latestSnapshotRef.current;
-    if (curSnap) {
-      const updatedPlayers = curSnap.players.map((p) =>
-        p.id === playerId ? { ...p, npcDialogue: null } : p
-      );
-      latestSnapshotRef.current = { ...curSnap, players: updatedPlayers };
-    }
-  };
 
   const hasNpcDialogueOpen = Boolean(me?.npcDialogue);
   const npcDialogueOptionsRef = useRef(me?.npcDialogue?.options);
@@ -361,12 +370,10 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
         else if (st.attributesModalOpen) setAttributesModalOpen(false);
         else if (st.expandedMapOpen) setExpandedMapOpen(false);
         else if (st.chatOpen) setChatOpen(false);
-        else if (st.hasNpcDialogueOpen) {
-          optimisticCloseDialogue();
-          onSendAdminCommandRef.current?.({ type: 'player:dialogue_close' });
-        }
         else if (st.pauseOpen) setPauseOpen(false);
-        else if (st.status === 'playing' && !st.hasCinematic) setPauseOpen(true);
+        else if (st.hasNpcDialogueOpen) {
+          onSendAdminCommandRef.current?.({ type: 'player:dialogue_close' });
+        } else if (st.status === 'playing' && !st.hasCinematic) setPauseOpen(true);
         return;
       }
 
@@ -375,6 +382,7 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
         const opt = dlgOpts[k === '1' ? 0 : 1];
         if (opt) {
           e.preventDefault();
+          e.stopPropagation();
           sfx.playUiClick('confirm');
           if (opt.id === 'reset_stats') {
             onSendAdminCommandRef.current?.({ type: 'player:reset_attributes' });
@@ -453,11 +461,12 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
     }
   };
 
-  const boss = snapshot.enemies.find((e) => e.kind === 'boss');
+  const boss = isOpenWorld ? undefined : snapshot.enemies.find((e) => e.kind === 'boss');
 
-  const isTavern = map.floor === 0 || snapshot.floor === 0;
   const nearPortal = Boolean(
-    me && Math.hypot(map.portalPos.x - me.x, map.portalPos.y - me.y) <= 80
+    !isOpenWorld &&
+      me &&
+      Math.hypot(map.portalPos.x - me.x, map.portalPos.y - me.y) <= 80
   );
 
   // Check if player is near any chest, shrine, NPC, or portal
@@ -492,7 +501,8 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
         snapshot.trainingDummies?.some(
           (d) => Math.hypot(d.x - me.x, d.y - me.y) <= 72
         ) ||
-        (snapshot.bossDefeated &&
+        (!isOpenWorld &&
+          snapshot.bossDefeated &&
           Math.hypot(map.portalPos.x - me.x, map.portalPos.y - me.y) <= 68))
   );
 
@@ -653,6 +663,17 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
     );
     const liveSnap = latestSnapshotRef.current;
     const liveMe = liveSnap?.players.find((p) => p.id === playerId) || me;
+    const pvpPlayers = liveSnap?.pvpEnabled
+      ? liveSnap.players
+          .filter(
+            (p) =>
+              p.id !== liveMe.id &&
+              p.connected &&
+              !p.downed &&
+              (p.spawnProtectionMs || 0) <= 0
+          )
+          .map((p) => ({ id: p.id, x: p.x, y: p.y, radius: 14 }))
+      : undefined;
     const smart = resolveSkillSmartTarget({
       spec,
       playerX: liveMe.x,
@@ -664,6 +685,7 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
       map,
       props: liveSnap?.props,
       enemies: liveSnap?.enemies ?? [],
+      pvpPlayers,
       trainingDummies: liveSnap?.trainingDummies,
     });
     abilityAimRef.current = {
@@ -716,6 +738,35 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
               <span aria-hidden="true" className="hidden sm:inline text-[#78768A]">·</span>
               <span className="hidden sm:inline text-[#BDBACF]">
                 {snapshot.players.length} {snapshot.players.length === 1 ? 'Adventurer' : 'Adventurers'}
+              </span>
+            </>
+          ) : isOpenWorld ? (
+            <>
+              <span className="font-display text-xs sm:text-base text-white font-semibold whitespace-nowrap truncate max-w-[125px] sm:max-w-none">
+                {map.biomeTitle || 'Verdant Borderlands'}
+              </span>
+              <span aria-hidden="true" className="text-[#78768A]">·</span>
+              <span
+                className="font-semibold text-[10px] sm:text-xs whitespace-nowrap"
+                style={{ color: currentOverworldRegion?.accentColor || '#A7F3D0' }}
+              >
+                {currentOverworldRegion?.name || 'Borderlands'}
+              </span>
+              <span aria-hidden="true" className="text-[#78768A]">·</span>
+              <span className="text-[#FCA5A5] font-bold text-[10px] sm:text-xs whitespace-nowrap">
+                OPEN PVP
+              </span>
+              <span aria-hidden="true" className="text-[#78768A]">·</span>
+              <span className="text-[#FCD34D] font-mono text-[10px] sm:text-xs font-bold">
+                {me?.level >= MAX_LEVEL ? 'MAX' : `Lv.${me?.level || 1}`}
+              </span>
+              <span aria-hidden="true" className="hidden sm:inline text-[#78768A]">·</span>
+              <span className="hidden sm:inline text-[#BDBACF] whitespace-nowrap">
+                {snapshot.players.length} Online
+              </span>
+              <span aria-hidden="true" className="hidden md:inline text-[#78768A]">·</span>
+              <span className="hidden md:inline text-[#FB7185] font-semibold whitespace-nowrap">
+                PvP Kills {me?.kills || 0}
               </span>
             </>
           ) : (
@@ -894,10 +945,16 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
             <button
               type="button"
               onClick={handleCopyCode}
-              title={isTavern ? 'Copy Tavern Room Code' : 'Copy Party Code'}
+              title={
+                isTavern
+                  ? 'Copy Tavern Room Code'
+                  : isOpenWorld
+                    ? 'Verdant Borderlands Open World PvP'
+                    : 'Copy Party Code'
+              }
               className="stone-button stone-button-dark text-[9px] sm:text-[10px] py-0.5 px-1.5 sm:py-1 sm:px-2"
             >
-              {copiedCode ? 'Copied!' : isTavern ? 'TAVERN' : snapshot.roomId}
+              {copiedCode ? 'Copied!' : isTavern ? 'TAVERN' : isOpenWorld ? 'WORLD' : snapshot.roomId}
             </button>
 
             <button
@@ -1136,7 +1193,7 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
         </div>
       )}
 
-      {/* Collapsible Co-op Party Dropdown Menu */}
+      {/* Collapsible Co-op Party / Open World Roster Dropdown */}
       <div className="pointer-events-auto fixed top-9 sm:top-14 left-1.5 sm:left-5 z-20">
         <button
           type="button"
@@ -1145,9 +1202,9 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
             setPartyOpen((v) => !v);
           }}
           className="px-2 py-1 sm:px-2.5 sm:py-1.5 bg-[#1A1A24]/95 border border-[#38364C] hover:border-[#D9AA52] font-mono text-[10px] sm:text-xs text-[#E6E4EE] transition-colors whitespace-nowrap shadow-md flex items-center gap-1 cursor-pointer min-h-[30px] sm:min-h-[36px]"
-          title="Toggle Party Members List"
+          title={isOpenWorld ? 'Toggle Online Players List' : 'Toggle Party Members List'}
         >
-          <span>Party ({snapshot.players.length})</span>
+          <span>{isOpenWorld ? `World (${snapshot.players.length})` : `Party (${snapshot.players.length})`}</span>
           <span className="text-[9px] sm:text-[10px] text-[#FCD34D]">{partyOpen ? '▴' : '▾'}</span>
         </button>
 
@@ -1155,25 +1212,37 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
           <aside className="mt-1 space-y-1 w-48 sm:w-60 max-h-[45dvh] overflow-y-auto custom-scrollbar bg-[#1A1A24]/95 border border-[#323044] p-1.5 sm:p-2 shadow-2xl animate-in fade-in duration-150">
             {snapshot.players.map((p) => {
               const cDef = HERO_CLASSES[p.heroClass];
+              const isMe = p.id === playerId;
+              const isPvpRival = Boolean(snapshot.pvpEnabled && !isMe);
               const hpPct = Math.max(0, Math.min(100, (p.hp / Math.max(1, p.maxHp)) * 100));
               const memberIsHost =
                 !isTavern &&
+                !isOpenWorld &&
                 (snapshot.hostId ? snapshot.hostId === p.id : snapshot.hostName === p.username);
               return (
                 <div
                   key={p.id}
                   className={`bg-[#242332] border px-2 py-1.5 space-y-1 ${
-                    !p.connected ? 'border-[#6E2932] opacity-75' : 'border-[#3E3C50]'
+                    !p.connected
+                      ? 'border-[#6E2932] opacity-75'
+                      : isPvpRival
+                        ? 'border-[#EF4444]/40'
+                        : 'border-[#3E3C50]'
                   }`}
                 >
                   <div className="flex items-center justify-between gap-1 text-[11px] sm:text-xs">
                     <span className="font-display text-xs text-white truncate flex items-center gap-1">
-                      <span className="truncate">
-                        {p.username} {p.id === playerId ? '(You)' : ''}
+                      <span className={`truncate ${isPvpRival ? 'text-[#FCA5A5]' : ''}`}>
+                        {p.username} {isMe ? '(You)' : ''}
                       </span>
                       {memberIsHost && (
                         <span className="px-1 py-0.2 bg-[#D9AA52]/20 border border-[#D9AA52]/60 text-[#FDE68A] font-mono text-[8px] font-bold shrink-0">
                           HOST
+                        </span>
+                      )}
+                      {isPvpRival && (
+                        <span className="px-1 py-0.2 bg-[#7F1D1D]/50 border border-[#EF4444]/60 text-[#FCA5A5] font-mono text-[8px] font-bold shrink-0">
+                          PVP
                         </span>
                       )}
                     </span>
@@ -1182,26 +1251,35 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
                     </span>
                   </div>
 
-                  <div className="w-full h-1.5 bg-[#171622] overflow-hidden">
-                    <div
-                      style={{ width: `${hpPct}%` }}
-                      className={`h-full ${
-                        p.downed
-                          ? 'bg-[#64748B]'
-                          : hpPct <= 30
-                            ? 'bg-[#EF4444]'
-                            : 'bg-[#22C55E]'
-                      }`}
-                    />
-                  </div>
+                  {!isPvpRival ? (
+                    <>
+                      <div className="w-full h-1.5 bg-[#171622] overflow-hidden">
+                        <div
+                          style={{ width: `${hpPct}%` }}
+                          className={`h-full ${
+                            p.downed
+                              ? 'bg-[#64748B]'
+                              : hpPct <= 30
+                                ? 'bg-[#EF4444]'
+                                : 'bg-[#22C55E]'
+                          }`}
+                        />
+                      </div>
 
-                  <div className="flex items-center justify-between text-[10px] font-mono tabular-nums text-[#C9C7D8]">
-                    <span>
-                      HP {p.hp}/{p.maxHp}
-                      {p.shield > 0 ? ` (+${p.shield})` : ''}
-                    </span>
-                    <span>{p.downed ? 'DOWN' : `${Math.round(hpPct)}%`}</span>
-                  </div>
+                      <div className="flex items-center justify-between text-[10px] font-mono tabular-nums text-[#C9C7D8]">
+                        <span>
+                          HP {p.hp}/{p.maxHp}
+                          {p.shield > 0 ? ` (+${p.shield})` : ''}
+                        </span>
+                        <span>{p.downed ? 'DOWN' : `${Math.round(hpPct)}%`}</span>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="flex items-center justify-between text-[10px] font-mono tabular-nums text-[#FCA5A5]">
+                      <span>Lv.{p.level} · {p.kills} Kills</span>
+                      <span>{p.downed ? 'FALLEN' : 'ACTIVE'}</span>
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -1289,6 +1367,7 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
           )}
           {/* Armament / Tactical Buff & Channel Status Indicators */}
           {(myShieldLocked ||
+            (me.spawnProtectionMs ?? 0) > 0 ||
             (me.bastionCounterMs ?? 0) > 0 ||
             (me.crimsonFrenzyMs ?? 0) > 0 ||
             isChronoSuspended ||
@@ -1296,6 +1375,11 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
             me.equippedScrollId) && (
             <div className="pt-1 border-t border-[#2E2B3D] space-y-1">
               <div className="flex flex-wrap gap-1">
+                {(me.spawnProtectionMs ?? 0) > 0 && (
+                  <div className="px-1.5 py-0.5 rounded-sm border border-[#FACC15]/80 bg-[#422006]/75 text-[#FEF08A] text-[9px] font-mono font-bold tracking-wide">
+                    PROTECTED {((me.spawnProtectionMs || 0) / 1000).toFixed(1)}s
+                  </div>
+                )}
                 {myShieldLocked && (
                   <div
                     title="Shield gain blocked while Crimson War Axe is equipped."
@@ -1603,6 +1687,17 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
                 const spec = getAbilityTargetSpec('arcanist', 'tactical', 'disintegration');
                 const liveSnap = latestSnapshotRef.current;
                 const liveMe = liveSnap?.players.find((p) => p.id === playerId) || me;
+                const pvpPlayers = liveSnap?.pvpEnabled
+                  ? liveSnap.players
+                      .filter(
+                        (p) =>
+                          p.id !== liveMe.id &&
+                          p.connected &&
+                          !p.downed &&
+                          (p.spawnProtectionMs || 0) <= 0
+                      )
+                      .map((p) => ({ id: p.id, x: p.x, y: p.y, radius: 14 }))
+                  : undefined;
                 const smart = resolveSkillSmartTarget({
                   spec,
                   playerX: liveMe.x,
@@ -1614,6 +1709,7 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
                   map,
                   props: liveSnap?.props,
                   enemies: liveSnap?.enemies ?? [],
+                  pvpPlayers,
                   trainingDummies: liveSnap?.trainingDummies,
                 });
                 sfx.playArcanistSpell('disintegration');
@@ -2054,6 +2150,7 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
           floor={Math.max(1, snapshot?.floor || 1)}
           mapBiome={map.biomeTitle}
           isTavern={isTavern}
+          isOpenWorld={isOpenWorld}
           onClose={() => setPauseOpen(false)}
           onOpenInventory={() => setInventoryModalOpen(true)}
           onOpenAttributes={() => setAttributesModalOpen(true)}
@@ -2077,9 +2174,6 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
         const dlg = me.npcDialogue!;
         const handlePickOption = (optionId: string) => {
           sfx.playUiClick('confirm');
-          if (optionId === 'goodbye' || optionId === 'reset_stats') {
-            optimisticCloseDialogue();
-          }
           if (optionId === 'reset_stats') {
             onSendAdminCommand?.({ type: 'player:reset_attributes' });
           } else if (optionId === 'goodbye') {
@@ -2100,6 +2194,8 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
 
         return (
           <div
+            onMouseDown={(e) => e.stopPropagation()}
+            onTouchStart={(e) => e.stopPropagation()}
             style={
               anchored && clampedLeft !== undefined && clampedTop !== undefined
                 ? { left: `${clampedLeft}px`, top: `${clampedTop}px`, transform: 'translateX(-50%)' }
@@ -2123,7 +2219,6 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
               type="button"
               onClick={() => {
                 sfx.playUiClick();
-                optimisticCloseDialogue();
                 onSendAdminCommand?.({ type: 'player:dialogue_close' });
               }}
               className="stone-button stone-button-dark text-[10px] sm:text-[11px] font-mono py-1 px-2 min-h-0"
@@ -2135,8 +2230,22 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
         );
       })()}
 
-      {/* Victory / Defeat Modal */}
-      {(snapshot.status === 'victory' || snapshot.status === 'defeat') && (
+      {/* Open World Respawn Countdown Overlay */}
+      {isOpenWorld && me?.downed && (
+        <div className="fixed inset-x-0 top-24 sm:top-28 z-30 flex justify-center px-4 pointer-events-none">
+          <div className="stone-panel px-5 py-3 border-2 border-[#EF4444]/80 bg-[#1B1318]/95 text-center shadow-2xl space-y-1">
+            <div className="font-display text-base sm:text-lg font-bold text-[#FCA5A5]">
+              Fallen in Battle
+            </div>
+            <div className="font-mono text-xs text-[#FDE68A] tabular-nums">
+              Respawning in {Math.max(0.1, (me.downedTimerMs || 0) / 1000).toFixed(1)}s...
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Victory / Defeat Modal (Dungeon Expeditions only) */}
+      {(snapshot.status === 'victory' || snapshot.status === 'defeat') && !isOpenWorld && (
         <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
           <div className="stone-panel max-w-lg w-full p-5 sm:p-7 space-y-5 my-auto">
             <div className="text-center space-y-1">

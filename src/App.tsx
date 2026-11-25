@@ -36,7 +36,7 @@ const ACTIVE_ROOM_KEY = 'beyond_active_room_id';
 
 function saveActiveRoomId(roomId: string | null): void {
   try {
-    if (roomId && roomId !== 'TAVERN-HUB') {
+    if (roomId && roomId !== 'TAVERN-HUB' && roomId !== 'OPEN-WORLD') {
       sessionStorage.setItem(ACTIVE_ROOM_KEY, roomId);
     } else {
       sessionStorage.removeItem(ACTIVE_ROOM_KEY);
@@ -100,7 +100,52 @@ export function App() {
   const selectedClassRef = useRef<HeroClassId>(selectedClass);
   selectedClassRef.current = selectedClass;
 
+  const applyIncomingSnapshot = useCallback((nextSnapRaw: GameSnapshot) => {
+    const privateDlg = privateNpcDialogueRef.current;
+    const pid = activePlayerIdRef.current;
+    const needsDialoguePatch =
+      Boolean(pid) &&
+      (Boolean(privateDlg) ||
+        nextSnapRaw.players.some((p) => Boolean(p.npcDialogue)));
+    const nextSnap = needsDialoguePatch
+      ? {
+          ...nextSnapRaw,
+          players: nextSnapRaw.players.map((p) =>
+            p.id === pid
+              ? { ...p, npcDialogue: privateDlg }
+              : p.npcDialogue
+                ? { ...p, npcDialogue: null }
+                : p
+          ),
+        }
+      : nextSnapRaw;
+
+    // Canvas always consumes latest 40Hz snapshot via ref with zero React re-render overhead
+    latestSnapshotRef.current = nextSnap;
+    const now = performance.now();
+    const nextHudKey = buildSnapshotHudKey(
+      nextSnap,
+      pid,
+      dungeonMapRef.current
+    );
+    if (
+      nextHudKey !== lastHudKeyRef.current ||
+      now - lastHudSyncAtRef.current >= HUD_MAX_STALE_MS
+    ) {
+      lastHudKeyRef.current = nextHudKey;
+      lastHudSyncAtRef.current = now;
+      setSnapshot(nextSnap);
+    }
+  }, []);
+
   const sendWs = useCallback((msg: ClientMessage): boolean => {
+    if (msg.type === 'player:dialogue_close') {
+      privateNpcDialogueRef.current = null;
+      const curSnap = latestSnapshotRef.current;
+      if (curSnap) {
+        applyIncomingSnapshot(curSnap);
+      }
+    }
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) return false;
     if (
@@ -111,7 +156,7 @@ export function App() {
     }
     ws.send(JSON.stringify(msg));
     return true;
-  }, []);
+  }, [applyIncomingSnapshot]);
 
   // Restore session if token exists in sessionStorage
   useEffect(() => {
@@ -202,37 +247,6 @@ export function App() {
           return;
         }
 
-        const applyIncomingSnapshot = (nextSnapRaw: GameSnapshot) => {
-          const privateDlg = privateNpcDialogueRef.current;
-          const pid = activePlayerIdRef.current;
-          const nextSnap =
-            privateDlg && pid
-              ? {
-                  ...nextSnapRaw,
-                  players: nextSnapRaw.players.map((p) =>
-                    p.id === pid ? { ...p, npcDialogue: privateDlg } : p
-                  ),
-                }
-              : nextSnapRaw;
-
-          // Canvas always consumes latest 40Hz snapshot via ref with zero React re-render overhead
-          latestSnapshotRef.current = nextSnap;
-          const now = performance.now();
-          const nextHudKey = buildSnapshotHudKey(
-            nextSnap,
-            pid,
-            dungeonMapRef.current
-          );
-          if (
-            nextHudKey !== lastHudKeyRef.current ||
-            now - lastHudSyncAtRef.current >= HUD_MAX_STALE_MS
-          ) {
-            lastHudKeyRef.current = nextHudKey;
-            lastHudSyncAtRef.current = now;
-            setSnapshot(nextSnap);
-          }
-        };
-
         if (msg.type === 'lobby:rooms') {
           const lobbyKey = buildLobbyRoomsKey(msg.rooms, msg.onlineCount);
           if (lobbyKey !== lastLobbyKeyRef.current) {
@@ -248,7 +262,13 @@ export function App() {
           privateNpcDialogueRef.current = null;
           snapshotSeqRef.current = 0;
           lastResyncRequestAtRef.current = 0;
-          lastHudKeyRef.current = buildSnapshotHudKey(msg.snapshot, msg.playerId, msg.map);
+          const sanitizedSnapshot: GameSnapshot = {
+            ...msg.snapshot,
+            players: msg.snapshot.players.map((p) =>
+              p.npcDialogue ? { ...p, npcDialogue: null } : p
+            ),
+          };
+          lastHudKeyRef.current = buildSnapshotHudKey(sanitizedSnapshot, msg.playerId, msg.map);
           lastHudSyncAtRef.current = performance.now();
           inputDispatcherRef.current.reset();
           latestInputSeqRef.current = 0;
@@ -258,8 +278,8 @@ export function App() {
           }
           setPlayerId(msg.playerId);
           setDungeonMap(msg.map);
-          latestSnapshotRef.current = msg.snapshot;
-          setSnapshot(msg.snapshot);
+          latestSnapshotRef.current = sanitizedSnapshot;
+          setSnapshot(sanitizedSnapshot);
           setChatMessages(msg.chat);
           setErrorBanner(null);
           setScreen('PLAYING');
@@ -301,9 +321,6 @@ export function App() {
           const curSnap = latestSnapshotRef.current;
           if (curSnap) {
             applyIncomingSnapshot(curSnap);
-            if (latestSnapshotRef.current) {
-              setSnapshot({ ...latestSnapshotRef.current });
-            }
           }
         } else if (msg.type === 'chat:message') {
           setChatMessages((prev) => {
@@ -598,7 +615,11 @@ export function App() {
   }
 
   if (screen === 'PLAYING' && dungeonMap && snapshot) {
-    if (snapshot.roomId !== 'TAVERN-HUB' && snapshot.status === 'waiting') {
+    if (
+      snapshot.roomId !== 'TAVERN-HUB' &&
+      snapshot.roomId !== 'OPEN-WORLD' &&
+      snapshot.status === 'waiting'
+    ) {
       return (
         <PartyLobbyView
           playerId={playerId}

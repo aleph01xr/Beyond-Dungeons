@@ -114,6 +114,7 @@ export const SanctuaryLobby: React.FC<SanctuaryLobbyProps> = ({
     const joinable = rooms.find(
       (r) =>
         r.roomId !== 'TAVERN-HUB' &&
+        r.roomId !== 'OPEN-WORLD' &&
         r.status === 'waiting' &&
         r.playerCount < r.maxPlayers
     );
@@ -150,6 +151,11 @@ export const SanctuaryLobby: React.FC<SanctuaryLobbyProps> = ({
   const handleEnterTavern = () => {
     sfx.playUiClick();
     onJoinRoom('TAVERN-HUB', selectedClass);
+  };
+
+  const handleEnterOpenWorld = () => {
+    sfx.playUiClick();
+    onJoinRoom('OPEN-WORLD', selectedClass);
   };
 
   const currentClassDef = HERO_CLASSES[selectedClass];
@@ -216,18 +222,25 @@ export const SanctuaryLobby: React.FC<SanctuaryLobbyProps> = ({
           ))}
         </nav>
 
-        <div className="flex items-center gap-3 shrink-0">
+        <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+          <button
+            type="button"
+            onClick={handleEnterOpenWorld}
+            className="stone-button stone-button-red text-[10px] sm:text-xs whitespace-nowrap"
+          >
+            Open World
+          </button>
           <button
             type="button"
             onClick={handleEnterTavern}
-            className="stone-button stone-button-gold text-[10px] sm:text-xs"
+            className="stone-button stone-button-gold text-[10px] sm:text-xs whitespace-nowrap"
           >
             Tavern Hub
           </button>
           <button
             type="button"
             onClick={handleQuickStart}
-            className="stone-button stone-button-blue text-[10px] sm:text-xs whitespace-nowrap"
+            className="stone-button stone-button-blue text-[10px] sm:text-xs whitespace-nowrap hidden sm:inline-flex"
           >
             Quick Co-op
           </button>
@@ -361,29 +374,62 @@ export const SanctuaryLobby: React.FC<SanctuaryLobbyProps> = ({
         {/* TAB 1: EXPEDITIONS */}
         {activeTab === 'expeditions' && (
           <div className="space-y-8">
-            {/* Tavern Banner Card */}
-            <div className="p-6 sm:p-7 bg-gradient-to-r from-[#2A231C] via-[#22202B] to-[#1D1C26] border-2 border-[#D9AA52] flex flex-col md:flex-row items-center justify-between gap-6 shadow-xl relative overflow-hidden">
-              <div className="absolute -right-6 -bottom-6 opacity-10 text-9xl pointer-events-none select-none font-display">
-                
-              </div>
-              <div className="space-y-2 text-center md:text-left z-10">
-                <div className="inline-flex items-center gap-2 px-2.5 py-1 bg-[#D9AA52]/20 border border-[#D9AA52] text-[#FCD34D] font-mono text-xs font-semibold">
-                  <span></span> Multiplayer Social Hub
+            {/* Persistent Realm Gateways: Tavern Hub & Open World PvP */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+              {/* Tavern Banner Card */}
+              <div className="p-5 sm:p-6 bg-gradient-to-r from-[#2A231C] via-[#22202B] to-[#1D1C26] border-2 border-[#D9AA52] flex flex-col justify-between gap-5 shadow-xl relative overflow-hidden">
+                <div className="space-y-2 z-10">
+                  <div className="inline-flex items-center gap-2 px-2.5 py-1 bg-[#D9AA52]/20 border border-[#D9AA52] text-[#FCD34D] font-mono text-xs font-semibold">
+                    Multiplayer Social Hub
+                  </div>
+                  <h2 className="font-display text-xl sm:text-2xl font-bold text-white">
+                    Sanctuary Tavern &amp; Training Ground
+                  </h2>
+                  <p className="text-xs sm:text-sm text-[#BDBACF] leading-relaxed">
+                    Meet adventurers in real time, talk to Tavern NPCs, and test your build on training dummies.
+                  </p>
                 </div>
-                <h2 className="font-display text-2xl sm:text-3xl font-bold text-white">
-                  Sanctuary Tavern & Training Ground
-                </h2>
-                <p className="text-xs sm:text-sm text-[#BDBACF] max-w-3xl leading-relaxed">
-                  Meet adventurers in real time, talk to Tavern NPCs, and test your build on training dummies.
-                </p>
+                <div className="flex items-center justify-between gap-3">
+                  <button
+                    type="button"
+                    onClick={handleEnterTavern}
+                    className="stone-button stone-button-gold px-6 py-3 text-sm shadow-xl"
+                  >
+                    Enter Tavern Hub
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleQuickStart}
+                    className="stone-button stone-button-blue px-4 py-3 text-xs sm:hidden"
+                  >
+                    Quick Co-op
+                  </button>
+                </div>
               </div>
-              <button
-                type="button"
-                onClick={handleEnterTavern}
-                className="stone-button stone-button-gold px-8 py-4 text-base shadow-xl"
-              >
-                Enter Tavern Hub
-              </button>
+
+              {/* Open World PvP Banner Card */}
+              <div className="p-5 sm:p-6 bg-gradient-to-r from-[#2B171B] via-[#1E2229] to-[#17211B] border-2 border-[#EF4444]/80 flex flex-col justify-between gap-5 shadow-xl relative overflow-hidden">
+                <div className="space-y-2 z-10">
+                  <div className="inline-flex items-center gap-2 px-2.5 py-1 bg-[#EF4444]/20 border border-[#EF4444] text-[#FCA5A5] font-mono text-xs font-semibold">
+                    Live Open World PvP
+                  </div>
+                  <h2 className="font-display text-xl sm:text-2xl font-bold text-white">
+                    Verdant Borderlands Overworld
+                  </h2>
+                  <p className="text-xs sm:text-sm text-[#BDBACF] leading-relaxed">
+                    Roam a shared wilderness map with live real-time players, open PvP combat, and automatic respawning.
+                  </p>
+                </div>
+                <div>
+                  <button
+                    type="button"
+                    onClick={handleEnterOpenWorld}
+                    className="stone-button stone-button-red px-6 py-3 text-sm shadow-xl"
+                  >
+                    Enter Open World
+                  </button>
+                </div>
+              </div>
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">

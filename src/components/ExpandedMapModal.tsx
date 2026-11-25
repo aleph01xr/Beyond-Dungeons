@@ -1,5 +1,5 @@
-import React from 'react';
-import { TILE_SIZE, type DungeonMap, type GameSnapshot, type PlayerState } from '../shared/types.ts';
+import React, { useEffect, useRef } from 'react';
+import { TILE_SIZE, type DungeonMap, type GameSnapshot } from '../shared/types.ts';
 import { sfx } from '../client/sound.ts';
 
 interface ExpandedMapModalProps {
@@ -15,21 +15,73 @@ export const ExpandedMapModal: React.FC<ExpandedMapModalProps> = ({
   playerId,
   onClose,
 }) => {
-  const me = snapshot.players.find((p) => p.id === playerId) || snapshot.players[0];
-  const boss = snapshot.enemies.find((e) => e.kind === 'boss');
-
+  const isOpenWorld = snapshot.roomMode === 'open_world' || map.biome === 'overworld';
   const flagMap = new Map(snapshot.roomClearedFlags.map((f) => [f.id, f]));
 
-  // Calculate zoom scale for 600px canvas viewport
   const maxDim = Math.max(map.width, map.height);
-  const scale = Math.max(6, Math.min(12, Math.floor(520 / maxDim)));
+  const scale = Math.max(3, Math.min(12, Math.floor(520 / maxDim)));
   const canvasW = map.width * scale;
   const canvasH = map.height * scale;
+
+  const tileCanvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  useEffect(() => {
+    const canvas = tileCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    ctx.fillStyle = isOpenWorld ? '#0E1418' : '#111018';
+    ctx.fillRect(0, 0, canvasW, canvasH);
+
+    for (let ty = 0; ty < map.height; ty++) {
+      for (let tx = 0; tx < map.width; tx++) {
+        const code = map.tiles[ty * map.width + tx];
+        if (isOpenWorld) {
+          const isOuter = tx < 2 || tx >= map.width - 2 || ty < 2 || ty >= map.height - 2;
+          if (code === 0) {
+            if (isOuter) {
+              ctx.fillStyle = '#0A1014';
+            } else {
+              const isShallow =
+                map.tiles[(ty - 1) * map.width + tx] !== 0 ||
+                map.tiles[(ty + 1) * map.width + tx] !== 0 ||
+                map.tiles[ty * map.width + (tx - 1)] !== 0 ||
+                map.tiles[ty * map.width + (tx + 1)] !== 0;
+              ctx.fillStyle = isShallow ? '#2563EB' : '#163D6E';
+            }
+          } else if (code === 1) {
+            ctx.fillStyle = '#255B34';
+          } else if (code === 2) {
+            ctx.fillStyle = '#143820';
+          } else if (code === 3) {
+            ctx.fillStyle = tx >= 64 && ty < 45 ? '#7C654F' : '#64748B';
+          } else if (code === 4) {
+            ctx.fillStyle = '#7C5A3C';
+          } else if (code === 5) {
+            ctx.fillStyle = '#585D6E';
+          } else {
+            ctx.fillStyle = '#B5935A';
+          }
+          ctx.fillRect(tx * scale, ty * scale, scale, scale);
+          if (tx === 60 && ty === 45) {
+            ctx.fillStyle = 'rgba(250, 204, 21, 0.45)';
+            ctx.fillRect((tx - 1) * scale, (ty - 1) * scale, scale * 3, scale * 3);
+          }
+        } else if (code > 0) {
+          ctx.fillStyle = '#1E1D2A';
+          ctx.fillRect(tx * scale, ty * scale, scale, scale);
+        }
+      }
+    }
+  }, [map, canvasW, canvasH, scale, isOpenWorld]);
+
+  const connectedPlayers = snapshot.players.filter((p) => p.connected);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-1.5 sm:p-6 bg-black/85 backdrop-blur-md animate-in fade-in duration-200 select-none pb-safe pt-safe pl-safe pr-safe">
       <div className="stone-panel w-full max-w-4xl max-h-[94dvh] flex flex-col overflow-hidden text-white rounded-none">
-        
+
         {/* Header */}
         <div className="stone-plaque p-2.5 sm:p-4 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3">
@@ -37,19 +89,33 @@ export const ExpandedMapModal: React.FC<ExpandedMapModalProps> = ({
               [MAP]
             </div>
             <div>
-              <div className="flex items-center gap-2 font-mono">
+              <div className="flex items-center gap-2 font-mono flex-wrap">
                 <h2 className="text-base sm:text-lg font-bold text-white tracking-wide">
-                  Floor {snapshot.floor}: {map.biomeTitle}
+                  {isOpenWorld
+                    ? `${map.biomeTitle} · Open World`
+                    : map.floor === 0
+                      ? 'Sanctuary Tavern Hub'
+                      : `Floor ${snapshot.floor}: ${map.biomeTitle}`}
                 </h2>
-                <span className="text-[10px] px-2 py-0.5 bg-[#252336] border border-[#353442] text-[#FCD34D]">
-                  SEED #{map.seed}
-                </span>
-                <span className="text-[10px] px-2 py-0.5 border border-[#38BDF8]/40 bg-[#38BDF8]/10 text-[#38BDF8]">
-                  {snapshot.difficulty}
-                </span>
+                {!isOpenWorld && (
+                  <span className="text-[10px] px-2 py-0.5 bg-[#252336] border border-[#353442] text-[#FCD34D]">
+                    SEED #{map.seed}
+                  </span>
+                )}
+                {isOpenWorld ? (
+                  <span className="text-[10px] px-2 py-0.5 border border-[#EF4444]/60 bg-[#7F1D1D]/40 text-[#FCA5A5] font-bold">
+                    OPEN PVP
+                  </span>
+                ) : (
+                  <span className="text-[10px] px-2 py-0.5 border border-[#38BDF8]/40 bg-[#38BDF8]/10 text-[#38BDF8]">
+                    {snapshot.difficulty}
+                  </span>
+                )}
               </div>
               <p className="text-xs text-[#A19FAF] font-mono mt-0.5 tabular-nums">
-                Rooms {snapshot.combatRoomsCleared ?? 0}/{snapshot.combatRoomsTotal ?? 0} · Boss Wards {snapshot.bossWards ?? 0} · Guardians Left {snapshot.guardiansRemaining ?? 0} · Press [M] or [Esc]
+                {isOpenWorld
+                  ? `Players Online: ${connectedPlayers.length} · Full-Map Radar · Press [M] or [Esc]`
+                  : `Rooms ${snapshot.combatRoomsCleared ?? 0}/${snapshot.combatRoomsTotal ?? 0} · Boss Wards ${snapshot.bossWards ?? 0} · Guardians Left ${snapshot.guardiansRemaining ?? 0} · Press [M] or [Esc]`}
               </p>
             </div>
           </div>
@@ -68,46 +134,83 @@ export const ExpandedMapModal: React.FC<ExpandedMapModalProps> = ({
         </div>
 
         {/* Map Body */}
-        <div className="flex-1 overflow-y-auto p-4 sm:p-6 flex flex-col items-center justify-center space-y-6">
+        <div className="flex-1 overflow-y-auto p-3 sm:p-6 flex flex-col items-center justify-center space-y-5">
 
           {/* Map Graphic Container */}
-          <div className="stone-input p-3 sm:p-4 flex items-center justify-center max-w-full overflow-auto">
+          <div className="stone-input p-2 sm:p-4 flex items-center justify-center max-w-full overflow-auto">
             <div
-              className="relative border-2 border-[#353442] bg-[#111018]"
+              className="relative border-2 border-[#353442] bg-[#111018] shrink-0"
               style={{ width: canvasW, height: canvasH }}
             >
-              {/* Corridor Tiles */}
-              {Array.from({ length: map.height }).map((_, ty) =>
-                Array.from({ length: map.width }).map((_, tx) => {
-                  const tileCode = map.tiles[ty * map.width + tx];
-                  if (tileCode === 0) return null;
-                  return (
-                    <div
-                      key={`t_${tx}_${ty}`}
-                      className="absolute bg-[#1E1D2A]"
-                      style={{
-                        left: tx * scale,
-                        top: ty * scale,
-                        width: scale,
-                        height: scale,
-                      }}
-                    />
-                  );
-                })
-              )}
+              <canvas
+                ref={tileCanvasRef}
+                width={canvasW}
+                height={canvasH}
+                className="block pixelated"
+                style={{ width: canvasW, height: canvasH }}
+              />
 
-              {/* Rooms */}
-              {map.rooms.map((room) => {
-                const flags = flagMap.get(room.id);
-                const discovered = flags ? flags.discovered : room.discovered;
-                const cleared = flags ? flags.cleared : room.cleared;
-                const isGuardian = Boolean(room.guardian || flags?.guardian);
+              {/* Rooms (Dungeon Mode only) */}
+              {!isOpenWorld &&
+                map.rooms.map((room) => {
+                  const flags = flagMap.get(room.id);
+                  const discovered = flags ? flags.discovered : room.discovered;
+                  const cleared = flags ? flags.cleared : room.cleared;
+                  const isGuardian = Boolean(room.guardian || flags?.guardian);
 
-                if (!discovered && room.type !== 'boss') {
+                  if (!discovered && room.type !== 'boss') {
+                    return (
+                      <div
+                        key={`r_${room.id}`}
+                        className="absolute bg-[#0D0C14] border border-[#1E1D2A]/60 flex items-center justify-center font-mono text-[9px] text-[#475569]"
+                        style={{
+                          left: room.x * scale,
+                          top: room.y * scale,
+                          width: room.w * scale,
+                          height: room.h * scale,
+                        }}
+                      >
+                        ?
+                      </div>
+                    );
+                  }
+
+                  let bgClass = 'bg-[#1E293B] border-[#475569]';
+                  let typeTag = '[COMBAT]';
+                  let tagColor = 'text-[#94A3B8]';
+
+                  if (room.type === 'boss') {
+                    bgClass = 'bg-[#7F1D1D] border-[#EF4444] animate-pulse';
+                    typeTag = '[BOSS SANCTUM]';
+                    tagColor = 'text-[#FCA5A5]';
+                  } else if (room.type === 'treasure') {
+                    bgClass = 'bg-[#78350F] border-[#F59E0B]';
+                    typeTag = '[TREASURE VAULT]';
+                    tagColor = 'text-[#FDE047]';
+                  } else if (room.type === 'shrine') {
+                    bgClass = 'bg-[#064E3B] border-[#10B981]';
+                    typeTag = '[SANCTUARY SHRINE]';
+                    tagColor = 'text-[#6EE7B7]';
+                  } else if (room.type === 'start') {
+                    bgClass = 'bg-[#1E293B] border-[#64748B]';
+                    typeTag = '[START]';
+                    tagColor = 'text-[#CBD5E1]';
+                  } else if (isGuardian) {
+                    bgClass = cleared
+                      ? 'bg-[#064E3B]/70 border-[#10B981]'
+                      : 'bg-[#451A03] border-[#F59E0B]';
+                    typeTag = '[GUARDIAN]';
+                    tagColor = cleared ? 'text-[#6EE7B7]' : 'text-[#FCD34D]';
+                  } else if (!cleared) {
+                    bgClass = 'bg-[#334155] border-[#64748B]';
+                    typeTag = '[HOSTILE]';
+                    tagColor = 'text-[#F87171]';
+                  }
+
                   return (
                     <div
                       key={`r_${room.id}`}
-                      className="absolute bg-[#0D0C14] border border-[#1E1D2A]/60 flex items-center justify-center font-mono text-[9px] text-[#475569]"
+                      className={`absolute border-2 ${bgClass} flex flex-col items-center justify-center p-1 text-center font-mono`}
                       style={{
                         left: room.x * scale,
                         top: room.y * scale,
@@ -115,68 +218,38 @@ export const ExpandedMapModal: React.FC<ExpandedMapModalProps> = ({
                         height: room.h * scale,
                       }}
                     >
-                      ?
+                      <span className={`text-[10px] font-bold ${tagColor}`}>
+                        {typeTag}
+                      </span>
+                      {room.type !== 'start' && (
+                        <span className="text-[9px] text-[#A19FAF]">
+                          {cleared ? 'CLEARED' : isGuardian ? 'SEAL ACTIVE' : 'UNCLEARED'}
+                        </span>
+                      )}
                     </div>
                   );
-                }
+                })}
 
-                let bgClass = 'bg-[#1E293B] border-[#475569]';
-                let typeTag = '[COMBAT]';
-                let tagColor = 'text-[#94A3B8]';
-
-                if (room.type === 'boss') {
-                  bgClass = 'bg-[#7F1D1D] border-[#EF4444] animate-pulse';
-                  typeTag = '[BOSS SANCTUM]';
-                  tagColor = 'text-[#FCA5A5]';
-                } else if (room.type === 'treasure') {
-                  bgClass = 'bg-[#78350F] border-[#F59E0B]';
-                  typeTag = '[TREASURE VAULT]';
-                  tagColor = 'text-[#FDE047]';
-                } else if (room.type === 'shrine') {
-                  bgClass = 'bg-[#064E3B] border-[#10B981]';
-                  typeTag = '[SANCTUARY SHRINE]';
-                  tagColor = 'text-[#6EE7B7]';
-                } else if (room.type === 'start') {
-                  bgClass = 'bg-[#1E293B] border-[#64748B]';
-                  typeTag = '[START]';
-                  tagColor = 'text-[#CBD5E1]';
-                } else if (isGuardian) {
-                  bgClass = cleared
-                    ? 'bg-[#064E3B]/70 border-[#10B981]'
-                    : 'bg-[#451A03] border-[#F59E0B]';
-                  typeTag = '[GUARDIAN]';
-                  tagColor = cleared ? 'text-[#6EE7B7]' : 'text-[#FCD34D]';
-                } else if (!cleared) {
-                  bgClass = 'bg-[#334155] border-[#64748B]';
-                  typeTag = '[HOSTILE]';
-                  tagColor = 'text-[#F87171]';
-                }
-
-                return (
+              {/* Overworld Landmark Labels */}
+              {isOpenWorld &&
+                map.regions &&
+                map.regions.map((region) => (
                   <div
-                    key={`r_${room.id}`}
-                    className={`absolute border-2 ${bgClass} flex flex-col items-center justify-center p-1 text-center font-mono`}
+                    key={`reg_${region.id}`}
+                    className="absolute -translate-x-1/2 -translate-y-1/2 pointer-events-none select-none font-mono text-[9px] sm:text-[10px] font-bold uppercase tracking-wider whitespace-nowrap px-1"
                     style={{
-                      left: room.x * scale,
-                      top: room.y * scale,
-                      width: room.w * scale,
-                      height: room.h * scale,
+                      left: (region.x / TILE_SIZE) * scale,
+                      top: (region.y / TILE_SIZE) * scale - 10,
+                      color: region.accentColor,
+                      textShadow: '0 1px 3px rgba(0,0,0,0.95), 0 0 6px rgba(0,0,0,0.9)',
                     }}
                   >
-                    <span className={`text-[10px] font-bold ${tagColor}`}>
-                      {typeTag}
-                    </span>
-                    {room.type !== 'start' && (
-                      <span className="text-[9px] text-[#A19FAF]">
-                        {cleared ? 'CLEARED' : isGuardian ? 'SEAL ACTIVE' : 'UNCLEARED'}
-                      </span>
-                    )}
+                    {region.name}
                   </div>
-                );
-              })}
+                ))}
 
-              {/* Portal Marker */}
-              {map.portalPos && (
+              {/* Portal Marker (Dungeon & Tavern only) */}
+              {map.portalPos && !isOpenWorld && (
                 <div
                   className={`absolute w-4 h-4 -ml-2 -mt-2 rounded-full border-2 flex items-center justify-center font-mono text-[8px] font-bold ${
                     snapshot.bossDefeated
@@ -235,23 +308,26 @@ export const ExpandedMapModal: React.FC<ExpandedMapModalProps> = ({
                 const isMe = p.id === playerId;
                 const px = Math.floor(p.x / TILE_SIZE) * scale;
                 const py = Math.floor(p.y / TILE_SIZE) * scale;
+                const isRival = Boolean(snapshot.pvpEnabled && !isMe);
 
                 return (
                   <div
                     key={`p_${p.id}`}
-                    className={`absolute -ml-3 -mt-3 flex flex-col items-center z-10`}
+                    className="absolute -ml-2.5 -mt-2.5 flex flex-col items-center z-10 pointer-events-none"
                     style={{ left: px, top: py }}
                   >
                     <div
                       className={`w-4 h-4 rounded-full border-2 flex items-center justify-center font-mono text-[9px] font-bold shadow-md ${
                         isMe
                           ? 'bg-[#FACC15] border-[#854D0E] text-black animate-pulse'
-                          : 'bg-[#38BDF8] border-[#1E3A8A] text-black'
+                          : isRival
+                            ? 'bg-[#EF4444] border-[#7F1D1D] text-white'
+                            : 'bg-[#38BDF8] border-[#1E3A8A] text-black'
                       }`}
                     >
                       {p.username.substring(0, 1).toUpperCase()}
                     </div>
-                    <span className="text-[8px] font-mono bg-black/80 text-white px-1 border border-[#353442] whitespace-nowrap mt-0.5">
+                    <span className="text-[8px] font-mono bg-black/85 text-white px-1 border border-[#353442] whitespace-nowrap mt-0.5">
                       {p.username}
                     </span>
                   </div>
@@ -265,32 +341,62 @@ export const ExpandedMapModal: React.FC<ExpandedMapModalProps> = ({
           <div className="stone-plaque p-3 w-full font-mono text-xs flex flex-wrap items-center justify-around gap-4 text-[#A19FAF]">
             <div className="flex items-center gap-2">
               <span className="w-3 h-3 rounded-full bg-[#FACC15] border border-[#854D0E]" />
-              <span>You (Local Hero)</span>
+              <span>You</span>
             </div>
-            <div className="flex items-center gap-2">
-              <span className="w-3 h-3 rounded-full bg-[#38BDF8] border border-[#1E3A8A]" />
-              <span>Co-op Ally</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="w-3.5 h-3.5 rounded-full bg-[#DC2626] border border-[#F87171]" />
-              <span>Floor Boss</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="w-3 h-3 bg-[#451A03] border border-[#F59E0B]" />
-              <span>Guardian Chamber</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="w-3 h-3 bg-[#78350F] border border-[#F59E0B]" />
-              <span>Treasure Room</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="w-3 h-3 bg-[#064E3B] border border-[#10B981]" />
-              <span>Sanctuary Shrine</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="w-3 h-3 rounded-full bg-[#38BDF8] border border-white" />
-              <span>Floor Portal</span>
-            </div>
+            {snapshot.pvpEnabled ? (
+              <div className="flex items-center gap-2">
+                <span className="w-3 h-3 rounded-full bg-[#EF4444] border border-[#7F1D1D]" />
+                <span>Rival Player (PvP)</span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <span className="w-3 h-3 rounded-full bg-[#38BDF8] border border-[#1E3A8A]" />
+                <span>Co-op Ally</span>
+              </div>
+            )}
+            {isOpenWorld ? (
+              <>
+                <div className="flex items-center gap-2">
+                  <span className="w-3 h-3 bg-[#7C5A3C] border border-[#353442]" />
+                  <span>Roads</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="w-3 h-3 bg-[#585D6E] border border-[#353442]" />
+                  <span>Crossroads &amp; Ruins</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="w-3 h-3 bg-[#1D4E89] border border-[#353442]" />
+                  <span>Whispering Lake</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="w-3 h-3 bg-[#143820] border border-[#353442]" />
+                  <span>Forest Ridge</span>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="flex items-center gap-2">
+                  <span className="w-3.5 h-3.5 rounded-full bg-[#DC2626] border border-[#F87171]" />
+                  <span>Floor Boss</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="w-3 h-3 bg-[#451A03] border border-[#F59E0B]" />
+                  <span>Guardian Chamber</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="w-3 h-3 bg-[#78350F] border border-[#F59E0B]" />
+                  <span>Treasure Room</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="w-3 h-3 bg-[#064E3B] border border-[#10B981]" />
+                  <span>Sanctuary Shrine</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="w-3 h-3 rounded-full bg-[#38BDF8] border border-white" />
+                  <span>Floor Portal</span>
+                </div>
+              </>
+            )}
           </div>
 
         </div>
@@ -306,9 +412,9 @@ export const ExpandedMapModal: React.FC<ExpandedMapModalProps> = ({
               sfx.playUiClick();
               onClose();
             }}
-            className="stone-button stone-button-gold py-1.5 px-6 text-xs font-bold"
+            className="stone-button stone-button-gold py-1.5 px-6 text-xs font-bold text-black"
           >
-            Close Tactical Map
+            {isOpenWorld ? 'Close World Map' : 'Close Tactical Map'}
           </button>
         </div>
 

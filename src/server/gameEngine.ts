@@ -31,6 +31,7 @@ import {
   type ProjectileState,
   type PropState,
   type RoomNode,
+  type RoomMode,
   type RoomStatus,
   type RoomSummary,
   type TrainingDummyState,
@@ -52,6 +53,7 @@ import {
   resolveSkillSmartTarget,
 } from '../shared/abilityTargeting.ts';
 import { generateDungeonFloor, generateTavernFloor, makeEnemy } from './dungeonGenerator.ts';
+import { generateOpenWorldMap } from './overworldGenerator.ts';
 import {
   ARCANIST_SCROLLS,
   ARCANIST_SPELLS,
@@ -173,6 +175,11 @@ export class GameRoom {
   public readonly difficulty: DifficultyTier;
   public readonly baseSeed: number;
   public readonly maxPlayers: number;
+  public readonly isTavern: boolean;
+  public readonly isOpenWorld: boolean;
+  public readonly isPersistentSocialRoom: boolean;
+  public readonly roomMode: RoomMode;
+  public readonly pvpEnabled: boolean;
 
   public status: RoomStatus = 'playing';
   public floor = 1;
@@ -212,6 +219,7 @@ export class GameRoom {
     string,
     { carryMsRemaining: number | null; draggedEnemyIds: Set<string> }
   >();
+  private pvpGaleburstStacks = new Map<string, Map<string, number>>();
   public onFloorClearedCallback?: (playerIds: string[], floor: number) => void;
   public onKillCallback?: (playerId: string, meta?: { isBoss?: boolean }) => void;
   public onReviveCallback?: (playerId: string) => void;
@@ -235,14 +243,23 @@ export class GameRoom {
     this.hostId = opts.hostId || '';
     this.hostName = opts.hostName;
     this.difficulty = opts.difficulty;
-    this.maxPlayers = opts.roomId === 'TAVERN-HUB' ? 50 : 4;
+    this.isTavern = opts.roomId === 'TAVERN-HUB';
+    this.isOpenWorld = opts.roomId === 'OPEN-WORLD';
+    this.isPersistentSocialRoom = this.isTavern || this.isOpenWorld;
+    this.roomMode = this.isOpenWorld ? 'open_world' : this.isTavern ? 'tavern' : 'dungeon';
+    this.pvpEnabled = this.isOpenWorld;
+    this.maxPlayers = this.isPersistentSocialRoom ? 50 : 4;
     this.baseSeed =
       opts.seed && opts.seed > 0
         ? Math.floor(opts.seed)
         : Math.floor(100000 + Math.random() * 899999);
     const startFloor =
-      opts.initialFloor !== undefined ? opts.initialFloor : opts.roomId === 'TAVERN-HUB' ? 0 : 1;
-    this.status = opts.roomId === 'TAVERN-HUB' ? 'playing' : (opts.initialStatus ?? 'playing');
+      opts.initialFloor !== undefined
+        ? opts.initialFloor
+        : this.isTavern
+          ? 0
+          : 1;
+    this.status = this.isPersistentSocialRoom ? 'playing' : (opts.initialStatus ?? 'playing');
 
     if (this.status === 'waiting') {
       this.floor = startFloor;
@@ -304,12 +321,92 @@ export class GameRoom {
     if (pr) {
       pr.dummyGaleburstStacks.clear();
     }
+    this.pvpGaleburstStacks.delete(playerId);
+    for (const stacks of this.pvpGaleburstStacks.values()) {
+      stacks.delete(playerId);
+    }
     for (const enemy of this.enemies) {
       const meta = this.enemyMeta.get(enemy.id);
       if (meta?.galeburstByOwner?.delete(playerId)) {
         this.syncEnemyGaleburstMarks(enemy, meta);
       }
     }
+  }
+
+  private getPvpTargetsFor(attacker: PlayerState | null | undefined): PlayerState[] {
+    if (!this.pvpEnabled) return [];
+    const targets: PlayerState[] = [];
+    for (const pr of this.players.values()) {
+      const st = pr.state;
+      if (!st.connected || st.downed || st.hp <= 0) continue;
+      if (attacker && st.id === attacker.id) continue;
+      if ((st.spawnProtectionMs || 0) > 0) continue;
+      targets.push(st);
+    }
+    return targets;
+  }
+
+  private pickOpenWorldSpawnPoint(excludePlayerId?: string): { x: number; y: number } {
+    const candidates =
+      this.map?.spawnPoints && this.map.spawnPoints.length > 0
+        ? this.map.spawnPoints
+        : [this.spawnPoint];
+    const rivals: PlayerState[] = [];
+    for (const pr of this.players.values()) {
+      if (pr.state.id === excludePlayerId || !pr.state.connected || pr.state.downed) continue;
+      rivals.push(pr.state);
+    }
+
+    let bestPt = candidates[0];
+    let bestScore = -1;
+    for (let i = 0; i < candidates.length; i++) {
+      const pt = candidates[i];
+      if (this.collidesCircle(pt.x, pt.y, 12)) continue;
+      let minDist = Infinity;
+      for (const r of rivals) {
+        const d = Math.hypot(r.x - pt.x, r.y - pt.y);
+        if (d < minDist) minDist = d;
+      }
+      if (rivals.length === 0) {
+        minDist = 1000;
+      }
+      if (minDist > bestScore) {
+        bestScore = minDist;
+        bestPt = pt;
+      }
+    }
+    return { x: bestPt.x, y: bestPt.y };
+  }
+
+  private respawnOpenWorldPlayer(pr: PlayerRuntime): void {
+    const p = pr.state;
+    const spawn = this.pickOpenWorldSpawnPoint(p.id);
+    p.x = spawn.x;
+    p.y = spawn.y;
+    p.vx = 0;
+    p.vy = 0;
+    p.downed = false;
+    p.downedTimerMs = 0;
+    p.reviveProgress = 0;
+    p.hp = p.maxHp;
+    p.shield = computePlayerStartingShield(p);
+    p.statuses = [];
+    p.slowedMs = 0;
+    p.stunnedMs = 0;
+    p.frozenMs = 0;
+    p.burnedMs = 0;
+    p.shockedMs = 0;
+    p.poisonedMs = 0;
+    p.bleedingMs = 0;
+    p.silencedMs = 0;
+    p.chronoSuspendedMs = 0;
+    p.skillCooldownMs = 0;
+    p.dashCooldownMs = 0;
+    p.spawnProtectionMs = 2500;
+    this.pvpGaleburstStacks.delete(p.id);
+    this.clearEclipseCharge(pr);
+    this.clearPlayerTacticalState(pr, { removeOwnedZones: true });
+    this.emitEvent('status', p.x, p.y - 26, 'RESPAWNED!', '#34D399');
   }
 
   private syncEnemyGaleburstMarks(enemy: EnemyState, meta: EnemyRuntimeMeta): void {
@@ -676,8 +773,10 @@ export class GameRoom {
   }
 
   public loadFloor(floorNum: number, partySize: number): void {
-    if (this.roomId === 'TAVERN-HUB') {
+    if (this.isTavern) {
       floorNum = 0;
+    } else if (this.isOpenWorld) {
+      floorNum = 1;
     }
     this.floor = floorNum;
     this.enemyMeta.clear();
@@ -688,7 +787,18 @@ export class GameRoom {
     this.voidCreditedProjIds.clear();
     this.temporalCreditedProjIds.clear();
     this.triggeredOnceProjIds.clear();
-    if (floorNum === 0) {
+    this.pvpGaleburstStacks.clear();
+    if (this.isOpenWorld) {
+      const ow = generateOpenWorldMap(this.baseSeed);
+      this.map = ow.map;
+      this.enemies = [];
+      this.props = [];
+      this.npcs = [];
+      this.trainingDummies = [];
+      this.projectiles = [];
+      this.zones = [];
+      this.spawnPoint = ow.spawnPoint;
+    } else if (floorNum === 0) {
       const tav = generateTavernFloor();
       this.map = tav.map;
       this.enemies = tav.enemies;
@@ -1340,7 +1450,7 @@ export class GameRoom {
   }
 
   public returnToWaitingLobby(): void {
-    if (this.roomId === 'TAVERN-HUB') return;
+    if (this.isPersistentSocialRoom) return;
     if (this.status === 'victory' || this.status === 'defeat') {
       this.lastRunSummary = {
         outcome: this.status,
@@ -1404,12 +1514,14 @@ export class GameRoom {
     this.endedAt = null;
     this.runEndRecorded = false;
     this.resetPlayersForNewRun();
-    const restartFloor = this.roomId === 'TAVERN-HUB' ? 0 : 1;
+    const restartFloor = this.isTavern ? 0 : 1;
     this.loadFloor(restartFloor, Math.max(1, this.players.size));
     this.pushSystemChat(
-      this.roomId === 'TAVERN-HUB'
+      this.isTavern
         ? `Sanctuary Tavern refreshed.`
-        : `Host ${this.hostName} restarted the expedition on Seed ${this.baseSeed}.`
+        : this.isOpenWorld
+          ? `Open World refreshed.`
+          : `Host ${this.hostName} restarted the expedition on Seed ${this.baseSeed}.`
     );
     return this.map;
   }
@@ -1419,7 +1531,7 @@ export class GameRoom {
   }
 
   public isPartyLocked(): boolean {
-    return this.roomId !== 'TAVERN-HUB' && this.status === 'playing';
+    return !this.isPersistentSocialRoom && this.status === 'playing';
   }
 
   public isPlayerConnected(playerId: string): boolean {
@@ -1438,7 +1550,7 @@ export class GameRoom {
     playerId: string,
     ready?: boolean
   ): { ok: true; ready: boolean } | { ok: false; reason: string } {
-    if (this.roomId === 'TAVERN-HUB') {
+    if (this.isPersistentSocialRoom) {
       return { ok: false, reason: 'Ready status is only used in expedition party lobbies.' };
     }
     if (this.status !== 'waiting') {
@@ -1458,10 +1570,16 @@ export class GameRoom {
   ):
     | { allowed: true; isReconnect: boolean }
     | { allowed: false; code: 'in_progress' | 'ended' | 'full'; reason: string } {
-    if (this.roomId === 'TAVERN-HUB') {
+    if (this.isPersistentSocialRoom) {
       if (this.hasPlayer(playerId)) return { allowed: true, isReconnect: true };
       if (this.players.size >= this.maxPlayers) {
-        return { allowed: false, code: 'full', reason: 'Sanctuary Tavern is currently full.' };
+        return {
+          allowed: false,
+          code: 'full',
+          reason: this.isOpenWorld
+            ? 'Open World instance is currently full.'
+            : 'Sanctuary Tavern is currently full.',
+        };
       }
       return { allowed: true, isReconnect: false };
     }
@@ -1605,11 +1723,17 @@ export class GameRoom {
     const idx = this.players.size;
     let sx = this.spawnPoint.x + (idx % 2 === 0 ? -18 : 18);
     let sy = this.spawnPoint.y + (idx < 2 ? -14 : 14);
-    for (const ally of this.players.values()) {
-      if (ally.state.connected && !ally.state.downed) {
-        sx = ally.state.x + 22;
-        sy = ally.state.y;
-        break;
+    if (this.isOpenWorld) {
+      const owSpawn = this.pickOpenWorldSpawnPoint(playerId);
+      sx = owSpawn.x;
+      sy = owSpawn.y;
+    } else {
+      for (const ally of this.players.values()) {
+        if (ally.state.connected && !ally.state.downed) {
+          sx = ally.state.x + 22;
+          sy = ally.state.y;
+          break;
+        }
       }
     }
 
@@ -1684,6 +1808,7 @@ export class GameRoom {
       poisonedMs: 0,
       bleedingMs: 0,
       silencedMs: 0,
+      spawnProtectionMs: this.isOpenWorld ? 2500 : 0,
       kills: 0,
       damageDealt: 0,
       revives: 0,
@@ -1760,13 +1885,15 @@ export class GameRoom {
       dialogueSeq: 0,
     });
 
-    if (!this.hostId && this.roomId !== 'TAVERN-HUB') {
+    if (!this.hostId && !this.isPersistentSocialRoom) {
       this.hostId = playerId;
       this.hostName = username;
     }
 
     this.pushSystemChat(
-      `${username} (${def.name}) joined the ${this.status === 'waiting' ? 'party lobby' : 'expedition'}.`
+      this.isOpenWorld
+        ? `${username} (${def.name}) entered the Verdant Borderlands.`
+        : `${username} (${def.name}) joined the ${this.status === 'waiting' ? 'party lobby' : 'expedition'}.`
     );
     return state;
   }
@@ -1794,7 +1921,7 @@ export class GameRoom {
     this.cleanupChronoWellsForOwner(playerId);
     if (pr.state.connected) {
       pr.state.connected = false;
-      if (this.roomId !== 'TAVERN-HUB') {
+      if (!this.isPersistentSocialRoom) {
         this.pushSystemChat(`${pr.state.username} disconnected.`);
       }
       return true;
@@ -2984,7 +3111,8 @@ export class GameRoom {
 
       type LightningTarget =
         | { kind: 'enemy'; id: string; x: number; y: number; dist: number; enemy: EnemyState }
-        | { kind: 'dummy'; id: string; x: number; y: number; dist: number; dummy: TrainingDummyState };
+        | { kind: 'dummy'; id: string; x: number; y: number; dist: number; dummy: TrainingDummyState }
+        | { kind: 'player'; id: string; x: number; y: number; dist: number; player: PlayerState };
 
       const hitTargets: LightningTarget[] = [];
       for (const e of this.enemies) {
@@ -2997,6 +3125,16 @@ export class GameRoom {
         if (diff > halfAngle) continue;
         if (dist > 20 && !this.hasLineOfSight(p.x, p.y, e.x, e.y)) continue;
         hitTargets.push({ kind: 'enemy', id: e.id, x: e.x, y: e.y, dist, enemy: e });
+      }
+      for (const rival of this.getPvpTargetsFor(p)) {
+        const dx = rival.x - p.x;
+        const dy = rival.y - p.y;
+        const dist = Math.hypot(dx, dy);
+        if (dist > maxRange + 14) continue;
+        const diff = Math.abs(normalizeAngle(Math.atan2(dy, dx) - aimAngle));
+        if (diff > halfAngle) continue;
+        if (dist > 20 && !this.hasLineOfSight(p.x, p.y, rival.x, rival.y)) continue;
+        hitTargets.push({ kind: 'player', id: rival.id, x: rival.x, y: rival.y, dist, player: rival });
       }
       for (const d of this.trainingDummies) {
         const dx = d.x - p.x;
@@ -3020,6 +3158,8 @@ export class GameRoom {
         chainPoints.push({ x: tgt.x, y: tgt.y });
         if (tgt.kind === 'enemy') {
           this.damageEnemy(tgt.enemy, coneDmg, p, hasCrit, 'lightning');
+        } else if (tgt.kind === 'player') {
+          this.damagePlayer(tgt.player, coneDmg, 'lightning', p, { isCrit: hasCrit });
         } else {
           this.damageDummy(tgt.dummy, coneDmg, p, hasCrit, false, 'lightning');
         }
@@ -3106,6 +3246,7 @@ export class GameRoom {
         map: this.map,
         props: this.props,
         enemies: this.enemies,
+        pvpPlayers: this.getPvpTargetsFor(p),
         trainingDummies: this.trainingDummies,
       })?.target;
 
@@ -3146,6 +3287,7 @@ export class GameRoom {
     if (targetEnemyId) {
       const targetEntity =
         this.enemies.find((e) => e.id === targetEnemyId && e.hp > 0) ||
+        this.getPvpTargetsFor(p).find((pl) => pl.id === targetEnemyId) ||
         this.trainingDummies.find((d) => d.id === targetEnemyId);
       if (targetEntity) {
         fireAngle = Math.atan2(targetEntity.y - p.y, targetEntity.x - p.x);
@@ -3311,6 +3453,13 @@ export class GameRoom {
           this.onTacticalHitConfirmed(p);
         }
       }
+      for (const rival of this.getPvpTargetsFor(p)) {
+        const d = distancePointToSegment(rival.x, rival.y, p.x, p.y, endX, endY);
+        if (d <= beamHalfWidth + 14) {
+          const dealt = this.damagePlayer(rival, tickDmg, 'arcane', p);
+          if (dealt > 0) this.onTacticalHitConfirmed(p);
+        }
+      }
       for (const dummy of this.trainingDummies) {
         const d = distancePointToSegment(dummy.x, dummy.y, p.x, p.y, endX, endY);
         if (d <= beamHalfWidth + 18) {
@@ -3332,6 +3481,16 @@ export class GameRoom {
       if (!enemy || enemy.hp <= 0 || !this.enemies.includes(enemy)) continue;
       if (Math.hypot(enemy.x - proj.x, enemy.y - proj.y) <= radius + enemy.radius * 0.35) {
         const dealt = this.damageEnemy(enemy, proj.damage, attacker, Boolean(proj.crit), 'fire');
+        if (dealt > 0 && isTacticalProj) {
+          this.onTacticalHitConfirmed(attacker);
+        }
+      }
+    }
+    for (const rival of this.getPvpTargetsFor(attacker)) {
+      if (Math.hypot(rival.x - proj.x, rival.y - proj.y) <= radius + 14) {
+        const dealt = this.damagePlayer(rival, proj.damage, 'fire', attacker, {
+          isCrit: Boolean(proj.crit),
+        });
         if (dealt > 0 && isTacticalProj) {
           this.onTacticalHitConfirmed(attacker);
         }
@@ -3772,6 +3931,7 @@ export class GameRoom {
           map: this.map,
           props: this.props,
           enemies: this.enemies,
+          pvpPlayers: this.getPvpTargetsFor(p),
           trainingDummies: this.trainingDummies,
         });
         if (smart.target) {
@@ -3791,6 +3951,7 @@ export class GameRoom {
         );
         if (scrollActivated && p.relics.includes('oathbound_censer')) {
           for (const ally of this.players.values()) {
+            if (this.pvpEnabled && ally.state.id !== p.id) continue;
             if (!ally.state.downed && Math.hypot(ally.state.x - p.x, ally.state.y - p.y) <= 180) {
               const censerCurseMult = ally.state.statuses && ally.state.statuses.some(s => s.type === 'ashen_curse') ? 0.55 : 1.0;
               const censerHeal = Math.max(1, Math.round(8 * censerCurseMult));
@@ -3812,6 +3973,7 @@ export class GameRoom {
 
       if (p.relics.includes('oathbound_censer')) {
         for (const ally of this.players.values()) {
+          if (this.pvpEnabled && ally.state.id !== p.id) continue;
           if (!ally.state.downed && Math.hypot(ally.state.x - p.x, ally.state.y - p.y) <= 180) {
             const censerCurseMult = ally.state.statuses && ally.state.statuses.some(s => s.type === 'ashen_curse') ? 0.55 : 1.0;
             const censerHeal = Math.max(1, Math.round(8 * censerCurseMult));
@@ -3920,6 +4082,11 @@ export class GameRoom {
             this.damageEnemy(enemy, burstDmg, p, hasCrit, 'divine');
           }
         }
+        for (const rival of this.getPvpTargetsFor(p)) {
+          if (Math.hypot(rival.x - targetPos.x, rival.y - targetPos.y) <= burstRadius + 14) {
+            this.damagePlayer(rival, burstDmg, 'divine', p, { isCrit: hasCrit });
+          }
+        }
         for (const dummy of this.trainingDummies) {
           if (Math.hypot(dummy.x - targetPos.x, dummy.y - targetPos.y) <= burstRadius + 18) {
             this.damageDummy(dummy, burstDmg, p, hasCrit, false, 'divine');
@@ -3953,6 +4120,7 @@ export class GameRoom {
           ownerId: p.id,
         });
         for (const ally of this.players.values()) {
+          if (this.pvpEnabled && ally.state.id !== p.id) continue;
           if (!ally.state.downed && Math.hypot(ally.state.x - p.x, ally.state.y - p.y) <= 170) {
             const shieldGained = this.grantShield(ally.state, 28, 'add');
             if (shieldGained > 0) {
@@ -3967,6 +4135,12 @@ export class GameRoom {
           if (enemy && enemy.hp > 0 && this.enemies.includes(enemy) && Math.hypot(enemy.x - p.x, enemy.y - p.y) <= 84) {
             this.applyHardCc(enemy, 'stun', 1700);
             this.damageEnemy(enemy, Math.round(32 * dmgMult), p, false, 'physical');
+          }
+        }
+        for (const rival of this.getPvpTargetsFor(p)) {
+          if (Math.hypot(rival.x - p.x, rival.y - p.y) <= 84 + 12) {
+            this.applyStatusEffect(rival, 'stun', 1100, p);
+            this.damagePlayer(rival, Math.round(32 * dmgMult), 'physical', p);
           }
         }
         for (const dummy of this.trainingDummies) {
@@ -4046,6 +4220,7 @@ export class GameRoom {
           ownerId: p.id,
         });
         for (const ally of this.players.values()) {
+          if (this.pvpEnabled && ally.state.id !== p.id) continue;
           if (!ally.state.downed && Math.hypot(ally.state.x - p.x, ally.state.y - p.y) <= 210) {
             const heal = GameRoom.computeHealingAmount(baseHeal, p, ally.state);
             this.applyEffectiveHealing(p, ally.state, heal, 'tactical');
@@ -4055,6 +4230,11 @@ export class GameRoom {
         for (const enemy of smiteTargets) {
           if (enemy && enemy.hp > 0 && this.enemies.includes(enemy) && Math.hypot(enemy.x - p.x, enemy.y - p.y) <= 135) {
             this.damageEnemy(enemy, Math.round(28 * dmgMult), p, false, 'divine');
+          }
+        }
+        for (const rival of this.getPvpTargetsFor(p)) {
+          if (Math.hypot(rival.x - p.x, rival.y - p.y) <= 135 + 14) {
+            this.damagePlayer(rival, Math.round(28 * dmgMult), 'divine', p);
           }
         }
         for (const dummy of this.trainingDummies) {
@@ -4086,6 +4266,7 @@ export class GameRoom {
           map: this.map,
           props: this.props,
           enemies: this.enemies,
+          pvpPlayers: this.getPvpTargetsFor(p),
           trainingDummies: this.trainingDummies,
         });
         if (smart.target) {
@@ -4118,7 +4299,14 @@ export class GameRoom {
             enemy.markedMs = 6500;
           }
         }
+        for (const rival of this.getPvpTargetsFor(p)) {
+          if (Math.hypot(rival.x - p.x, rival.y - p.y) <= 340) {
+            rival.slowedMs = Math.max(rival.slowedMs || 0, 2800);
+            this.emitEvent('status', rival.x, rival.y - 24, 'QUARRY MARKED!', '#FBBF24');
+          }
+        }
         for (const ally of this.players.values()) {
+          if (this.pvpEnabled && ally.state.id !== p.id) continue;
           ally.state.hasteMs = 5000;
         }
         this.emitEvent('status', p.x, p.y - 26, 'Hunter Quarry Marked', '#FBBF24');
@@ -4288,6 +4476,14 @@ export class GameRoom {
             }
           }
         }
+        for (const rival of this.getPvpTargetsFor(attacker)) {
+          const dx = rival.x - z.x;
+          const dy = rival.y - z.y;
+          if (dx * dx + dy * dy <= meteorRadSq) {
+            const dealt = this.damagePlayer(rival, meteorDmg, 'arcane', attacker);
+            if (dealt > 0) this.onTacticalHitConfirmed(attacker);
+          }
+        }
         for (const dummy of this.trainingDummies) {
           const dx = dummy.x - z.x;
           const dy = dummy.y - z.y;
@@ -4316,6 +4512,15 @@ export class GameRoom {
               if (dx * dx + dy * dy <= hitR * hitR) {
                 this.damageEnemy(enemy, burnDmg, attacker, false, 'fire');
               }
+            }
+          }
+          const pvpBurnHitR = z.radius + 14;
+          const pvpBurnHitRSq = pvpBurnHitR * pvpBurnHitR;
+          for (const rival of this.getPvpTargetsFor(attacker)) {
+            const dx = rival.x - z.x;
+            const dy = rival.y - z.y;
+            if (dx * dx + dy * dy <= pvpBurnHitRSq) {
+              this.damagePlayer(rival, burnDmg, 'fire', attacker);
             }
           }
           const dummyHitR = z.radius + 18;
@@ -4730,6 +4935,23 @@ export class GameRoom {
             );
           }
         }
+        for (const rival of this.getPvpTargetsFor(ownerState)) {
+          const dx = z.x - rival.x;
+          const dy = z.y - rival.y;
+          const dist = Math.hypot(dx, dy);
+          if (dist > 8 && dist <= captureR) {
+            rival.slowedMs = Math.max(rival.slowedMs || 0, 350);
+            const stepDist = Math.min(dist - 6, pullPerSec * 0.45 * dtSec);
+            sharedMoveWithCollision(
+              this.map,
+              this.props,
+              rival,
+              (dx / dist) * stepDist,
+              (dy / dist) * stepDist,
+              9
+            );
+          }
+        }
 
         const accum = (this.weaponZoneTickAccum.get(z.id) || 0) + dtMs;
         if (accum >= gwCfg.cycloneTickIntervalMs) {
@@ -4768,6 +4990,26 @@ export class GameRoom {
                     1.0
                   );
                 }
+              }
+            }
+          }
+          for (const rival of this.getPvpTargetsFor(ownerState)) {
+            if (Math.hypot(rival.x - z.x, rival.y - z.y) <= z.radius + 14) {
+              rival.slowedMs = Math.max(rival.slowedMs || 0, 700);
+              this.damagePlayer(rival, tickDmg, 'physical', ownerState);
+              const targetMap = this.pvpGaleburstStacks.get(rival.id);
+              const ownerMarks = targetMap?.get(z.ownerId) || 0;
+              if (ownerMarks > 0 && targetMap && !rival.downed) {
+                targetMap.set(z.ownerId, 0);
+                this.emitEvent('status', rival.x, rival.y - 26, 'CYCLONE DETONATION!', '#6EE7B7');
+                this.triggerGaleburstExplosion(
+                  ownerState,
+                  rival.x,
+                  rival.y,
+                  detDmg,
+                  gwCfg.aoeRadiusPx,
+                  1.0
+                );
               }
             }
           }
@@ -4827,6 +5069,12 @@ export class GameRoom {
               this.damageEnemy(enemy, tickDmg, ownerState, false, 'arcane', false);
             }
           }
+          for (const rival of this.getPvpTargetsFor(ownerState)) {
+            if (Math.hypot(rival.x - z.x, rival.y - z.y) <= z.radius + 14) {
+              rival.slowedMs = Math.max(rival.slowedMs || 0, 700);
+              this.damagePlayer(rival, tickDmg, 'arcane', ownerState);
+            }
+          }
           for (const dummy of this.trainingDummies) {
             if (Math.hypot(dummy.x - z.x, dummy.y - z.y) <= z.radius + 18) {
               this.damageDummy(dummy, tickDmg, ownerState, false, false, 'arcane');
@@ -4867,6 +5115,11 @@ export class GameRoom {
               this.damageEnemy(enemy, strikeDmg, ownerState, hasCrit, 'arcane', false);
             }
           }
+          for (const rival of this.getPvpTargetsFor(ownerState)) {
+            if (Math.hypot(rival.x - z.x, rival.y - z.y) <= z.radius + 14) {
+              this.damagePlayer(rival, strikeDmg, 'arcane', ownerState, { isCrit: hasCrit });
+            }
+          }
           for (const dummy of this.trainingDummies) {
             if (Math.hypot(dummy.x - z.x, dummy.y - z.y) <= z.radius + 18) {
               this.damageDummy(dummy, strikeDmg, ownerState, hasCrit, false, 'arcane');
@@ -4888,6 +5141,7 @@ export class GameRoom {
           const ownerPr = this.players.get(z.ownerId);
           const ownerState = ownerPr ? ownerPr.state : null;
           for (const pr of this.players.values()) {
+            if (this.pvpEnabled && pr.state.id !== z.ownerId) continue;
             const dist = Math.hypot(pr.state.x - z.x, pr.state.y - z.y);
             if (dist <= z.radius) {
               if (pr.state.downed) {
@@ -4903,6 +5157,7 @@ export class GameRoom {
           }
         } else if (z.kind === 'star_rift') {
           const ownerPr = this.players.get(z.ownerId);
+          const attacker = ownerPr ? ownerPr.state : null;
           const starRiftBonus = ownerPr
             ? resolveEquippedWeaponForClass(ownerPr.state.heroClass, ownerPr.state.equippedWeapon)
                 ?.modifiers.starRiftBonusDamagePct || 0
@@ -4913,12 +5168,17 @@ export class GameRoom {
               const pullAngle = Math.atan2(z.y - enemy.y, z.x - enemy.x);
               enemy.x += Math.cos(pullAngle) * 5;
               enemy.y += Math.sin(pullAngle) * 5;
-              this.damageEnemy(enemy, riftDmg, ownerPr ? ownerPr.state : null, false, 'arcane');
+              this.damageEnemy(enemy, riftDmg, attacker, false, 'arcane');
+            }
+          }
+          for (const rival of this.getPvpTargetsFor(attacker)) {
+            if (Math.hypot(rival.x - z.x, rival.y - z.y) <= z.radius + 10) {
+              this.damagePlayer(rival, riftDmg, 'arcane', attacker);
             }
           }
           for (const dummy of this.trainingDummies) {
             if (Math.hypot(dummy.x - z.x, dummy.y - z.y) <= z.radius) {
-              this.damageDummy(dummy, riftDmg, ownerPr ? ownerPr.state : null, false, false, 'arcane');
+              this.damageDummy(dummy, riftDmg, attacker, false, false, 'arcane');
             }
           }
         }
@@ -4946,6 +5206,7 @@ export class GameRoom {
           const targetsInRange: PlayerState[] = [];
           for (const allyPr of this.players.values()) {
             const ally = allyPr.state;
+            if (this.pvpEnabled && ally.id !== cleric.id) continue;
             if (!ally.downed && ally.connected && Math.hypot(ally.x - cleric.x, ally.y - cleric.y) <= 140) {
               targetsInRange.push(ally);
               if (ally.hp < ally.maxHp) {
@@ -4966,7 +5227,9 @@ export class GameRoom {
           }
         }
       }
-      this.triggerSharedGraceTick();
+      if (!this.pvpEnabled) {
+        this.triggerSharedGraceTick();
+      }
     }
 
     // Vitality + Vestment Passive Combat Regeneration (Every 2.0s pulse)
@@ -5011,6 +5274,10 @@ export class GameRoom {
       }
       p.attackAnimMs = Math.max(0, p.attackAnimMs - dtMs);
       p.hasteMs = Math.max(0, p.hasteMs - dtMs);
+      p.slowedMs = Math.max(0, (p.slowedMs || 0) - dtMs);
+      p.stunnedMs = Math.max(0, (p.stunnedMs || 0) - dtMs);
+      p.frozenMs = Math.max(0, (p.frozenMs || 0) - dtMs);
+      p.spawnProtectionMs = Math.max(0, (p.spawnProtectionMs || 0) - dtMs);
 
       if (p.downed) {
         if (p.disintegrationState?.active) {
@@ -5023,6 +5290,14 @@ export class GameRoom {
         p.vx = 0;
         p.vy = 0;
         p.downedTimerMs = Math.max(0, p.downedTimerMs - dtMs);
+
+        if (this.isOpenWorld) {
+          p.reviveProgress = 0;
+          if (p.downedTimerMs <= 0) {
+            this.respawnOpenWorldPlayer(pr);
+          }
+          continue;
+        }
 
         let reviver: PlayerState | null = null;
         for (const ally of this.players.values()) {
@@ -5077,6 +5352,8 @@ export class GameRoom {
         const targetAlive =
           Boolean(p.predatorTargetId) &&
           (this.enemies.some((e) => e.id === p.predatorTargetId && e.hp > 0) ||
+            (this.pvpEnabled &&
+              this.getPvpTargetsFor(p).some((pl) => pl.id === p.predatorTargetId)) ||
             this.trainingDummies.some((d) => d.id === p.predatorTargetId));
         if (
           !targetAlive ||
@@ -5321,14 +5598,14 @@ export class GameRoom {
     const connectedPlayers = Array.from(this.players.values()).filter(
       (r) => r.state.connected
     );
-    if (connectedPlayers.length > 0) {
+    if (!this.isOpenWorld && connectedPlayers.length > 0) {
       const anyAlive = connectedPlayers.some(
         (r) => !r.state.downed || (connectedPlayers.length > 1 && r.state.downedTimerMs > 0 && connectedPlayers.some((other) => !other.state.downed))
       );
       if (!anyAlive) {
         this.status = 'defeat';
         this.endedAt = Date.now();
-        if (!this.runEndRecorded && this.roomId !== 'TAVERN-HUB') {
+        if (!this.runEndRecorded && !this.isPersistentSocialRoom) {
           this.runEndRecorded = true;
           this.onRunEndedCallback?.(
             Array.from(this.players.keys()),
@@ -5336,7 +5613,7 @@ export class GameRoom {
             this.floor
           );
         }
-        if (this.roomId !== 'TAVERN-HUB' && !this.isPlayerConnected(this.hostId)) {
+        if (!this.isPersistentSocialRoom && !this.isPlayerConnected(this.hostId)) {
           this.transferHostToConnectedMember();
         }
         this.pushSystemChat(`The expedition has fallen on Floor ${this.floor}.`);
@@ -5952,6 +6229,7 @@ export class GameRoom {
         proj.weaponId === 'arcanist_chronostar_scepter' &&
         !proj.targetEnemyId
       ) {
+        const ownerState = this.players.get(proj.ownerId)?.state;
         const seekRange = 170;
         let bestSeekDist = seekRange;
         let bestSeekId: string | undefined;
@@ -5962,6 +6240,16 @@ export class GameRoom {
           if (d <= bestSeekDist) {
             bestSeekDist = d;
             bestSeekId = e.id;
+          }
+        }
+        if (!bestSeekId && this.pvpEnabled) {
+          for (const rival of this.getPvpTargetsFor(ownerState)) {
+            if (proj.hitEntityIds?.includes(rival.id)) continue;
+            const d = Math.hypot(rival.x - proj.x, rival.y - proj.y);
+            if (d <= bestSeekDist) {
+              bestSeekDist = d;
+              bestSeekId = rival.id;
+            }
           }
         }
         if (!bestSeekId) {
@@ -5979,11 +6267,23 @@ export class GameRoom {
         }
       }
 
-      // Homing guidance for player projectiles towards target enemy or training dummy
+      // Homing guidance for player projectiles towards target enemy, PvP rival, or training dummy
       if (proj.ownerType === 'player' && proj.targetEnemyId) {
         let target: { x: number; y: number } | undefined = this.enemies.find(
           (e) => e.id === proj.targetEnemyId && e.hp > 0
         );
+        if (!target && this.pvpEnabled) {
+          const rivalPr = this.players.get(proj.targetEnemyId);
+          if (
+            rivalPr &&
+            rivalPr.state.id !== proj.ownerId &&
+            rivalPr.state.connected &&
+            !rivalPr.state.downed &&
+            (rivalPr.state.spawnProtectionMs || 0) <= 0
+          ) {
+            target = rivalPr.state;
+          }
+        }
         if (!target) {
           target = this.trainingDummies.find((d) => d.id === proj.targetEnemyId);
         }
@@ -6138,9 +6438,7 @@ export class GameRoom {
               }
             }
           }
-          for (let eIdx = this.enemies.length - 1; eIdx >= 0; eIdx--) {
-            if (eIdx >= this.enemies.length) continue;
-            const enemy = this.enemies[eIdx];
+          for (const enemy of this.enemies) {
             if (!enemy || !enemy.id || enemy.hp <= 0) continue;
             const dx = enemy.x - proj.x;
             const dy = enemy.y - proj.y;
@@ -6150,6 +6448,19 @@ export class GameRoom {
               if (!rec || (rec.hits < maxHits && this.simTimeMs - rec.lastHitAtMs >= hitInterval)) {
                 orbMap.set(enemy.id, { hits: (rec?.hits || 0) + 1, lastHitAtMs: this.simTimeMs });
                 const dealtOrb = this.damageEnemy(enemy, proj.damage, ownerPr ? ownerPr.state : null, false, 'arcane');
+                if (dealtOrb > 0 && isTacticalOrb) this.onTacticalHitConfirmed(ownerPr?.state);
+              }
+            }
+          }
+          for (const rival of this.getPvpTargetsFor(ownerPr?.state)) {
+            const dx = rival.x - proj.x;
+            const dy = rival.y - proj.y;
+            const hitR = 14 + proj.radius;
+            if (dx * dx + dy * dy <= hitR * hitR) {
+              const rec = orbMap.get(rival.id);
+              if (!rec || (rec.hits < maxHits && this.simTimeMs - rec.lastHitAtMs >= hitInterval)) {
+                orbMap.set(rival.id, { hits: (rec?.hits || 0) + 1, lastHitAtMs: this.simTimeMs });
+                const dealtOrb = this.damagePlayer(rival, proj.damage, 'arcane', ownerPr?.state ?? null);
                 if (dealtOrb > 0 && isTacticalOrb) this.onTacticalHitConfirmed(ownerPr?.state);
               }
             }
@@ -6222,6 +6533,74 @@ export class GameRoom {
           }
         }
         if (hitDummy) continue;
+
+        let consumedProj = false;
+        for (const rival of this.getPvpTargetsFor(ownerPr?.state)) {
+          if (proj.hitEntityIds.includes(rival.id)) continue;
+          const dx = rival.x - proj.x;
+          const dy = rival.y - proj.y;
+          const hitR = 14 + proj.radius;
+          if (dx * dx + dy * dy <= hitR * hitR) {
+            if (proj.spellId === 'fireball') {
+              this.explodeFireball(proj);
+              this.cleanupProjectileTracking(proj.id);
+              this.projectiles.splice(i, 1);
+              consumedProj = true;
+              break;
+            }
+            const isPrimaryProj = this.primaryAttackProjIds.has(proj.id);
+            const isTacticalProj = this.tacticalProjIds.has(proj.id);
+            const pierceHitIndex = proj.hitEntityIds.length;
+            proj.hitEntityIds.push(rival.id);
+            if (proj.slowOnHit) {
+              rival.slowedMs = Math.max(rival.slowedMs || 0, 2200);
+            }
+            const hitDamage = this.computePrimaryProjectileHitDamage(
+              proj,
+              rival.x,
+              rival.y,
+              ownerPr ? ownerPr.state : null,
+              pierceHitIndex,
+              null
+            );
+            const dealtPvp = this.damagePlayer(
+              rival,
+              hitDamage,
+              proj.damageCategory ?? inferDamageCategoryFromProjectileStyle(proj.style),
+              ownerPr ? ownerPr.state : null,
+              { isCrit: Boolean(proj.crit), isPrimaryAttack: isPrimaryProj }
+            );
+            if (!isPrimaryProj && isTacticalProj && dealtPvp > 0) {
+              this.onTacticalHitConfirmed(ownerPr?.state);
+            }
+            if (proj.style === 'cyclone_arrow' && cycState) {
+              rival.slowedMs = Math.max(rival.slowedMs || 0, 700);
+              if (cycState.carryMsRemaining === null) {
+                cycState.carryMsRemaining = ARMAMENT_TUNING.weapons.galewind.cycloneArrowCarryDurationMs;
+              }
+            }
+            if (isPrimaryProj && ownerPr && dealtPvp > 0) {
+              this.applyWeaponPrimaryHitSpecial(
+                proj,
+                rival.x,
+                rival.y,
+                ownerPr.state,
+                null,
+                null,
+                dealtPvp,
+                rival
+              );
+            }
+            proj.pierce -= 1;
+            if (proj.pierce <= 0) {
+              this.cleanupProjectileTracking(proj.id);
+              this.projectiles.splice(i, 1);
+              consumedProj = true;
+              break;
+            }
+          }
+        }
+        if (consumedProj) continue;
 
         for (let eIdx = this.enemies.length - 1; eIdx >= 0; eIdx--) {
           if (eIdx >= this.enemies.length) continue;
@@ -6565,6 +6944,18 @@ export class GameRoom {
         }
       }
     }
+    for (const rival of this.getPvpTargetsFor(p)) {
+      const dx = rival.x - p.x;
+      const dy = rival.y - p.y;
+      const dist = Math.hypot(dx, dy);
+      if (dist <= cleaveRadius + 14) {
+        const diff = Math.abs(normalizeAngle(Math.atan2(dy, dx) - cleaveAngle));
+        if (diff <= halfAngle) {
+          this.applyStatusEffect(rival, 'stun', 600, p);
+          this.damagePlayer(rival, cleaveDmg, 'physical', p, { isCrit: blockedHits > 0 });
+        }
+      }
+    }
     for (const dummy of this.trainingDummies) {
       const dx = dummy.x - p.x;
       const dy = dummy.y - p.y;
@@ -6613,6 +7004,11 @@ export class GameRoom {
         this.damageEnemy(other, burstBase, owner, false, burstCategory, false);
       }
     }
+    for (const rival of this.getPvpTargetsFor(owner)) {
+      if (Math.hypot(rival.x - cx, rival.y - cy) <= radius + 14) {
+        this.damagePlayer(rival, burstBase, burstCategory, owner);
+      }
+    }
     for (const d of this.trainingDummies) {
       if (Math.hypot(d.x - cx, d.y - cy) <= radius + 18) {
         this.damageDummy(d, burstBase, owner, false, false, burstCategory);
@@ -6643,6 +7039,11 @@ export class GameRoom {
         this.damageEnemy(enemy, enemyDmg, cleric, false, 'divine', false);
       }
     }
+    for (const rival of this.getPvpTargetsFor(cleric)) {
+      if (Math.hypot(rival.x - cleric.x, rival.y - cleric.y) <= radius + 14) {
+        this.damagePlayer(rival, enemyDmg, 'divine', cleric);
+      }
+    }
     for (const dummy of this.trainingDummies) {
       if (Math.hypot(dummy.x - cleric.x, dummy.y - cleric.y) <= radius + 18) {
         this.damageDummy(dummy, enemyDmg, cleric, false, false, 'divine');
@@ -6650,6 +7051,7 @@ export class GameRoom {
     }
     for (const allyPr of this.players.values()) {
       const ally = allyPr.state;
+      if (this.pvpEnabled && ally.id !== cleric.id) continue;
       if (ally.downed || !ally.connected) continue;
       if (Math.hypot(ally.x - cleric.x, ally.y - cleric.y) <= radius) {
         const healAmt = GameRoom.computeHealingAmount(srCfg.allyBaseHeal, cleric, ally);
@@ -6666,7 +7068,8 @@ export class GameRoom {
     owner: PlayerState,
     enemy: EnemyState | null,
     dummy: TrainingDummyState | null,
-    dealtDmg?: number
+    dealtDmg?: number,
+    pvpTarget?: PlayerState | null
   ): void {
     this.onConfirmedPrimaryHit(owner, proj.id);
 
@@ -6696,6 +7099,26 @@ export class GameRoom {
         } else {
           meta.galeburstByOwner.set(owner.id, nextStacks);
           this.syncEnemyGaleburstMarks(enemy, meta);
+        }
+      } else if (pvpTarget) {
+        let targetMap = this.pvpGaleburstStacks.get(pvpTarget.id);
+        if (!targetMap) {
+          targetMap = new Map();
+          this.pvpGaleburstStacks.set(pvpTarget.id, targetMap);
+        }
+        const nextStacks = (targetMap.get(owner.id) || 0) + 1;
+        if (nextStacks >= mods.galeburstTriggerHits) {
+          targetMap.set(owner.id, 0);
+          this.triggerGaleburstExplosion(
+            owner,
+            targetX,
+            targetY,
+            baseDmgForBurst,
+            mods.galeburstRadiusPx,
+            mods.galeburstDamageRatio
+          );
+        } else {
+          targetMap.set(owner.id, nextStacks);
         }
       } else if (dummy) {
         const pr = this.players.get(owner.id);
@@ -6750,6 +7173,16 @@ export class GameRoom {
           splashed++;
         }
       }
+      for (const otherRival of this.getPvpTargetsFor(owner)) {
+        if (otherRival === pvpTarget) continue;
+        const dx = otherRival.x - targetX;
+        const dy = otherRival.y - targetY;
+        const hitR = splashRad + 14;
+        if (dx * dx + dy * dy <= hitR * hitR) {
+          this.damagePlayer(otherRival, splashBase, 'fire', owner);
+          splashed++;
+        }
+      }
       for (const otherDummy of this.trainingDummies) {
         if (!otherDummy || otherDummy === dummy) continue;
         const dx = otherDummy.x - targetX;
@@ -6759,7 +7192,7 @@ export class GameRoom {
           splashed++;
         }
       }
-      if (splashed > 0 || enemy || dummy) {
+      if (splashed > 0 || enemy || dummy || pvpTarget) {
         this.emitEvent('status', targetX, targetY - 18, 'EMBER BLAST!', '#F97316');
       }
     }
@@ -6775,8 +7208,8 @@ export class GameRoom {
       }
     }
 
-    // Solaris War-Censer: Incense Mending heals lowest-HP injured OTHER ally within range (no self-heal fallback)
-    if (mods.allyHealOnHitBase && !triggeredBefore) {
+    // Solaris War-Censer: Incense Mending heals lowest-HP injured OTHER ally within range (co-op only)
+    if (mods.allyHealOnHitBase && !triggeredBefore && !this.pvpEnabled) {
       this.triggeredOnceProjIds.add(proj.id);
       const pr = this.players.get(owner.id);
       const procCd =
@@ -6862,6 +7295,7 @@ export class GameRoom {
         map: this.map,
         props: this.props,
         enemies: this.enemies,
+        pvpPlayers: this.getPvpTargetsFor(p),
         trainingDummies: this.trainingDummies,
       })?.target ?? null;
 
@@ -6986,6 +7420,17 @@ export class GameRoom {
           if (dealt > 0) this.onConfirmedPrimaryHit(p);
         }
       }
+      for (const rival of this.getPvpTargetsFor(p)) {
+        if (hitIds.has(rival.id)) continue;
+        if (Math.hypot(rival.x - slamPos.x, rival.y - slamPos.y) <= slamRadius + 14) {
+          hitIds.add(rival.id);
+          const dealt = this.damagePlayer(rival, slamDmg, category, p, {
+            isCrit: hasCrit,
+            isPrimaryAttack: true,
+          });
+          if (dealt > 0) this.onConfirmedPrimaryHit(p);
+        }
+      }
       for (const dummy of this.trainingDummies) {
         if (!dummy || hitIds.has(dummy.id)) continue;
         if (Math.hypot(dummy.x - slamPos.x, dummy.y - slamPos.y) <= slamRadius + 18) {
@@ -7026,6 +7471,17 @@ export class GameRoom {
           }
         }
       }
+      for (const rival of this.getPvpTargetsFor(p)) {
+        const dx = rival.x - p.x;
+        const dy = rival.y - p.y;
+        const dist = Math.hypot(dx, dy);
+        if (dist <= sfCfg.shockwaveRangePx + 14) {
+          const diff = Math.abs(normalizeAngle(Math.atan2(dy, dx) - p.aimAngle));
+          if (diff <= sfCfg.shockwaveHalfAngleRad) {
+            this.damagePlayer(rival, sfDmg, category, p);
+          }
+        }
+      }
       for (const dummy of this.trainingDummies) {
         const dx = dummy.x - p.x;
         const dy = dummy.y - p.y;
@@ -7052,6 +7508,7 @@ export class GameRoom {
       map: this.map,
       props: this.props,
       enemies: this.enemies,
+      pvpPlayers: this.getPvpTargetsFor(p),
       trainingDummies: this.trainingDummies,
     })?.target ?? null;
 
@@ -9376,15 +9833,55 @@ export class GameRoom {
   public damagePlayer(
     p: PlayerState,
     rawDamage: number,
-    damageType: DamageCategory | 'elemental' = 'physical'
+    damageType: DamageCategory | 'elemental' = 'physical',
+    attacker: PlayerState | null = null,
+    opts?: { isCrit?: boolean; isPrimaryAttack?: boolean }
   ): number {
     if (p.downed || p.godMode) return 0;
+    if (attacker) {
+      if (!this.pvpEnabled || attacker.id === p.id) return 0;
+      if ((p.spawnProtectionMs || 0) > 0) {
+        this.emitThrottledEntityStatus(p.id, p.x, p.y - 24, 'PROTECTED', '#FDE047', 900);
+        return 0;
+      }
+    }
+
+    const attackerActivePassive = attacker ? this.getActivePassive(attacker) : null;
+    const attackerWeapon = attacker
+      ? resolveEquippedWeaponForClass(attacker.heroClass, attacker.equippedWeapon)?.modifiers
+      : undefined;
+
+    let effectiveRaw = rawDamage;
+    let isCrit = Boolean(opts?.isCrit);
+    if (attacker && this.pvpEnabled) {
+      effectiveRaw = Math.max(1, Math.round(rawDamage * 0.55));
+      if (attackerActivePassive === 'eagle_keenness') {
+        const distToTarget = Math.hypot(p.x - attacker.x, p.y - attacker.y);
+        if (distToTarget >= 180) {
+          const longshotBonus = 0.25 + (attackerWeapon?.longshotBonusPct || 0);
+          effectiveRaw = Math.round(effectiveRaw * (1 + longshotBonus));
+          isCrit = true;
+        }
+      }
+      if (attackerActivePassive === 'predators_instinct') {
+        const predCfg = ARMAMENT_TUNING.passives.predatorsInstinct;
+        if (attacker.predatorTargetId !== p.id) {
+          attacker.predatorTargetId = p.id;
+          attacker.predatorStacks = 0;
+        } else if ((attacker.predatorStacks || 0) > 0) {
+          effectiveRaw = Math.max(
+            1,
+            Math.round(effectiveRaw * (1 + (attacker.predatorStacks || 0) * predCfg.damagePerStackPct))
+          );
+        }
+      }
+    }
 
     const resist = computeIncomingDamageTypeResistance(p, damageType);
     const vestmentMods =
       resolveEquippedVestmentForClass(p.heroClass, p.equippedVestment)?.modifiers;
 
-    let dmg = Math.max(1, Math.round(rawDamage * (1 - resist)));
+    let dmg = Math.max(1, Math.round(effectiveRaw * (1 - resist)));
 
     // Floor 1: Guard Broken - Increases incoming damage by 30%
     if (p.statuses.some(s => s.type === 'guard_broken')) {
@@ -9405,7 +9902,10 @@ export class GameRoom {
     }
 
     const inAegis = this.zones.some(
-      (z) => z.kind === 'aegis_dome' && Math.hypot(p.x - z.x, p.y - z.y) <= z.radius
+      (z) =>
+        z.kind === 'aegis_dome' &&
+        (!this.pvpEnabled || z.ownerId === p.id) &&
+        Math.hypot(p.x - z.x, p.y - z.y) <= z.radius
     );
     if (inAegis) dmg = Math.max(1, Math.round(dmg * 0.65));
 
@@ -9453,39 +9953,116 @@ export class GameRoom {
       if (mPr) mPr.momentumHoldMs = 0;
     }
 
+    if (attacker && this.pvpEnabled) {
+      attacker.damageDealt += finalMitigatedDamage;
+
+      if (attackerActivePassive === 'predators_instinct') {
+        const predCfg = ARMAMENT_TUNING.passives.predatorsInstinct;
+        const predPr = this.players.get(attacker.id);
+        attacker.predatorStacks = Math.min(
+          predCfg.maxStacks,
+          (attacker.predatorStacks || 0) + 1
+        );
+        if (predPr) predPr.predatorLastHitAtMs = this.simTimeMs;
+      }
+
+      if (attackerActivePassive === 'war_monger' && !attacker.downed && attacker.hp < attacker.maxHp) {
+        const wmCfg = ARMAMENT_TUNING.passives.warMonger;
+        const hpRatio = attacker.hp / Math.max(1, attacker.maxHp);
+        const isLowHp = wmCfg.thresholdInclusive
+          ? hpRatio <= wmCfg.lowHpThresholdRatio
+          : hpRatio < wmCfg.lowHpThresholdRatio;
+        const pct = isLowHp ? wmCfg.atOrBelowThresholdLifestealPct : wmCfg.aboveThresholdLifestealPct;
+        const missing = Math.max(0, attacker.maxHp - attacker.hp);
+        const lsHeal = Math.min(missing, Math.max(1, Math.round(finalMitigatedDamage * pct)));
+        if (lsHeal > 0) {
+          attacker.hp += lsHeal;
+          this.emitEvent('heal', attacker.x, attacker.y - 20, `+${lsHeal}`, '#34D399');
+        }
+      }
+
+      if (isCrimsonFrenzyActive(attacker) && !attacker.downed && attacker.hp < attacker.maxHp) {
+        const lsPct = ARMAMENT_TUNING.weapons.crimson.frenzyLifestealPct;
+        const missing = Math.max(0, attacker.maxHp - attacker.hp);
+        const lsHeal = Math.min(missing, Math.max(1, Math.round(finalMitigatedDamage * lsPct)));
+        if (lsHeal > 0) {
+          attacker.hp += lsHeal;
+          this.emitEvent('heal', attacker.x, attacker.y - 20, `+${lsHeal}`, '#34D399');
+        }
+      }
+
+      if (opts?.isPrimaryAttack && attackerWeapon) {
+        if (attacker.heroClass === 'vanguard' && attackerWeapon.shieldOnPrimaryHit) {
+          this.grantShield(attacker, attackerWeapon.shieldOnPrimaryHit, 'add');
+        }
+        if (attackerWeapon.chillChance && Math.random() < attackerWeapon.chillChance) {
+          p.slowedMs = Math.max(p.slowedMs || 0, 2000);
+        }
+      }
+    }
+
     if (dmg > 0) {
       p.hp = Math.max(0, p.hp - dmg);
+      this.emitEvent(
+        isCrit ? 'crit' : 'damage',
+        p.x,
+        p.y - 18,
+        isCrit ? `-${dmg}!` : `-${dmg}`,
+        getDamageTypeColor(damageType, isCrit),
+        damageType,
+        attacker
+          ? { attackerId: attacker.id, isPrimaryHit: opts?.isPrimaryAttack, hitTargetId: p.id }
+          : undefined
+      );
+    } else if (absorbed > 0 && attacker) {
       this.emitEvent(
         'damage',
         p.x,
         p.y - 18,
-        `-${dmg}`,
-        getDamageTypeColor(damageType, false),
-        damageType
+        `-${absorbed} (Shield)`,
+        '#93C5FD',
+        damageType,
+        { attackerId: attacker.id, isPrimaryHit: opts?.isPrimaryAttack, hitTargetId: p.id }
       );
     }
 
     // Break Charmed if taking >= 20 damage (jolt from trance)
-    if ((dmg >= 20 || absorbed >= 20 || rawDamage >= 20) && p.statuses && p.statuses.some(s => s.type === 'charmed')) {
+    if ((dmg >= 20 || absorbed >= 20 || effectiveRaw >= 20) && p.statuses && p.statuses.some(s => s.type === 'charmed')) {
       p.statuses = p.statuses.filter(s => s.type !== 'charmed');
       this.emitEvent('status', p.x, p.y - 30, 'CHARM BROKEN!', '#F472B6');
     }
 
     if (p.hp <= 0) {
       p.downed = true;
-      p.downedTimerMs = 18000;
+      p.downedTimerMs = this.isOpenWorld ? 3500 : 18000;
       p.reviveProgress = 0;
       const dPr = this.players.get(p.id);
       if (dPr) {
+        if (p.disintegrationState?.active) {
+          this.stopDisintegrationChannel(p.id);
+        }
+        p.spellCastState = null;
+        dPr.pendingBarrage = null;
         this.clearEclipseCharge(dPr);
-        this.clearPlayerTacticalState(dPr, { removeOwnedZones: false });
+        this.clearPlayerTacticalState(dPr, { removeOwnedZones: this.isOpenWorld });
+        this.cleanupChronoWellsForOwner(p.id);
       }
-      if (this.players.size > 1) {
+      if (this.isOpenWorld) {
+        this.pvpGaleburstStacks.delete(p.id);
+        if (attacker) {
+          attacker.kills += 1;
+          this.onKillCallback?.(attacker.id, { isBoss: false });
+          this.emitEvent('status', p.x, p.y - 30, 'SLAYED!', '#EF4444');
+          this.pushSystemChat(`${attacker.username} defeated ${p.username}!`);
+        } else {
+          this.pushSystemChat(`${p.username} fell in the Open World.`);
+        }
+      } else if (this.players.size > 1) {
         this.pushSystemChat(
           `${p.username} is downed! Stand near your ally to revive them.`
         );
       }
-    } else if (dmg > 0) {
+    } else if (dmg > 0 && !this.pvpEnabled) {
       this.triggerSharedGraceForAlly(p);
     }
 
@@ -9623,6 +10200,8 @@ export class GameRoom {
       playerCount: this.players.size,
       maxPlayers: this.maxPlayers,
       status: this.status,
+      roomMode: this.roomMode,
+      pvpEnabled: this.pvpEnabled,
     };
   }
 
@@ -9686,6 +10265,8 @@ export class GameRoom {
       combatRoomsTotal,
       floorMasteryAwarded: this.floorMasteryAwarded,
       portalReadyCount,
+      roomMode: this.roomMode,
+      pvpEnabled: this.pvpEnabled,
       players: activePlayers,
       enemies: this.enemies,
       projectiles: this.projectiles,
