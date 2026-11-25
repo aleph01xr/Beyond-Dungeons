@@ -2141,9 +2141,12 @@ async function startServer() {
       } else if (msg.type === 'admin:set_level') {
         if (acc.isAdmin) {
           const level = Math.floor(Number(msg.level));
+          const targetPlayerId = msg.targetPlayerId ? String(msg.targetPlayerId) : acc.id;
           if (Number.isFinite(level) && level >= 1 && level <= MAX_LEVEL) {
-            room.setPlayerLevel(acc.id, level);
-            room.pushSystemChat(`[ADMIN] Set Level ${level} for ${acc.username}`);
+            room.setPlayerLevel(targetPlayerId, level);
+            const targetState = room.getPlayerState(targetPlayerId);
+            const targetName = targetState ? targetState.username : acc.username;
+            room.pushSystemChat(`[ADMIN] Set Level ${level} for ${targetName}`);
           }
         }
       } else if (msg.type === 'admin:add_relic') {

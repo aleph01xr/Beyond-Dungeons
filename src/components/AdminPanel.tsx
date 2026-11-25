@@ -17,6 +17,7 @@ import { ArmamentIcon } from './ArmamentIcon.tsx';
 
 interface AdminPanelProps {
   me: PlayerState;
+  players?: PlayerState[];
   isOpen: boolean;
   onClose: () => void;
   onSendAdminCommand: (msg: ClientMessage) => void;
@@ -26,6 +27,7 @@ type AdminTab = 'classes' | 'armaments' | 'cheats' | 'relics' | 'scrolls' | 'spa
 
 export const AdminPanel: React.FC<AdminPanelProps> = ({
   me,
+  players,
   isOpen,
   onClose,
   onSendAdminCommand,
@@ -277,32 +279,74 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               {/* Progression & Leveling */}
               <div>
                 <h3 className="font-display text-xs font-bold text-[#FCD34D] uppercase tracking-wider mb-2.5 flex items-center gap-1.5">
-                  Progression & Leveling Overrides
+                  Progression &amp; Leveling Overrides (Self)
                 </h3>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                   <button
                     type="button"
-                    onClick={() => handleCommand({ type: 'admin:set_level', level: MAX_LEVEL })}
+                    onClick={() => handleCommand({ type: 'admin:set_level', level: MAX_LEVEL, targetPlayerId: me.id })}
                     className="stone-button stone-button-blue p-3 h-auto"
                   >
                     <div className="flex flex-col items-center">
-                      <span className="font-display font-bold text-sm">Set Level {MAX_LEVEL} (Cap)</span>
+                      <span className="font-display font-bold text-sm">Set Self to Level {MAX_LEVEL} (Max)</span>
                       <span className="text-[10px] opacity-80 font-mono">Current: Lv.{me.level}</span>
                     </div>
                   </button>
 
                   <button
                     type="button"
-                    onClick={() => handleCommand({ type: 'admin:set_level', level: 1 })}
+                    onClick={() => handleCommand({ type: 'admin:set_level', level: 1, targetPlayerId: me.id })}
                     className="stone-button stone-button-dark p-3 h-auto text-white"
                   >
                     <div className="flex flex-col items-center">
-                      <span className="font-display font-bold text-sm">Reset to Level 1</span>
-                      <span className="text-[10px] opacity-80 font-mono">Resets XP & Level</span>
+                      <span className="font-display font-bold text-sm">Reset Self to Level 1</span>
+                      <span className="text-[10px] opacity-80 font-mono">Resets XP &amp; Level</span>
                     </div>
                   </button>
                 </div>
               </div>
+
+              {/* Room Players Level Up to Max */}
+              {players && players.length > 0 && (
+                <div>
+                  <h3 className="font-display text-xs font-bold text-[#FCD34D] uppercase tracking-wider mb-2.5 flex items-center gap-1.5">
+                    Level Up Room Players to Max (Lv.{MAX_LEVEL})
+                  </h3>
+                  <div className="space-y-2">
+                    {players.map((p) => {
+                      const isMe = p.id === me.id;
+                      return (
+                        <div
+                          key={`p_lvl_${p.id}`}
+                          className="stone-plaque p-2.5 flex items-center justify-between gap-3 border border-[#383548]"
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 shrink-0" />
+                            <div className="truncate font-mono">
+                              <span className="font-bold text-white text-xs">{p.username}</span>
+                              <span className="text-[10px] text-[#A19FAF] ml-2 uppercase">
+                                {p.heroClass} • Lv.{p.level}
+                              </span>
+                              {isMe && (
+                                <span className="ml-2 text-[9px] px-1.5 py-0.5 bg-blue-500/20 text-blue-300 border border-blue-500/40">
+                                  YOU
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleCommand({ type: 'admin:set_level', level: MAX_LEVEL, targetPlayerId: p.id })}
+                            className="stone-button stone-button-gold py-1 px-3 text-xs font-bold text-black shrink-0"
+                          >
+                            Lv.{MAX_LEVEL} Max
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
 
               {/* Direct Attribute Injection */}
               <div>

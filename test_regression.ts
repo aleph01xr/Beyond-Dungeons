@@ -13332,6 +13332,23 @@ async function runRegressionTests() {
     assert.strictEqual(hudKeyA, hudKeyB, 'Open World HUD key must not re-render React HUD on elapsedSec or distant HP ticks');
   });
 
+  await test('144. Admin Level Up Player to Max', async () => {
+    const room = new GameRoom({
+      roomId: 'R_ADMIN_LVL',
+      name: 'Admin Level Room',
+      hostName: 'AdminHost',
+      difficulty: 'Normal',
+      seed: 14401,
+    });
+    room.status = 'playing';
+    const p1 = room.addOrReconnectPlayer('adm_u1', 'RivalHero', 'ranger', false, { level: 5, xp: 120, strength: 0, vitality: 0, dexterity: 0, intelligence: 0, faith: 0, attributePoints: 0 });
+    assert.strictEqual(p1.level, 5);
+
+    room.setPlayerLevel(p1.id, MAX_LEVEL);
+    assert.strictEqual(p1.level, MAX_LEVEL);
+    assert.strictEqual(p1.attributePoints, (MAX_LEVEL - 1) * 3);
+  });
+
   console.log(`\nAll regression tests completed: ${passed}/${total} passed.`);
   if (passed !== total) {
     throw new Error(`Some regression tests failed: ${passed}/${total}`);

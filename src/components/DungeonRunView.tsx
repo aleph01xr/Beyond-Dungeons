@@ -2641,6 +2641,7 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
       {me && (
         <AdminPanel
           me={me}
+          players={snapshot.players}
           isOpen={adminPanelOpen}
           onClose={() => setAdminPanelOpen(false)}
           onSendAdminCommand={(msg) => {

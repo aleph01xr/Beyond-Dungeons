@@ -1083,7 +1083,7 @@ export type ClientMessage =
   | { type: 'admin:toggle_no_cooldown'; enabled?: boolean }
   | { type: 'admin:add_gold'; amount?: number }
   | { type: 'admin:add_potions'; amount?: number }
-  | { type: 'admin:set_level'; level?: number }
+  | { type: 'admin:set_level'; level?: number; targetPlayerId?: string }
   | { type: 'admin:add_relic'; relicId: string }
   | { type: 'admin:spawn_dummy' }
   | { type: 'admin:teleport_floor'; floor: number }
