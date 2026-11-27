@@ -12,6 +12,13 @@ import { LocalPredictionController } from '../client/prediction.ts';
 import { DashAfterimageManager } from '../client/dashAfterimages.ts';
 import { drawEnhancedProjectile, ParticleManager } from '../client/canvasEffects.ts';
 import {
+  createQuantizedRadialZoneSprite,
+  createSteppedTorchGlowCanvas,
+  drawOverworldFontZonePixel,
+  drawOverworldPixelLandmarks,
+  renderOverworldTileMap,
+} from '../client/pixelArtWorld.ts';
+import {
   drawDungeonPortal,
   drawDungeonProp,
   drawMysticShrine,
@@ -202,6 +209,7 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const mapLayerRef = useRef<HTMLCanvasElement | null>(null);
+  const worldPixelCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   const keysRef = useRef({
     up: false,
@@ -261,7 +269,7 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
     bubbleRect?: { left: number; top: number; right: number; bottom: number };
   } | null>(null);
   const lastDialogueAnchorKeyRef = useRef('');
-  const disintegrationHoldSourceRef = useRef<'q' | 'rmb' | null>(null);
+  const disintegrationHoldSourceRef = useRef<'1' | 'q' | 'rmb' | null>(null);
   const lastChannelUpdateAtRef = useRef(0);
   const lastSentChannelAngleRef = useRef(0);
   const localInputPropRef = useRef(localInputRef);
@@ -679,257 +687,18 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
     ctx.fillStyle = palette.voidBg;
     ctx.fillRect(0, 0, off.width, off.height);
 
-    for (let ty = 0; ty < map.height; ty++) {
-      for (let tx = 0; tx < map.width; tx++) {
-        const code = map.tiles[ty * map.width + tx];
-        if (code === 0 && !isOverworld) continue;
-        const px = tx * TILE_SIZE;
-        const py = ty * TILE_SIZE;
-        const hash = ((tx * 73856093) ^ (ty * 19349663)) >>> 0;
+    if (isOverworld) {
+      renderOverworldTileMap(ctx, map);
+    } else {
+      for (let ty = 0; ty < map.height; ty++) {
+        for (let tx = 0; tx < map.width; tx++) {
+          const code = map.tiles[ty * map.width + tx];
+          if (code === 0) continue;
+          const px = tx * TILE_SIZE;
+          const py = ty * TILE_SIZE;
+          const hash = ((tx * 73856093) ^ (ty * 19349663)) >>> 0;
 
-        if (isOverworld) {
-          const tileAt = (cx: number, cy: number): number => {
-            if (cx < 0 || cx >= map.width || cy < 0 || cy >= map.height) return 0;
-            return map.tiles[cy * map.width + cx];
-          };
-          const isOuterBorder = tx < 2 || tx >= map.width - 2 || ty < 2 || ty >= map.height - 2;
-          const n = tileAt(tx, ty - 1);
-          const s = tileAt(tx, ty + 1);
-          const w = tileAt(tx - 1, ty);
-          const e = tileAt(tx + 1, ty);
-
-          if (code === 0) {
-            if (isOuterBorder) {
-              // Stepped outer chasm cliff edge
-              ctx.fillStyle = '#0A1014';
-              ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
-              if (tx === 1 || tx === map.width - 2 || ty === 1 || ty === map.height - 2) {
-                ctx.fillStyle = '#152028';
-                ctx.fillRect(px + (tx === 1 ? 24 : 0), py + (ty === 1 ? 24 : 0), tx === 1 || tx === map.width - 2 ? 8 : TILE_SIZE, ty === 1 || ty === map.height - 2 ? 8 : TILE_SIZE);
-              }
-              if (hash % 5 === 0) {
-                ctx.fillStyle = '#18242B';
-                ctx.fillRect(px + 6, py + 8, 10, 4);
-              }
-            } else {
-              // Whispering Lake 3-tone bathymetry + shoreline foam + bridge shadows
-              const touchesLand = n !== 0 || s !== 0 || w !== 0 || e !== 0;
-              const touchesBridge = n === 5 || s === 5 || w === 5 || e === 5;
-              const diagLand =
-                tileAt(tx - 1, ty - 1) !== 0 ||
-                tileAt(tx + 1, ty - 1) !== 0 ||
-                tileAt(tx - 1, ty + 1) !== 0 ||
-                tileAt(tx + 1, ty + 1) !== 0;
-              if (touchesLand) {
-                ctx.fillStyle = (tx + ty) % 2 === 0 ? '#286FB4' : '#2466A6';
-              } else if (diagLand) {
-                ctx.fillStyle = (tx + ty) % 2 === 0 ? '#1E5494' : '#1B4D88';
-              } else {
-                ctx.fillStyle = (tx + ty) % 2 === 0 ? '#163D6E' : '#143764';
-              }
-              ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
-
-              // Subtle wave ripples
-              ctx.fillStyle = touchesLand ? '#3B82C4' : '#2563EB';
-              if (hash % 3 === 0) {
-                ctx.fillRect(px + 6, py + 10, 11, 2);
-                ctx.fillRect(px + 15, py + 22, 9, 2);
-              }
-
-              // Bridge shadow cast onto water
-              if (touchesBridge) {
-                ctx.fillStyle = 'rgba(8, 18, 36, 0.36)';
-                if (n === 5) ctx.fillRect(px, py, TILE_SIZE, 7);
-                if (s === 5) ctx.fillRect(px, py + TILE_SIZE - 5, TILE_SIZE, 5);
-                if (w === 5) ctx.fillRect(px, py, 7, TILE_SIZE);
-                if (e === 5) ctx.fillRect(px + TILE_SIZE - 5, py, 5, TILE_SIZE);
-              }
-
-              // Shoreline seafoam along non-bridge land edges
-              ctx.fillStyle = '#BAE6FD';
-              if (n !== 0 && n !== 5) ctx.fillRect(px + 2, py, TILE_SIZE - 4, 3);
-              if (s !== 0 && s !== 5) ctx.fillRect(px + 2, py + TILE_SIZE - 3, TILE_SIZE - 4, 3);
-              if (w !== 0 && w !== 5) ctx.fillRect(px, py + 2, 3, TILE_SIZE - 4);
-              if (e !== 0 && e !== 5) ctx.fillRect(px + TILE_SIZE - 3, py + 2, 3, TILE_SIZE - 4);
-            }
-          } else if (code === 1) {
-            // Emerald meadow grass with subtle blades, clover patches & wildflowers
-            ctx.fillStyle = (tx + ty) % 2 === 0 ? '#2D6A3E' : '#286038';
-            ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
-            if (hash % 5 === 0) {
-              ctx.fillStyle = '#337A47';
-              ctx.fillRect(px + 3, py + 3, 10, 8);
-            }
-            if (hash % 4 === 0) {
-              ctx.fillStyle = '#429659';
-              ctx.fillRect(px + (hash % 18) + 4, py + ((hash >>> 3) % 18) + 4, 2, 4);
-              ctx.fillRect(px + (hash % 18) + 7, py + ((hash >>> 3) % 18) + 6, 2, 3);
-            }
-            if (hash % 19 === 0) {
-              ctx.fillStyle = hash % 3 === 0 ? '#FDE047' : hash % 3 === 1 ? '#F472B6' : '#E0F2FE';
-              ctx.fillRect(px + 12 + (hash % 6), py + 12 + ((hash >>> 4) % 6), 3, 3);
-              ctx.fillRect(px + 16 + (hash % 5), py + 15 + ((hash >>> 2) % 5), 2, 2);
-            }
-            // Soft edge shading near forest ridge or water
-            if (n === 2 || n === 0) {
-              ctx.fillStyle = 'rgba(0,0,0,0.14)';
-              ctx.fillRect(px, py, TILE_SIZE, 3);
-            }
-          } else if (code === 4) {
-            // Packed dirt roads & organic trails with grass-overhang edges & cart ruts
-            ctx.fillStyle = (tx + ty) % 2 === 0 ? '#7C5A3C' : '#725236';
-            ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
-            // Faint cart tracks & warm pebbles
-            ctx.fillStyle = '#62452C';
-            if (hash % 3 === 0) ctx.fillRect(px + 4, py + 9, 10, 2);
-            if (hash % 4 === 0) ctx.fillRect(px + 15, py + 21, 11, 2);
-            ctx.fillStyle = '#96704D';
-            if (hash % 5 === 0) ctx.fillRect(px + 6, py + 13, 4, 3);
-            if (hash % 9 === 0) ctx.fillRect(px + 20, py + 22, 3, 2);
-            // Organic grass-edge overlap along neighboring meadow tiles
-            ctx.fillStyle = '#2D6A3E';
-            if (n === 1) {
-              ctx.fillRect(px + 2, py, 7, 3);
-              ctx.fillRect(px + 17, py, 9, 2);
-            }
-            if (s === 1) {
-              ctx.fillRect(px + 5, py + TILE_SIZE - 3, 8, 3);
-              ctx.fillRect(px + 20, py + TILE_SIZE - 2, 7, 2);
-            }
-            if (w === 1) {
-              ctx.fillRect(px, py + 4, 3, 8);
-              ctx.fillRect(px, py + 18, 2, 9);
-            }
-            if (e === 1) {
-              ctx.fillRect(px + TILE_SIZE - 3, py + 6, 3, 8);
-              ctx.fillRect(px + TILE_SIZE - 2, py + 20, 2, 7);
-            }
-          } else if (code === 5) {
-            // Ancient cobblestone plaza, ruin dais & stone bridges
-            const distCenter = Math.hypot(tx - 60, ty - 45);
-            const isCenterInlay = distCenter <= 4.3 && (Math.abs(tx - 60) === Math.abs(ty - 45) || tx === 60 || ty === 45);
-            ctx.fillStyle = isCenterInlay
-              ? '#6A6558'
-              : (tx + ty) % 2 === 0
-                ? '#585D6E'
-                : '#4E5363';
-            ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
-            ctx.fillStyle = isCenterInlay ? '#B8954A' : '#2E313D';
-            ctx.fillRect(px, py + 15, TILE_SIZE, 2);
-            ctx.fillRect(px + 15, py, 2, TILE_SIZE);
-            ctx.fillStyle = isCenterInlay ? 'rgba(253, 224, 71, 0.25)' : 'rgba(255,255,255,0.09)';
-            ctx.fillRect(px + 2, py + 2, 12, 2);
-            ctx.fillRect(px + 18, py + 18, 12, 2);
-
-            // Stone bridge parapet curb edges wherever bordering inland water (0)
-            const isLakeEdge = (c: number, ox: number, oy: number) =>
-              c === 0 && ox >= 2 && ox < map.width - 2 && oy >= 2 && oy < map.height - 2;
-            if (isLakeEdge(n, tx, ty - 1)) {
-              ctx.fillStyle = '#334155';
-              ctx.fillRect(px, py, TILE_SIZE, 4);
-              ctx.fillStyle = '#94A3B8';
-              ctx.fillRect(px + 1, py + 1, TILE_SIZE - 2, 2);
-            }
-            if (isLakeEdge(s, tx, ty + 1)) {
-              ctx.fillStyle = '#334155';
-              ctx.fillRect(px, py + TILE_SIZE - 4, TILE_SIZE, 4);
-              ctx.fillStyle = '#94A3B8';
-              ctx.fillRect(px + 1, py + TILE_SIZE - 3, TILE_SIZE - 2, 2);
-            }
-            if (isLakeEdge(w, tx - 1, ty)) {
-              ctx.fillStyle = '#334155';
-              ctx.fillRect(px, py, 4, TILE_SIZE);
-              ctx.fillStyle = '#94A3B8';
-              ctx.fillRect(px + 1, py + 1, 2, TILE_SIZE - 2);
-            }
-            if (isLakeEdge(e, tx + 1, ty)) {
-              ctx.fillStyle = '#334155';
-              ctx.fillRect(px + TILE_SIZE - 4, py, 4, TILE_SIZE);
-              ctx.fillStyle = '#94A3B8';
-              ctx.fillRect(px + TILE_SIZE - 3, py + 1, 2, TILE_SIZE - 2);
-            }
-          } else if (code === 6) {
-            // Sunlit sand & wet lake shoreline
-            ctx.fillStyle = (tx + ty) % 2 === 0 ? '#BA975D' : '#AE8D55';
-            ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
-            // Wet sand band along water edge
-            ctx.fillStyle = '#8F7143';
-            if (n === 0) ctx.fillRect(px, py, TILE_SIZE, 4);
-            if (s === 0) ctx.fillRect(px, py + TILE_SIZE - 4, TILE_SIZE, 4);
-            if (w === 0) ctx.fillRect(px, py, 4, TILE_SIZE);
-            if (e === 0) ctx.fillRect(px + TILE_SIZE - 4, py, 4, TILE_SIZE);
-            if (hash % 5 === 0) {
-              ctx.fillStyle = '#D2B277';
-              ctx.fillRect(px + 7, py + 14, 9, 2);
-            }
-          } else if (code === 2) {
-            // Alternating Evergreen Pine & Broadleaf Ancient Oak trees over rich undergrowth
-            ctx.fillStyle = '#22512F';
-            ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
-            // Ground shadow
-            ctx.fillStyle = 'rgba(8, 22, 12, 0.42)';
-            ctx.fillRect(px + 4, py + 23, TILE_SIZE - 8, 7);
-            // Trunk
-            ctx.fillStyle = '#4A2C1A';
-            ctx.fillRect(px + 13, py + 20, 6, 9);
-            if (hash % 2 === 0) {
-              // Layered Evergreen Pine silhouette
-              ctx.fillStyle = '#0F3F22';
-              ctx.fillRect(px + 4, py + 14, TILE_SIZE - 8, 9);
-              ctx.fillStyle = '#14532D';
-              ctx.fillRect(px + 6, py + 9, TILE_SIZE - 12, 10);
-              ctx.fillStyle = '#15803D';
-              ctx.fillRect(px + 9, py + 4, TILE_SIZE - 18, 9);
-              ctx.fillStyle = '#22C55E';
-              ctx.fillRect(px + 12, py + 3, 8, 5);
-            } else {
-              // Broadleaf Ancient Oak (occasional golden-sunlit autumn/spring crown)
-              const sunlit = hash % 7 === 0;
-              ctx.fillStyle = sunlit ? '#3F6212' : '#14532D';
-              ctx.fillRect(px + 3, py + 6, TILE_SIZE - 6, 17);
-              ctx.fillStyle = sunlit ? '#65A30D' : '#16803C';
-              ctx.fillRect(px + 5, py + 3, TILE_SIZE - 10, 14);
-              ctx.fillStyle = sunlit ? '#A3E635' : '#22C55E';
-              ctx.fillRect(px + 8, py + 4, 11, 5);
-            }
-          } else if (code === 3) {
-            // Location-aware Quarry Boulders (NE) vs Ivy-draped Rune Monoliths (Crossroads/SE/Sylvan Ring)
-            const isQuarryRock = tx >= 64 && ty < 45;
-            if (isQuarryRock) {
-              ctx.fillStyle = '#8F734D';
-              ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
-              ctx.fillStyle = 'rgba(0,0,0,0.34)';
-              ctx.fillRect(px + 3, py + 23, TILE_SIZE - 6, 7);
-              ctx.fillStyle = '#574636';
-              ctx.fillRect(px + 4, py + 6, TILE_SIZE - 8, TILE_SIZE - 10);
-              ctx.fillStyle = '#7C654F';
-              ctx.fillRect(px + 6, py + 4, TILE_SIZE - 12, 12);
-              ctx.fillStyle = '#A68B6D';
-              ctx.fillRect(px + 8, py + 5, TILE_SIZE - 16, 3);
-              // Amber mineral vein
-              ctx.fillStyle = '#F59E0B';
-              ctx.fillRect(px + 9, py + 15, 6, 2);
-              ctx.fillRect(px + 14, py + 17, 4, 2);
-            } else {
-              ctx.fillStyle = '#3B4252';
-              ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
-              ctx.fillStyle = 'rgba(0,0,0,0.36)';
-              ctx.fillRect(px + 3, py + 23, TILE_SIZE - 6, 7);
-              ctx.fillStyle = '#475569';
-              ctx.fillRect(px + 4, py + 5, TILE_SIZE - 8, TILE_SIZE - 9);
-              ctx.fillStyle = '#64748B';
-              ctx.fillRect(px + 5, py + 3, TILE_SIZE - 10, 13);
-              ctx.fillStyle = '#94A3B8';
-              ctx.fillRect(px + 7, py + 5, TILE_SIZE - 14, 3);
-              // Ivy & glowing rune inlay
-              ctx.fillStyle = '#15803D';
-              ctx.fillRect(px + 4, py + 18, 6, 6);
-              ctx.fillStyle = hash % 2 === 0 ? '#34D399' : '#38BDF8';
-              ctx.fillRect(px + 13, py + 13, 6, 4);
-              ctx.fillRect(px + 15, py + 11, 2, 8);
-            }
-          }
-        } else if (isTavern) {
+          if (isTavern) {
           if (code === 1) {
             // Polished Oak Wooden Planks
             ctx.fillStyle = (ty % 2 === 0) ? '#5C3A21' : '#52331C';
@@ -1095,6 +864,7 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
           }
         }
       }
+      }
     }
 
     mapLayerRef.current = off;
@@ -1193,12 +963,20 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
       }
     };
 
+    const normalizeControlKey = (e: KeyboardEvent): string => {
+      if (e.code === 'ShiftLeft' || e.code === 'ShiftRight' || e.key === 'Shift') return 'shift';
+      if (e.code === 'Digit1' || e.key === '1') return '1';
+      if (e.code === 'Digit2' || e.key === '2') return '2';
+      if (e.code === 'Digit3' || e.key === '3') return '3';
+      return e.key.toLowerCase();
+    };
+
     const handleKeyDown = (e: KeyboardEvent) => {
       if (controlsBlockedRef.current || chatFocusedRef.current) return;
       if (isEditableEventTarget(e.target)) return;
       if (e.ctrlKey || e.metaKey || e.altKey) return;
 
-      const k = e.key.toLowerCase();
+      const k = normalizeControlKey(e);
       let changed = false;
 
       if (k === 'escape') {
@@ -1244,18 +1022,33 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
           changed = true;
           triggerLocalSwing('primary');
         }
-      } else if (k === 'q' || k === 'r' || e.key === 'Shift' || k === 'c' || k === 'f' || k === 'v') {
+      } else if (
+        k === '1' ||
+        k === '2' ||
+        k === 'q' ||
+        k === 'r' ||
+        k === 'shift' ||
+        k === 'c' ||
+        k === 'f'
+      ) {
         if (e.repeat || abilityAimPropRef.current.current) return;
-        const action: AimableAction =
-          k === 'q' ? 'tactical' : k === 'r' || e.key === 'Shift' ? 'ult' : 'dash';
-        if (!canStartAbilityAim(action)) return;
-        syncDirectionalAimFromKeys();
         const snap = latestSnapshotRef.current;
         const me = snap?.players.find((p) => p.id === playerId) || snap?.players[0];
+        if ((k === '1' || k === '2') && me?.npcDialogue?.options && me.npcDialogue.options.length > 0) {
+          return;
+        }
+        const action: AimableAction =
+          k === '1' || k === 'q'
+            ? 'tactical'
+            : k === '2' || k === 'r'
+              ? 'ult'
+              : 'dash';
+        if (!canStartAbilityAim(action)) return;
+        syncDirectionalAimFromKeys();
         if (action === 'tactical' && me?.heroClass === 'arcanist' && me.equippedScrollId === 'disintegration') {
           if ((me.chronoSuspendedMs || 0) > 0) return;
           const smartTarget = computeDesktopAimTarget('tactical', 'keyboard');
-          disintegrationHoldSourceRef.current = 'q';
+          disintegrationHoldSourceRef.current = k === '1' ? '1' : 'q';
           lastSentChannelAngleRef.current = smartTarget.aimAngle;
           lastChannelUpdateAtRef.current = performance.now();
           sfx.playArcanistSpell('disintegration', { isLocal: true });
@@ -1267,7 +1060,7 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
           return;
         }
         const target = computeDesktopAimTarget(action, 'keyboard');
-        activeAimKeyRef.current = e.key === 'Shift' ? 'shift' : k;
+        activeAimKeyRef.current = k;
         abilityAimPropRef.current.current = {
           action,
           source: 'keyboard',
@@ -1277,13 +1070,10 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
           cancelled: false,
         };
         syncAimUi(abilityAimPropRef.current.current);
-      } else if (k === '1' || k === 'h') {
+      } else if (k === '3' || k === 'h') {
         if (e.repeat) return;
         const snap = latestSnapshotRef.current;
         const me = snap?.players.find((p) => p.id === playerId) || snap?.players[0];
-        if (k === '1' && me?.npcDialogue?.options && me.npcDialogue.options.length > 0) {
-          return;
-        }
         if (me && !me.downed && me.potions > 0 && me.hp < me.maxHp) {
           sfx.playHeal({ isLocal: true });
         }
@@ -1306,13 +1096,12 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
-      const k = e.key.toLowerCase();
-      const normAimKey = e.key === 'Shift' ? 'shift' : k;
-      if (activeAimKeyRef.current && normAimKey === activeAimKeyRef.current) {
+      const k = normalizeControlKey(e);
+      if (activeAimKeyRef.current && k === activeAimKeyRef.current) {
         commitDesktopAbilityAim(false);
       }
 
-      if (k === 'q' && disintegrationHoldSourceRef.current === 'q') {
+      if ((k === '1' || k === 'q') && disintegrationHoldSourceRef.current === k) {
         disintegrationHoldSourceRef.current = null;
         onSendCommandRef.current?.({ type: 'player:channel_stop' });
       }
@@ -1467,8 +1256,8 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+    const screenCtx = canvas.getContext('2d');
+    if (!screenCtx) return;
 
     const smoothedPlayers = new Map<string, SmoothedPos>();
     const smoothedEnemies = new Map<string, SmoothedPos>();
@@ -1500,6 +1289,8 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
     const prevComboStepMap = new Map<string, number>();
     const prevPropsMap = new Map<string, { opened: boolean; kind: PropState['kind']; x: number; y: number }>();
     let prevPropsFloor = -1;
+    let prevCombatRoomsCleared = -1;
+    let prevBossDefeated = false;
     const playerWeaponSwings = new Map<string, WeaponSwingAnimationState>();
     const triggeredSwingVfxMap = new Map<string, number>();
     const playerFootstepStateMap = new Map<string, { lastStepIndex: number; wasMoving: boolean }>();
@@ -1541,8 +1332,8 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
         if (textWidthCache.size >= 256) {
           textWidthCache.clear();
         }
-        ctx.font = font;
-        w = ctx.measureText(text).width;
+        screenCtx.font = font;
+        w = screenCtx.measureText(text).width;
         textWidthCache.set(key, w);
       }
       return w;
@@ -1565,38 +1356,13 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
     let lastAutoSrc = '';
     let cachedAutoTargetId: string | null = null;
 
-    // Offscreen caches to eliminate per-frame gradient allocations & 3,000+ minimap fillRect calls
-    const torchGlowCanvas = document.createElement('canvas');
-    torchGlowCanvas.width = 136;
-    torchGlowCanvas.height = 136;
-    const torchGlowCtx = torchGlowCanvas.getContext('2d');
-    if (torchGlowCtx) {
-      const grad = torchGlowCtx.createRadialGradient(68, 68, 2, 68, 68, 68);
-      grad.addColorStop(0, 'rgba(255, 196, 98, 0.25)');
-      grad.addColorStop(1, 'rgba(255, 140, 50, 0)');
-      torchGlowCtx.fillStyle = grad;
-      torchGlowCtx.fillRect(0, 0, 136, 136);
-    }
+    // Quantized pixel-art offscreen caches (stepped Bayer-dithered torchlight & zone auras)
+    const torchGlowCanvas = createSteppedTorchGlowCanvas();
 
     const createRadialZoneSprite = (
       size: number,
       stops: readonly [number, string][]
-    ): HTMLCanvasElement => {
-      const c = document.createElement('canvas');
-      c.width = size;
-      c.height = size;
-      const gCtx = c.getContext('2d');
-      if (gCtx) {
-        const half = size / 2;
-        const grad = gCtx.createRadialGradient(half, half, 2, half, half, half);
-        for (let s = 0; s < stops.length; s++) {
-          grad.addColorStop(stops[s][0], stops[s][1]);
-        }
-        gCtx.fillStyle = grad;
-        gCtx.fillRect(0, 0, size, size);
-      }
-      return c;
-    };
+    ): HTMLCanvasElement => createQuantizedRadialZoneSprite(size, stops);
 
     const createLinearZoneSprite = (
       w: number,
@@ -1694,12 +1460,28 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
       canvasRectRef.current = { left: r.left, top: r.top, width: r.width, height: r.height };
     };
     const resize = () => {
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
+      const rect = canvas.getBoundingClientRect();
+      const vw = Math.max(
+        1,
+        Math.round(rect.width || window.visualViewport?.width || window.innerWidth)
+      );
+      const vh = Math.max(
+        1,
+        Math.round(rect.height || window.visualViewport?.height || window.innerHeight)
+      );
+      if (canvas.width !== vw || canvas.height !== vh) {
+        canvas.width = vw;
+        canvas.height = vh;
+      }
       updateCanvasRect();
     };
     resize();
     window.addEventListener('resize', resize);
+    window.addEventListener('orientationchange', resize);
+    window.visualViewport?.addEventListener('resize', resize);
+    const resizeObserver =
+      typeof ResizeObserver !== 'undefined' ? new ResizeObserver(() => resize()) : null;
+    resizeObserver?.observe(canvas);
     window.addEventListener('scroll', updateCanvasRect, { passive: true });
 
     let rafId = 0;
@@ -1717,10 +1499,10 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
       }
       const zoom = cameraZoomRef.current;
 
-      ctx.imageSmoothingEnabled = false;
+      screenCtx.imageSmoothingEnabled = false;
 
-      ctx.fillStyle = '#111219';
-      ctx.fillRect(0, 0, cw, ch);
+      screenCtx.fillStyle = '#111219';
+      screenCtx.fillRect(0, 0, cw, ch);
 
       const snap = latestSnapshotRef.current;
       if (!snap) {
@@ -2507,6 +2289,9 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
               particleManager.spawnClericSeraphicJudgmentBurst(z.x, z.y, z.radius || 110, now);
               sfx.playExplosion('holy', z.radius || 110, { worldPos: { x: z.x, y: z.y } });
               screenShake = Math.min(8, Math.max(screenShake, 4.5));
+            } else if (z.kind === 'cinderflare_blast') {
+              sfx.playExplosion('fire', z.radius || 95, { worldPos: { x: z.x, y: z.y } });
+              screenShake = Math.min(9, Math.max(screenShake, 5.2));
             }
           }
         }
@@ -2695,6 +2480,11 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
             if (prop.kind === 'crate') {
               particleManager.spawnPropBreakBurst(prop.x, prop.y, prop.kind, now);
               sfx.playPropBreak(prop.kind, { worldPos: { x: prop.x, y: prop.y } });
+            } else if (prop.kind === 'keg') {
+              particleManager.spawnPropBreakBurst(prop.x, prop.y, 'crate', now);
+              particleManager.spawnFireballExplosion(prop.x, prop.y, 112, now);
+              sfx.playExplosion('fire', 112, { worldPos: { x: prop.x, y: prop.y } });
+              screenShake = Math.min(9, Math.max(screenShake, 5.5));
             } else if (prop.kind === 'potion') {
               particleManager.spawnLootPickupBurst(prop.x, prop.y, '#34D399', now);
             } else if (prop.kind === 'chest' || prop.kind === 'relic_chest') {
@@ -2704,9 +2494,15 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
           }
         }
         for (const [propId, prevProp] of prevPropsMap.entries()) {
-          if (!prevProp.opened && prevProp.kind === 'crate' && !snap.props.some((pr) => pr.id === propId)) {
-            particleManager.spawnPropBreakBurst(prevProp.x, prevProp.y, prevProp.kind, now);
-            sfx.playPropBreak(prevProp.kind, { worldPos: { x: prevProp.x, y: prevProp.y } });
+          if (!prevProp.opened && (prevProp.kind === 'crate' || prevProp.kind === 'keg') && !snap.props.some((pr) => pr.id === propId)) {
+            particleManager.spawnPropBreakBurst(prevProp.x, prevProp.y, 'crate', now);
+            if (prevProp.kind === 'keg') {
+              particleManager.spawnFireballExplosion(prevProp.x, prevProp.y, 112, now);
+              sfx.playExplosion('fire', 112, { worldPos: { x: prevProp.x, y: prevProp.y } });
+              screenShake = Math.min(9, Math.max(screenShake, 5.5));
+            } else {
+              sfx.playPropBreak(prevProp.kind, { worldPos: { x: prevProp.x, y: prevProp.y } });
+            }
           }
         }
       }
@@ -2714,6 +2510,24 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
       for (const prop of snap.props) {
         prevPropsMap.set(prop.id, { opened: prop.opened, kind: prop.kind, x: prop.x, y: prop.y });
       }
+      if (hasInitWorldEffects && prevPropsFloor === snap.floor && snap.floor > 0 && !snap.pvpEnabled) {
+        const curCleared = snap.combatRoomsCleared ?? 0;
+        if (!prevBossDefeated && snap.bossDefeated) {
+          sfx.playRelicChime();
+          sfx.playUiClick('confirm');
+          impactVignetteFlash = {
+            until: now + 420,
+            bornAt: now,
+            durationMs: 420,
+            alpha: 0.24,
+            color: '#34D399',
+          };
+        } else if (prevCombatRoomsCleared >= 0 && curCleared > prevCombatRoomsCleared) {
+          sfx.playUiClick('confirm');
+        }
+      }
+      prevCombatRoomsCleared = snap.combatRoomsCleared ?? 0;
+      prevBossDefeated = Boolean(snap.bossDefeated);
       prevPropsFloor = snap.floor;
 
       prevBossState = activeBoss ? { id: activeBoss.id, x: activeBoss.x, y: activeBoss.y } : null;
@@ -2972,14 +2786,37 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
         screenShake = 0;
       }
 
-      const snappedCamX = Math.round((cameraRef.current.x + shakeX) * zoom) / zoom;
-      const snappedCamY = Math.round((cameraRef.current.y + shakeY) * zoom) / zoom;
-      const worldView = getWorldViewBounds(snappedCamX, snappedCamY, cw, ch, zoom);
+      const camIntX = Math.round(cameraRef.current.x + shakeX);
+      const camIntY = Math.round(cameraRef.current.y + shakeY);
+      const snappedCamX = snapToScreenPixel(cameraRef.current.x + shakeX, zoom);
+      const snappedCamY = snapToScreenPixel(cameraRef.current.y + shakeY, zoom);
 
+      let bufW = Math.max(64, Math.ceil(cw / zoom) + 4);
+      let bufH = Math.max(64, Math.ceil(ch / zoom) + 4);
+      if (bufW % 2 !== 0) bufW++;
+      if (bufH % 2 !== 0) bufH++;
+      const halfW = bufW / 2;
+      const halfH = bufH / 2;
+
+      let worldBuf = worldPixelCanvasRef.current;
+      if (!worldBuf) {
+        worldBuf = document.createElement('canvas');
+        worldPixelCanvasRef.current = worldBuf;
+      }
+      if (worldBuf.width !== bufW || worldBuf.height !== bufH) {
+        worldBuf.width = bufW;
+        worldBuf.height = bufH;
+      }
+      const wCtx = worldBuf.getContext('2d') || screenCtx;
+      const ctx = wCtx;
+      const worldView = getWorldViewBounds(camIntX, camIntY, bufW, bufH, 1);
+
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.imageSmoothingEnabled = false;
+      ctx.fillStyle = '#111219';
+      ctx.fillRect(0, 0, bufW, bufH);
       ctx.save();
-      ctx.translate(cw / 2, ch / 2);
-      ctx.scale(zoom, zoom);
-      ctx.translate(-snappedCamX, -snappedCamY);
+      ctx.translate(halfW - camIntX, halfH - camIntY);
 
       if (mapLayerRef.current) {
         const off = mapLayerRef.current;
@@ -3001,13 +2838,16 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
             if (map.tiles[ty * map.width + tx] !== 0) continue;
             const wave = Math.sin(now * 0.0028 + tx * 0.9 + ty * 0.7);
             if (wave > 0.35) {
-              const wx = tx * TILE_SIZE + 6 + Math.floor((wave - 0.35) * 14);
-              const wy = ty * TILE_SIZE + 8 + ((tx * 7 + ty * 13) % 16);
-              ctx.fillStyle = wave > 0.78 ? 'rgba(186, 230, 253, 0.55)' : 'rgba(125, 211, 252, 0.32)';
-              ctx.fillRect(wx, wy, wave > 0.78 ? 5 : 8, 1.5);
+              const wx = tx * TILE_SIZE + 6 + Math.floor((wave - 0.35) * 7) * 2;
+              const wy = ty * TILE_SIZE + 8 + ((tx * 7 + ty * 13) & 14);
+              ctx.fillStyle = wave > 0.78 ? 'rgba(186, 230, 253, 0.62)' : 'rgba(125, 211, 252, 0.38)';
+              ctx.fillRect(wx, wy, wave > 0.78 ? 6 : 8, 2);
             }
           }
         }
+
+        // Overworld Landmark Centerpieces & Drifting Stepped Pixel Cloud Shadows
+        drawOverworldPixelLandmarks(ctx, worldView, now);
       } else {
         const portalSealText =
           snap.bossRoomCleared && (snap.guardiansRemaining ?? 0) > 0
@@ -5086,6 +4926,111 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
             ctx.stroke();
           }
           ctx.restore();
+        } else if (z.kind === 'acid_pool') {
+          const alpha = Math.max(0.18, Math.min(1, z.ttlMs / Math.max(1, z.maxTtlMs)));
+          const r = z.radius || 34;
+          const pulse = Math.sin(now * 0.008 + z.x * 0.05) * 2;
+          ctx.save();
+          ctx.translate(z.x, z.y);
+          ctx.fillStyle = `rgba(21, 128, 61, ${(0.36 * alpha).toFixed(3)})`;
+          ctx.beginPath();
+          ctx.arc(0, 0, r, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = `rgba(132, 204, 22, ${(0.28 * alpha).toFixed(3)})`;
+          ctx.beginPath();
+          ctx.arc(0, 0, Math.max(8, r * 0.62 + pulse * 0.5), 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = `rgba(163, 230, 53, ${(0.88 * alpha).toFixed(3)})`;
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.arc(0, 0, r, 0, Math.PI * 2);
+          ctx.stroke();
+          // Bubbling caustic pockets
+          for (let b = 0; b < 4; b++) {
+            const ba = b * 1.57 + now * 0.002;
+            const br = r * 0.48;
+            const bx = Math.cos(ba) * br;
+            const by = Math.sin(ba) * br;
+            const bRad = 2.2 + Math.abs(Math.sin(now * 0.006 + b)) * 2.5;
+            ctx.fillStyle = `rgba(217, 249, 157, ${(0.75 * alpha).toFixed(3)})`;
+            ctx.beginPath();
+            ctx.arc(bx, by, bRad, 0, Math.PI * 2);
+            ctx.fill();
+          }
+          ctx.restore();
+        } else if (z.kind === 'seismic_ring') {
+          const alpha = Math.max(0.16, Math.min(1, z.ttlMs / Math.max(1, z.maxTtlMs)));
+          const progress = 1 - Math.max(0, Math.min(1, z.ttlMs / Math.max(1, z.maxTtlMs)));
+          const maxR = z.radius || 76;
+          const r = maxR * (0.28 + 0.72 * progress);
+          ctx.save();
+          ctx.translate(z.x, z.y);
+          ctx.fillStyle = `rgba(217, 119, 6, ${(0.2 * alpha).toFixed(3)})`;
+          ctx.beginPath();
+          ctx.arc(0, 0, maxR, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = `rgba(251, 191, 36, ${(0.92 * alpha).toFixed(3)})`;
+          ctx.lineWidth = 3.2;
+          ctx.beginPath();
+          ctx.arc(0, 0, r, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.strokeStyle = `rgba(245, 158, 11, ${(0.55 * alpha).toFixed(3)})`;
+          ctx.lineWidth = 1.6;
+          ctx.setLineDash([6, 5]);
+          ctx.beginPath();
+          ctx.arc(0, 0, maxR, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.setLineDash([]);
+          // Jagged stone fissures
+          ctx.strokeStyle = `rgba(254, 240, 138, ${(0.82 * alpha).toFixed(3)})`;
+          ctx.lineWidth = 1.8;
+          for (let f = 0; f < 6; f++) {
+            const fa = (f * Math.PI) / 3 + 0.35;
+            ctx.beginPath();
+            ctx.moveTo(Math.cos(fa) * 8, Math.sin(fa) * 8);
+            ctx.lineTo(Math.cos(fa + 0.16) * (r * 0.56), Math.sin(fa + 0.16) * (r * 0.56));
+            ctx.lineTo(Math.cos(fa - 0.1) * (r * 0.92), Math.sin(fa - 0.1) * (r * 0.92));
+            ctx.stroke();
+          }
+          ctx.restore();
+        } else if (z.kind === 'void_sigil') {
+          const alpha = Math.max(0.2, Math.min(1, z.ttlMs / Math.max(1, z.maxTtlMs)));
+          const progress = 1 - Math.max(0, Math.min(1, z.ttlMs / Math.max(1, z.maxTtlMs)));
+          const r = z.radius || 44;
+          const spin = now * 0.0045;
+          ctx.save();
+          ctx.translate(z.x, z.y);
+          ctx.fillStyle = `rgba(107, 33, 168, ${(0.3 * alpha).toFixed(3)})`;
+          ctx.beginPath();
+          ctx.arc(0, 0, r, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = `rgba(217, 70, 239, ${(0.92 * alpha).toFixed(3)})`;
+          ctx.lineWidth = 2.2;
+          ctx.beginPath();
+          ctx.arc(0, 0, r, 0, Math.PI * 2);
+          ctx.stroke();
+          // Contracting detonation ring
+          const innerR = Math.max(6, r * (1 - progress * 0.78));
+          ctx.strokeStyle = `rgba(244, 63, 94, ${(0.9 * alpha).toFixed(3)})`;
+          ctx.lineWidth = 1.8;
+          ctx.setLineDash([5, 4]);
+          ctx.beginPath();
+          ctx.arc(0, 0, innerR, spin, spin + Math.PI * 2);
+          ctx.stroke();
+          ctx.setLineDash([]);
+          // Rotating arcane cross-glyph
+          ctx.strokeStyle = `rgba(240, 171, 252, ${(0.82 * alpha).toFixed(3)})`;
+          ctx.lineWidth = 1.5;
+          for (let g = 0; g < 4; g++) {
+            const ga = spin + (g * Math.PI) / 2;
+            ctx.beginPath();
+            ctx.moveTo(Math.cos(ga) * (r * 0.25), Math.sin(ga) * (r * 0.25));
+            ctx.lineTo(Math.cos(ga) * (r * 0.85), Math.sin(ga) * (r * 0.85));
+            ctx.stroke();
+          }
+          ctx.restore();
+        } else if (z.kind === 'overworld_font') {
+          drawOverworldFontZonePixel(ctx, z, now);
         }
       }
 
@@ -5180,7 +5125,7 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
 
       // Props, Relic Vault, Mystic Shrine & Pickups (viewport-culled)
       for (const prop of snap.props) {
-        if (prop.opened && (prop.kind === 'crate' || prop.kind === 'coin' || prop.kind === 'potion')) {
+        if (prop.opened && (prop.kind === 'crate' || prop.kind === 'keg' || prop.kind === 'coin' || prop.kind === 'potion')) {
           continue;
         }
         const propMargin = prop.kind === 'warden_gate' ? 180 : 96;
@@ -5278,8 +5223,8 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
         const enemyImpact = enemyImpactMap.get(en.id);
         const enemyImpactVis = sampleEnemyImpactVisual(enemyImpact, now);
         const enemyRenderNow = enemyImpactVis.renderNow;
-        const ex = snapToScreenPixel(pos.x + enemyImpactVis.offsetX, zoom);
-        const ey = snapToScreenPixel(pos.y + enemyImpactVis.offsetY, zoom);
+        const ex = Math.round(pos.x + enemyImpactVis.offsetX);
+        const ey = Math.round(pos.y + enemyImpactVis.offsetY);
         const enMargin = en.radius + (en.kind === 'boss' ? 220 : 80);
         if (
           ex < worldView.left - enMargin ||
@@ -5296,6 +5241,111 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
           prevEnemyFacing?.facingLeft ?? false
         );
         enemyFacingMap.set(en.id, { dir: enemyPose.dir, facingLeft: enemyPose.facingLeft });
+
+        if (en.kind !== 'boss') {
+          // Subtle gilded ground ring beneath Elite dungeon mobs
+          if (en.elite) {
+            const elitePulse = 1 + Math.sin(now * 0.008 + ex * 0.05) * 0.08;
+            ctx.save();
+            ctx.fillStyle = 'rgba(245, 158, 11, 0.14)';
+            ctx.beginPath();
+            ctx.ellipse(ex, ey + en.radius * 0.65, (en.radius + 5) * elitePulse, 7, 0, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = 'rgba(251, 191, 36, 0.68)';
+            ctx.lineWidth = 1.6;
+            ctx.beginPath();
+            ctx.ellipse(ex, ey + en.radius * 0.65, (en.radius + 5) * elitePulse, 7, 0, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.restore();
+          }
+
+          // Compact hazard runway telegraph for charging / pouncing regular mobs
+          if (en.charging) {
+            ctx.save();
+            const cAngle = en.chargeAngle ?? 0;
+            const runwayLen = 110;
+            const runwayW = en.radius * 2 + 6;
+            const windupMs = en.chargeWindupMs ?? 0;
+            const isWindingUp = windupMs > 0;
+            const fillRatio = isWindingUp ? Math.max(0.1, Math.min(1, 1 - windupMs / 420)) : 1;
+
+            ctx.translate(ex, ey);
+            ctx.rotate(cAngle);
+            ctx.fillStyle = isWindingUp ? 'rgba(245, 158, 11, 0.14)' : 'rgba(239, 68, 68, 0.24)';
+            ctx.fillRect(0, -runwayW / 2, runwayLen, runwayW);
+            if (isWindingUp) {
+              ctx.fillStyle = 'rgba(245, 158, 11, 0.28)';
+              ctx.fillRect(0, -runwayW / 2, runwayLen * fillRatio, runwayW);
+            }
+            ctx.strokeStyle = isWindingUp ? 'rgba(251, 191, 36, 0.88)' : 'rgba(239, 68, 68, 0.94)';
+            ctx.lineWidth = isWindingUp ? 1.8 : 2.2;
+            ctx.setLineDash([6, 4]);
+            ctx.beginPath();
+            ctx.moveTo(0, -runwayW / 2);
+            ctx.lineTo(runwayLen, -runwayW / 2);
+            ctx.moveTo(0, runwayW / 2);
+            ctx.lineTo(runwayLen, runwayW / 2);
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            // Directional chevrons >>>
+            ctx.strokeStyle = isWindingUp ? 'rgba(253, 224, 71, 0.92)' : 'rgba(254, 240, 138, 0.95)';
+            ctx.lineWidth = 2;
+            const chevOff = (now * (isWindingUp ? 0.08 : 0.15)) % 32;
+            for (let c = 22; c < runwayLen - 6; c += 32) {
+              const cx = (c + chevOff) % (runwayLen - 8) + 8;
+              ctx.beginPath();
+              ctx.moveTo(cx - 6, -6);
+              ctx.lineTo(cx, 0);
+              ctx.lineTo(cx - 6, 6);
+              ctx.stroke();
+            }
+            ctx.restore();
+
+            if (!isWindingUp) {
+              ctx.save();
+              ctx.strokeStyle = 'rgba(248, 113, 113, 0.65)';
+              ctx.lineWidth = 2.4;
+              ctx.beginPath();
+              ctx.moveTo(ex - Math.cos(cAngle) * 26, ey - Math.sin(cAngle) * 26);
+              ctx.lineTo(ex, ey);
+              ctx.stroke();
+              ctx.restore();
+            }
+          }
+
+          // Pulsing ground windup danger ring for regular mobs preparing a strike/cast
+          if (en.state === 'windup' || (en.chargeWindupMs ?? 0) > 0) {
+            const pulse = Math.sin(now * 0.018) * 1.5;
+            ctx.save();
+            ctx.strokeStyle = en.elite ? 'rgba(251, 191, 36, 0.85)' : 'rgba(248, 113, 113, 0.8)';
+            ctx.lineWidth = 1.8;
+            ctx.beginPath();
+            ctx.arc(ex, ey + 4, en.radius + 7 + pulse, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.restore();
+          }
+
+          // Metallic-cyan Shield Wall barrier arc for bracing regular mobs (Knight / Warden Enforcer)
+          if ((en.shieldWallMs ?? 0) > 0) {
+            ctx.save();
+            ctx.fillStyle = 'rgba(147, 197, 253, 0.18)';
+            ctx.beginPath();
+            ctx.arc(ex, ey, en.radius + 8, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = 'rgba(56, 189, 248, 0.92)';
+            ctx.lineWidth = 2.4;
+            ctx.beginPath();
+            ctx.arc(ex, ey, en.radius + 8, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.strokeStyle = 'rgba(224, 242, 254, 0.85)';
+            ctx.lineWidth = 1.6;
+            ctx.beginPath();
+            ctx.arc(ex, ey, en.radius + 4, -Math.PI * 0.75, Math.PI * 0.75);
+            ctx.stroke();
+            ctx.restore();
+          }
+        }
 
         if (en.kind === 'slime') {
           drawSlimeSprite(ctx, en, ex, ey, enemyRenderNow, map.biome, enemyPose);
@@ -5581,75 +5631,14 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
           ctx.restore();
         }
 
-        if (me?.predatorTargetId === en.id && (me.predatorStacks ?? 0) > 0) {
-          const stacks = me.predatorStacks ?? 0;
-          const pr = en.radius + 7;
-          ctx.save();
-          ctx.strokeStyle = '#34D399';
-          ctx.lineWidth = 1.6;
-          ctx.setLineDash([4, 4]);
-          ctx.beginPath();
-          ctx.arc(ex, ey, pr, 0, Math.PI * 2);
-          ctx.stroke();
-          ctx.setLineDash([]);
-          ctx.fillStyle = '#34D399';
-          ctx.font = 'bold 9px monospace';
-          ctx.textAlign = 'center';
-          ctx.fillText(`x${stacks}`, ex, ey + en.radius + 11);
-          ctx.restore();
-        }
-
-        const barW = en.kind === 'boss' ? 76 : 30;
-        const hpRatio = Math.max(0, en.hp / Math.max(1, en.maxHp));
-        const isCatacombs = map.biome === 'catacombs' || map.floor === 2;
-        const isEmber = map.biome === 'ember' || map.floor === 3;
-        const isVoid = map.biome === 'void' || map.floor === 4;
-        const isAstral = map.biome === 'astral' || map.floor === 5;
-        const isHymns = map.biome === 'hymns' || map.floor === 6;
-
-        ctx.fillStyle = '#181820';
-        ctx.fillRect(ex - barW / 2 - 1, ey - en.radius - 17, barW + 2, 6);
-        ctx.fillStyle =
-          en.kind === 'boss'
-            ? isCatacombs
-              ? '#A855F7'
-              : isEmber
-                ? '#F97316'
-                : isVoid
-                  ? '#9333EA'
-                  : isAstral
-                    ? '#38BDF8'
-                    : isHymns
-                      ? '#FBBF24'
-                      : '#EF4444'
-            : en.elite
-              ? '#F59E0B'
-              : '#DC2626';
-        ctx.fillRect(ex - barW / 2, ey - en.radius - 16, Math.round(barW * hpRatio), 4);
-
         if (en.kind === 'boss') {
-          ctx.font = '700 11px "Plus Jakarta Sans", sans-serif';
-          ctx.textAlign = 'center';
-          ctx.fillStyle = en.enraged
-            ? '#EF4444'
-            : isCatacombs
-              ? '#C084FC'
-              : isEmber
-                ? '#FDBA74'
-                : isVoid
-                  ? '#F0ABFC'
-                  : isAstral
-                    ? '#BAE6FD'
-                    : isHymns
-                      ? '#FEF08A'
-                      : '#FCA5A5';
-          ctx.fillText(
-            en.enraged ? ` ${en.name} [ENRAGED] ` : en.name,
-            ex,
-            ey - en.radius - 21
-          );
+          const isCatacombs = map.biome === 'catacombs' || map.floor === 2;
+          const isEmber = map.biome === 'ember' || map.floor === 3;
+          const isVoid = map.biome === 'void' || map.floor === 4;
+          const isAstral = map.biome === 'astral' || map.floor === 5;
+          const isHymns = map.biome === 'hymns' || map.floor === 6;
 
-          // Enraged Fiery Pulsing Aura & Shockwave Burst
+          // Enraged Fiery Pulsing Aura & Shockwave Burst (screen-space name & bar drawn in Pass 2)
           if (en.enraged) {
             ctx.save();
             const pulse = Math.sin(now * 0.015) * 4;
@@ -5699,34 +5688,7 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
           }
         }
 
-        // Active Status Badges beneath health bar (reusing shared buffers)
-        enemyStatusIcons.length = 0;
-        enemyStatusColors.length = 0;
-        if ((en.burnedMs ?? 0) > 0) { enemyStatusIcons.push('BRN'); enemyStatusColors.push('#F97316'); }
-        if ((en.frozenMs ?? 0) > 0) { enemyStatusIcons.push('FRZ'); enemyStatusColors.push('#38BDF8'); }
-        if ((en.shockedMs ?? 0) > 0) { enemyStatusIcons.push('SHK'); enemyStatusColors.push('#FBBF24'); }
-        if ((en.poisonedMs ?? 0) > 0) { enemyStatusIcons.push('PSN'); enemyStatusColors.push('#22C55E'); }
-        if ((en.bleedingMs ?? 0) > 0) { enemyStatusIcons.push('BLD'); enemyStatusColors.push('#EF4444'); }
-        if ((en.stunnedMs ?? 0) > 0) { enemyStatusIcons.push('STN'); enemyStatusColors.push('#EAB308'); }
-
-        if (enemyStatusIcons.length > 0) {
-          ctx.save();
-          const badgeSpacing = 11;
-          const totalW = enemyStatusIcons.length * badgeSpacing;
-          const startX = ex - totalW / 2 + 5;
-          const badgeY = ey - en.radius - 7;
-          ctx.font = '9px monospace';
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          for (let idx = 0; idx < enemyStatusIcons.length; idx++) {
-            const bx = startX + idx * badgeSpacing;
-            ctx.fillStyle = 'rgba(15, 15, 22, 0.75)';
-            ctx.fillRect(bx - 5, badgeY - 5, 10, 10);
-            ctx.fillStyle = enemyStatusColors[idx];
-            ctx.fillText(enemyStatusIcons[idx], bx, badgeY);
-          }
-          ctx.restore();
-        }
+        // Status Badges moved to crisp Pass 2 screen-space rendering
 
         // Visual Status Overlays & Auras
         // 1. Frozen: Ice crystal encasement & frosted white shards
@@ -5948,14 +5910,33 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
 
       // Players
       const speakingSet = voiceManager.getSpeakingParticipantIds();
+      let pvpLeaderId: string | null = null;
+      if (snap.pvpEnabled) {
+        let topKills = 0;
+        let tied = false;
+        for (const pl of snap.players) {
+          if (!pl.connected) continue;
+          const k = pl.kills || 0;
+          if (k > topKills) {
+            topKills = k;
+            pvpLeaderId = pl.id;
+            tied = false;
+          } else if (k > 0 && k === topKills) {
+            tied = true;
+          }
+        }
+        if (tied || topKills <= 0) {
+          pvpLeaderId = null;
+        }
+      }
       for (const p of snap.players) {
         const basePos = smoothedPlayers.get(p.id) || { x: p.x, y: p.y };
         const dashVisual = !p.downed
           ? dashAfterimageManager.getVisualDashSample(p.id, basePos.x, basePos.y, now)
           : null;
         const pos = dashVisual ? { x: dashVisual.x, y: dashVisual.y } : basePos;
-        const hx = snapToScreenPixel(pos.x, zoom);
-        const hy = snapToScreenPixel(pos.y, zoom);
+        const hx = Math.round(pos.x);
+        const hy = Math.round(pos.y);
         const def = HERO_CLASSES[p.heroClass];
         const isLocalPlayer = p.id === playerId;
         const ang = isLocalPlayer ? aimAngleRef.current : p.aimAngle;
@@ -6436,121 +6417,7 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
           ctx.restore();
         }
 
-        // Player Name Tag (Username Lvl X without border box; Crimson for PvP rivals, Green for allies, Purple for admin)
-        const isPlayerAdmin = Boolean(p.isAdmin);
-        const isPvpRival = Boolean(snap.pvpEnabled && !isLocalPlayer);
-        const displayLevel = Math.max(1, p.level || 1);
-        const displayLabel = `${p.username} Lvl ${displayLevel}`;
-
-        ctx.font = '700 11px "Plus Jakarta Sans", sans-serif';
-        ctx.textAlign = 'center';
-        const badgeY = hy - 38;
-
-        // Gold Marker Arrow for Local Player
-        if (isLocalPlayer) {
-          ctx.fillStyle = '#F59E0B';
-          ctx.beginPath();
-          ctx.moveTo(hx, badgeY - 13);
-          ctx.lineTo(hx - 4, badgeY - 17);
-          ctx.lineTo(hx + 4, badgeY - 17);
-          ctx.closePath();
-          ctx.fill();
-        }
-
-        // Text shadow for readability
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
-        ctx.fillText(displayLabel, hx + 1, badgeY + 2);
-
-        // Name text: Crimson for PvP rivals, Purple for admin, Green for allies/local
-        ctx.fillStyle = isPvpRival ? '#FB7185' : isPlayerAdmin ? '#C084FC' : '#34D399';
-        ctx.fillText(displayLabel, hx, badgeY + 1);
-
-        // Live Proximity Voice Speaking Indicator beside player nameplate
-        const isSpeakingNow =
-          speakingSet.has(p.id) &&
-          (isLocalPlayer || !voiceManager.isUserMutedLocally(p.id));
-        if (isSpeakingNow) {
-          const labelWidth = measureTextCached('700 11px "Plus Jakarta Sans", sans-serif', displayLabel);
-          const iconX = hx + labelWidth / 2 + 10;
-          const iconY = badgeY - 3;
-          const pulse = (Math.sin(now * 0.015) + 1) * 0.5;
-          ctx.fillStyle = '#10B981';
-          ctx.fillRect(iconX, iconY - 2, 3, 5);
-          ctx.fillRect(iconX + 3, iconY - 4, 2, 9);
-          ctx.fillStyle = `rgba(110, 231, 183, ${(0.45 + pulse * 0.55).toFixed(2)})`;
-          ctx.fillRect(iconX + 6, iconY - 2 - Math.round(pulse * 2), 2, 5 + Math.round(pulse * 4));
-        }
-
-        // Health Bar & Compact Shield Bar (only for other players; local player uses screen HUD)
-        if (!isLocalPlayer) {
-          const pBarW = 36;
-          const pHpRatio = Math.max(0, p.hp / Math.max(1, p.maxHp));
-          ctx.fillStyle = '#0F172A';
-          ctx.fillRect(hx - pBarW / 2 - 1, hy - 18, pBarW + 2, 5);
-          ctx.fillStyle = isPvpRival ? '#EF4444' : '#38BDF8';
-          ctx.fillRect(hx - pBarW / 2, hy - 17, Math.round(pBarW * pHpRatio), 3);
-          if (p.shield > 0) {
-            const pShieldRatio = Math.min(1, p.shield / 60);
-            ctx.fillStyle = '#0F172A';
-            ctx.fillRect(hx - pBarW / 2 - 1, hy - 21, pBarW + 2, 3);
-            ctx.fillStyle = '#93C5FD';
-            ctx.fillRect(hx - pBarW / 2, hy - 20, Math.max(2, Math.round(pBarW * pShieldRatio)), 2);
-          }
-        }
-
-        // Chrono Well Time-Suspension Overlay on Allied Players
-        if ((p.chronoSuspendedMs || 0) > 0) {
-          ctx.save();
-          ctx.fillStyle = 'rgba(56, 189, 248, 0.16)';
-          ctx.beginPath();
-          ctx.arc(hx, hy, 22, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.strokeStyle = 'rgba(125, 211, 252, 0.92)';
-          ctx.lineWidth = 2;
-          ctx.setLineDash([4, 3]);
-          ctx.beginPath();
-          ctx.arc(hx, hy, 22, 0, Math.PI * 2);
-          ctx.stroke();
-          ctx.setLineDash([]);
-          ctx.restore();
-        }
-
-        // Arcanist Spell Cast Bar (e.g. Arcane Meteor 0.5s cast)
-        if (p.spellCastState && p.spellCastState.totalMs > 0) {
-          const castPct = Math.max(
-            0,
-            Math.min(1, 1 - p.spellCastState.remainingMs / p.spellCastState.totalMs)
-          );
-          const cbW = 46;
-          const cbX = hx - cbW / 2;
-          const cbY = hy - 56;
-          ctx.save();
-          ctx.fillStyle = 'rgba(15, 23, 42, 0.92)';
-          ctx.fillRect(cbX - 1, cbY - 1, cbW + 2, 7);
-          ctx.fillStyle = '#F97316';
-          ctx.fillRect(cbX, cbY, Math.round(cbW * castPct), 5);
-          ctx.strokeStyle = '#FDBA74';
-          ctx.lineWidth = 1;
-          ctx.strokeRect(cbX - 1, cbY - 1, cbW + 2, 7);
-          ctx.restore();
-        }
-
-        // Ranger Eclipse Longbow hold-to-charge bar
-        if ((p.eclipseChargeRatio ?? 0) > 0) {
-          const chargePct = Math.max(0, Math.min(1, p.eclipseChargeRatio || 0));
-          const ebW = 42;
-          const ebX = hx - ebW / 2;
-          const ebY = hy - 54;
-          ctx.save();
-          ctx.fillStyle = 'rgba(15, 23, 42, 0.9)';
-          ctx.fillRect(ebX - 1, ebY - 1, ebW + 2, 6);
-          ctx.fillStyle = chargePct >= 0.95 ? '#FDE047' : '#818CF8';
-          ctx.fillRect(ebX, ebY, Math.round(ebW * chargePct), 4);
-          ctx.strokeStyle = '#C4B5FD';
-          ctx.lineWidth = 1;
-          ctx.strokeRect(ebX - 1, ebY - 1, ebW + 2, 6);
-          ctx.restore();
-        }
+        // Player Nameplates, PvP Crowns, Rival HP/Shield Bars & Cast Bars drawn crisp in Pass 2 screen-space
 
         // Arcanist Disintegration Channel Beam (42u wide, up to 450u wall-clipped)
         if (p.disintegrationState?.active) {
@@ -6714,210 +6581,487 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
       }
       particleManager.cleanupInactiveProjectiles(activeProjIds);
 
-      // Floating Numbers, Critical Hit Animations & Speech Bubbles with Vertical Stacking
-      if (floatingTexts.length > 0) {
-        if (floatOffsetsBuf.length < floatingTexts.length) {
-          floatOffsetsBuf.length = floatingTexts.length;
-        }
-        floatOffsetsBuf.fill(0, 0, floatingTexts.length);
-        for (let i = 0; i < floatingTexts.length; i++) {
-          const ft = floatingTexts[i];
-          const age = now - ft.bornAt;
-          const isDialogue = ft.text.startsWith('"');
-          const duration = isDialogue ? 5500 : ft.kind === 'ping' ? 2600 : ft.kind === 'crit' ? 1200 : 950;
-          if (age >= duration) continue;
-          const t = age / duration;
-          const baseFloatY = ft.y - (isDialogue ? Math.min(10, t * 12) : t * (ft.kind === 'ping' ? 20 : ft.kind === 'crit' ? 36 : 28));
-
-          let stackSlot = 0;
-          for (let j = 0; j < i; j++) {
-            const other = floatingTexts[j];
-            const otherAge = now - other.bornAt;
-            const otherDuration = other.text.startsWith('"') ? 5500 : other.kind === 'ping' ? 2600 : other.kind === 'crit' ? 1200 : 950;
-            if (otherAge >= otherDuration) continue;
-            const otherT = otherAge / otherDuration;
-            const otherBaseFloatY = other.y - (other.text.startsWith('"') ? Math.min(10, otherT * 12) : otherT * (other.kind === 'ping' ? 20 : other.kind === 'crit' ? 36 : 28));
-            const otherFloatY = otherBaseFloatY - (floatOffsetsBuf[j] * 18);
-
-            if (Math.abs(ft.x - other.x) < 45 && Math.abs(baseFloatY - otherFloatY) < 20) {
-              stackSlot = Math.max(stackSlot, floatOffsetsBuf[j] + 1);
-            }
-          }
-          floatOffsetsBuf[i] = stackSlot;
-        }
-
-      for (let i = floatingTexts.length - 1; i >= 0; i--) {
-        const ft = floatingTexts[i];
-        const age = now - ft.bornAt;
-        const isDialogue = ft.text.startsWith('"');
-        const duration = isDialogue ? 5500 : ft.kind === 'ping' ? 2600 : ft.kind === 'crit' ? 1200 : 950;
-        if (age >= duration) {
-          floatingTexts.splice(i, 1);
-          continue;
-        }
-        const t = age / duration;
-        const alpha = Math.max(0, 1 - Math.pow(t, 4)); // 100% opacity for most of the duration
-        const baseFloatY = ft.y - (isDialogue ? Math.min(10, t * 12) : t * (ft.kind === 'ping' ? 20 : ft.kind === 'crit' ? 36 : 28));
-        const floatY = baseFloatY - (floatOffsetsBuf[i] * 18);
-
-        if (
-          ft.x < worldView.left - 160 ||
-          ft.x > worldView.right + 160 ||
-          floatY < worldView.top - 100 ||
-          floatY > worldView.bottom + 100
-        ) {
-          continue;
-        }
-
-        ctx.save();
-        ctx.globalAlpha = alpha;
-
-        if (ft.kind === 'crit') {
-          // Explosive Scale Pop & Damage-Type Colored Glow for Critical Hits
-          const pop = t < 0.18 ? 0.6 + (t / 0.18) * 1.0 : Math.max(1, 1.6 - (t - 0.18) * 0.7);
-          ctx.translate(ft.x, floatY);
-          ctx.scale(pop, pop);
-
-          const rawTrim = ft.text.trim();
-          const critDisplay = rawTrim.endsWith('!') ? rawTrim : `${rawTrim}!`;
-          const critFont = '800 13px "JetBrains Mono", monospace';
-          const badgeW = Math.max(48, Math.ceil(measureTextCached(critFont, critDisplay)) + 14);
-          ctx.font = critFont;
-
-          const critColor = ft.damageCategory
-            ? getDamageTypeColor(ft.damageCategory, true)
-            : ft.color || '#FEF08A';
-          const upperCol = critColor.toUpperCase();
-          const family = ft.damageCategory
-            ? getDamageTypeFamily(ft.damageCategory)
-            : upperCol === '#EF4444' || upperCol === '#F87171' || upperCol === '#FCA5A5' || upperCol === '#DC2626'
-              ? 'physical'
-              : upperCol === '#A855F7' || upperCol === '#C084FC' || upperCol === '#D8B4FE' || upperCol === '#E9D5FF'
-                ? 'magic'
-                : upperCol === '#FACC15' || upperCol === '#FDE047' || upperCol === '#FEF08A' || upperCol === '#FBBF24' || upperCol === '#FCD34D'
-                  ? 'divine'
-                  : 'other';
-
-          const badgeBg =
-            family === 'physical'
-              ? 'rgba(127, 29, 29, 0.76)'
-              : family === 'magic'
-                ? 'rgba(88, 28, 135, 0.76)'
-                : family === 'divine'
-                  ? 'rgba(113, 63, 18, 0.78)'
-                  : 'rgba(15, 23, 42, 0.82)';
-          const badgeStroke =
-            family === 'physical'
-              ? '#EF4444'
-              : family === 'magic'
-                ? '#A855F7'
-                : family === 'divine'
-                  ? '#FACC15'
-                  : critColor;
-
-          // Glowing badge background matched to damage type
-          ctx.fillStyle = badgeBg;
-          ctx.fillRect(-badgeW / 2, -12, badgeW, 16);
-          ctx.strokeStyle = badgeStroke;
-          ctx.lineWidth = 1.5;
-          ctx.strokeRect(-badgeW / 2, -12, badgeW, 16);
-
-          ctx.textAlign = 'center';
-          ctx.fillStyle = '#111219';
-          ctx.fillText(critDisplay, 1, 1);
-          ctx.fillStyle = critColor;
-          ctx.fillText(critDisplay, 0, 0);
-        } else if (ft.kind === 'status') {
-          const trimmed = ft.text.trim();
-          const upper = trimmed.toUpperCase();
-          const isMajorStatus =
-            isDialogue ||
-            upper.includes('PHASE') ||
-            upper.includes('ENRAGED') ||
-            upper.includes('LEVEL') ||
-            upper.includes('PORTAL') ||
-            upper.includes('WARD') ||
-            upper.includes('GUARDIAN') ||
-            upper.includes('ROOM CLEARED') ||
-            upper.includes('FLOOR CLEARED') ||
-            upper.includes('RELIC') ||
-            upper.includes('SCROLL') ||
-            upper.includes('OBELISK') ||
-            upper.includes('LOCKED') ||
-            upper.includes('DETONATION') ||
-            upper.includes('JUDGMENT') ||
-            upper.includes('PARRY') ||
-            upper.includes('SHIELD WALL') ||
-            upper.includes('WAR CHARGE') ||
-            upper.includes('SUPERNOVA') ||
-            upper.includes('SINGULARITY') ||
-            upper.includes('CHARM BROKEN') ||
-            upper.includes('COOLDOWNS') ||
-            upper.includes('SKILLS READY') ||
-            upper.includes('RESET');
-
-          ctx.translate(ft.x, floatY);
-          if (isMajorStatus) {
-            const statusFont = isDialogue
-              ? '600 12px "Plus Jakarta Sans", sans-serif'
-              : '700 11px "JetBrains Mono", monospace';
-            const textW = measureTextCached(statusFont, ft.text);
-            ctx.font = statusFont;
-
-            ctx.fillStyle = 'rgba(15, 23, 42, 0.92)';
-            ctx.fillRect(-textW / 2 - 8, -13, textW + 16, 20);
-            ctx.strokeStyle = isDialogue ? '#FCD34D' : ft.color;
-            ctx.lineWidth = 1.4;
-            ctx.strokeRect(-textW / 2 - 8, -13, textW + 16, 20);
-
-            if (isDialogue) {
-              ctx.fillStyle = '#FCD34D';
-              ctx.beginPath();
-              ctx.moveTo(0, 7);
-              ctx.lineTo(-4, 11);
-              ctx.lineTo(4, 11);
-              ctx.closePath();
-              ctx.fill();
-            }
-
-            ctx.textAlign = 'center';
-            ctx.fillStyle = isDialogue ? '#FDE68A' : ft.color;
-            ctx.fillText(ft.text, 0, 1);
-          } else {
-            // Compact borderless status cue for combat procs so the arena stays clear
-            ctx.font = '700 10px "JetBrains Mono", monospace';
-            ctx.textAlign = 'center';
-            ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
-            ctx.fillText(trimmed, 1, 2);
-            ctx.fillStyle = ft.color;
-            ctx.fillText(trimmed, 0, 1);
-          }
-        } else {
-          // Standard Damage, Heal, Gold, Ping
-          ctx.font =
-            ft.kind === 'ping'
-              ? '700 13px "JetBrains Mono", monospace'
-              : '600 12px "JetBrains Mono", monospace';
-          ctx.textAlign = 'center';
-          ctx.fillStyle = '#111219';
-          ctx.fillText(ft.text, ft.x + 1, floatY + 1);
-          ctx.fillStyle =
-            ft.kind === 'heal'
-              ? '#34D399'
-              : ft.kind === 'damage' && ft.damageCategory
-                ? getDamageTypeColor(ft.damageCategory, false)
-                : ft.color;
-          ctx.fillText(ft.text, ft.x, floatY);
-        }
-
-        ctx.restore();
-      }
-      }
-
-      // Update and render combat particles in world coordinates (viewport-culled)
+      // Update and render combat particles inside world pixel buffer (viewport-culled)
       particleManager.updateAndDraw(ctx, now, dtSec, worldView);
 
       ctx.restore();
+
+      // Switch back to screen display canvas and blit pixel world buffer with nearest-neighbor scaling
+      const mainCtx = screenCtx;
+      mainCtx.save();
+      mainCtx.imageSmoothingEnabled = false;
+      const subOffX = (snappedCamX - camIntX) * zoom;
+      const subOffY = (snappedCamY - camIntY) * zoom;
+      const destX = Math.round(cw / 2 - halfW * zoom - subOffX);
+      const destY = Math.round(ch / 2 - halfH * zoom - subOffY);
+      const destW = Math.round(bufW * zoom);
+      const destH = Math.round(bufH * zoom);
+      if (worldBuf !== canvas) {
+        mainCtx.drawImage(worldBuf, 0, 0, bufW, bufH, destX, destY, destW, destH);
+      }
+      mainCtx.restore();
+
+      {
+        const ctx = mainCtx;
+        const toScreenX = (wx: number) => Math.round(cw / 2 + (wx - snappedCamX) * zoom);
+        const toScreenY = (wy: number) => Math.round(ch / 2 + (wy - snappedCamY) * zoom);
+
+        // Pass 2A: War Font crisp pixel-typography caption in Open World
+        if (isOverworldMap) {
+          for (const z of snap.zones) {
+            if (z.kind !== 'overworld_font') continue;
+            const zMargin = (z.radius || 0) + 120;
+            if (
+              z.x < worldView.left - zMargin ||
+              z.x > worldView.right + zMargin ||
+              z.y < worldView.top - zMargin ||
+              z.y > worldView.bottom + zMargin
+            ) {
+              continue;
+            }
+            const fontKind = z.quadrant || 1;
+            const fontName =
+              fontKind === 1 ? 'FURY FONT' : fontKind === 2 ? 'ZEPHYR FONT' : 'BASTION FONT';
+            const pct = Math.max(0, Math.min(100, z.stage ?? 0));
+            const isContested = z.ownerId === 'contested';
+            const statusCaption = isContested
+              ? `${fontName} · CONTESTED`
+              : pct > 0
+                ? `${fontName} · ${pct}%`
+                : fontName;
+            const bobCrystal = Math.round(Math.sin(now * 0.004) * 3);
+            const fx = toScreenX(z.x);
+            const fy = toScreenY(z.y - 26 + bobCrystal);
+            ctx.font = '700 12px "Pixelify Sans", "JetBrains Mono", monospace';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillStyle = '#0B0A10';
+            ctx.fillText(statusCaption, fx + 1, fy + 1);
+            ctx.fillStyle = isContested ? '#FBBF24' : '#FEF08A';
+            ctx.fillText(statusCaption, fx, fy);
+          }
+        }
+
+        // Pass 2B: Crisp Screen-Space Enemy HP Bars, Predator Stacks, Status Badges & Boss Names
+        for (const en of snap.enemies) {
+          const pos = smoothedEnemies.get(en.id) || { x: en.x, y: en.y };
+          const enemyImpact = enemyImpactMap.get(en.id);
+          const enemyImpactVis = sampleEnemyImpactVisual(enemyImpact, now);
+          const wx = snapToScreenPixel(pos.x + enemyImpactVis.offsetX, zoom);
+          const wy = snapToScreenPixel(pos.y + enemyImpactVis.offsetY, zoom);
+          const enMargin = en.radius + (en.kind === 'boss' ? 220 : 80);
+          if (
+            wx < worldView.left - enMargin ||
+            wx > worldView.right + enMargin ||
+            wy < worldView.top - enMargin ||
+            wy > worldView.bottom + enMargin
+          ) {
+            continue;
+          }
+          const ex = toScreenX(wx);
+          const ey = toScreenY(wy);
+          const rScaled = Math.round(en.radius * zoom);
+
+          if (me?.predatorTargetId === en.id && (me.predatorStacks ?? 0) > 0) {
+            const stacks = me.predatorStacks ?? 0;
+            ctx.fillStyle = '#34D399';
+            ctx.font = '700 11px "Pixelify Sans", "JetBrains Mono", monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText(`x${stacks}`, ex, ey + rScaled + 14);
+          }
+
+          const barW = en.kind === 'boss' ? 96 : 40;
+          const hpRatio = Math.max(0, en.hp / Math.max(1, en.maxHp));
+          const isCatacombs = map.biome === 'catacombs' || map.floor === 2;
+          const isEmber = map.biome === 'ember' || map.floor === 3;
+          const isVoid = map.biome === 'void' || map.floor === 4;
+          const isAstral = map.biome === 'astral' || map.floor === 5;
+          const isHymns = map.biome === 'hymns' || map.floor === 6;
+
+          const barY = ey - rScaled - 22;
+          ctx.fillStyle = en.elite && en.kind !== 'boss' ? '#78350F' : '#181820';
+          ctx.fillRect(ex - barW / 2 - 2, barY - 1, barW + 4, 8);
+          ctx.fillStyle =
+            en.kind === 'boss'
+              ? isCatacombs
+                ? '#A855F7'
+                : isEmber
+                  ? '#F97316'
+                  : isVoid
+                    ? '#9333EA'
+                    : isAstral
+                      ? '#38BDF8'
+                      : isHymns
+                        ? '#FBBF24'
+                        : '#EF4444'
+              : en.elite
+                ? '#F59E0B'
+                : '#DC2626';
+          ctx.fillRect(ex - barW / 2, barY + 1, Math.round(barW * hpRatio), 4);
+
+          if (en.kind !== 'boss' && en.elite) {
+            const cx = ex - barW / 2 - 8;
+            const cy = barY + 3;
+            ctx.fillStyle = '#78350F';
+            ctx.fillRect(cx - 4, cy - 4, 8, 8);
+            ctx.fillStyle = '#FDE047';
+            ctx.fillRect(cx - 2, cy - 2, 4, 4);
+          }
+
+          if (en.kind === 'boss') {
+            ctx.font = '700 14px "Pixelify Sans", "JetBrains Mono", monospace';
+            ctx.textAlign = 'center';
+            const bossTitle = en.enraged ? `${en.name} [ENRAGED]` : en.name;
+            ctx.fillStyle = '#0B0A10';
+            ctx.fillText(bossTitle, ex + 1, barY - 7);
+            ctx.fillStyle = en.enraged
+              ? '#EF4444'
+              : isCatacombs
+                ? '#C084FC'
+                : isEmber
+                  ? '#FDBA74'
+                  : isVoid
+                    ? '#F0ABFC'
+                    : isAstral
+                      ? '#BAE6FD'
+                      : isHymns
+                        ? '#FEF08A'
+                        : '#FCA5A5';
+            ctx.fillText(bossTitle, ex, barY - 8);
+          }
+
+          enemyStatusIcons.length = 0;
+          enemyStatusColors.length = 0;
+          if ((en.burnedMs ?? 0) > 0) { enemyStatusIcons.push('BRN'); enemyStatusColors.push('#F97316'); }
+          if ((en.frozenMs ?? 0) > 0) { enemyStatusIcons.push('FRZ'); enemyStatusColors.push('#38BDF8'); }
+          if ((en.shockedMs ?? 0) > 0) { enemyStatusIcons.push('SHK'); enemyStatusColors.push('#FBBF24'); }
+          if ((en.poisonedMs ?? 0) > 0) { enemyStatusIcons.push('PSN'); enemyStatusColors.push('#22C55E'); }
+          if ((en.bleedingMs ?? 0) > 0) { enemyStatusIcons.push('BLD'); enemyStatusColors.push('#EF4444'); }
+          if ((en.stunnedMs ?? 0) > 0) { enemyStatusIcons.push('STN'); enemyStatusColors.push('#EAB308'); }
+
+          if (enemyStatusIcons.length > 0) {
+            const badgeSpacing = 18;
+            const totalW = enemyStatusIcons.length * badgeSpacing;
+            const startX = ex - totalW / 2 + 9;
+            const badgeY = ey - rScaled - 8;
+            ctx.font = '700 9px "Pixelify Sans", "JetBrains Mono", monospace';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            for (let idx = 0; idx < enemyStatusIcons.length; idx++) {
+              const bx = startX + idx * badgeSpacing;
+              ctx.fillStyle = 'rgba(15, 15, 22, 0.85)';
+              ctx.fillRect(bx - 8, badgeY - 6, 16, 12);
+              ctx.fillStyle = enemyStatusColors[idx];
+              ctx.fillText(enemyStatusIcons[idx], bx, badgeY);
+            }
+          }
+        }
+
+        // Pass 2C: Crisp Screen-Space Player Nameplates, PvP Crowns, Rival HP/Shield & Cast Bars
+        for (const p of snap.players) {
+          if (p.downed) continue;
+          const basePos = smoothedPlayers.get(p.id) || { x: p.x, y: p.y };
+          const dashVisual = dashAfterimageManager.getVisualDashSample(p.id, basePos.x, basePos.y, now);
+          const pos = dashVisual ? { x: dashVisual.x, y: dashVisual.y } : basePos;
+          const wx = snapToScreenPixel(pos.x, zoom);
+          const wy = snapToScreenPixel(pos.y, zoom);
+          const hx = toScreenX(wx);
+          const hy = toScreenY(wy);
+          const isLocalPlayer = p.id === playerId;
+          const isPlayerAdmin = Boolean(p.isAdmin);
+          const isPvpRival = Boolean(snap.pvpEnabled && !isLocalPlayer);
+          const displayLevel = Math.max(1, p.level || 1);
+          const displayLabel = `${p.username} Lvl ${displayLevel}`;
+          const nameFont = '700 13px "Pixelify Sans", "JetBrains Mono", monospace';
+          const badgeY = hy - Math.round(36 * zoom);
+
+          if (isLocalPlayer) {
+            ctx.fillStyle = '#0B0A10';
+            ctx.fillRect(hx - 4, badgeY - 19, 8, 4);
+            ctx.fillRect(hx - 2, badgeY - 15, 4, 3);
+            ctx.fillStyle = '#F59E0B';
+            ctx.fillRect(hx - 3, badgeY - 18, 6, 3);
+            ctx.fillRect(hx - 1, badgeY - 15, 2, 2);
+          }
+          if (p.id === pvpLeaderId) {
+            const crownY = isLocalPlayer ? badgeY - 25 : badgeY - 16;
+            ctx.fillStyle = '#0B0A10';
+            ctx.fillRect(hx - 8, crownY - 8, 16, 9);
+            ctx.fillStyle = '#FACC15';
+            ctx.fillRect(hx - 6, crownY - 3, 12, 4);
+            ctx.fillRect(hx - 6, crownY - 7, 3, 4);
+            ctx.fillRect(hx - 1, crownY - 8, 3, 5);
+            ctx.fillRect(hx + 3, crownY - 7, 3, 4);
+            ctx.fillStyle = '#EF4444';
+            ctx.fillRect(hx - 1, crownY - 3, 2, 2);
+          }
+
+          ctx.font = nameFont;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillStyle = 'rgba(0, 0, 0, 0.9)';
+          ctx.fillText(displayLabel, hx + 1, badgeY + 1);
+          ctx.fillStyle = isPvpRival ? '#FB7185' : isPlayerAdmin ? '#C084FC' : '#34D399';
+          ctx.fillText(displayLabel, hx, badgeY);
+
+          const isSpeakingNow =
+            speakingSet.has(p.id) &&
+            (isLocalPlayer || !voiceManager.isUserMutedLocally(p.id));
+          if (isSpeakingNow) {
+            const labelWidth = measureTextCached(nameFont, displayLabel);
+            const iconX = hx + Math.round(labelWidth / 2) + 8;
+            const iconY = badgeY - 2;
+            const pulse = (Math.sin(now * 0.015) + 1) * 0.5;
+            ctx.fillStyle = '#10B981';
+            ctx.fillRect(iconX, iconY - 3, 4, 6);
+            ctx.fillRect(iconX + 4, iconY - 5, 3, 10);
+            ctx.fillStyle = `rgba(110, 231, 183, ${(0.45 + pulse * 0.55).toFixed(2)})`;
+            ctx.fillRect(iconX + 8, iconY - 3 - Math.round(pulse * 2), 3, 6 + Math.round(pulse * 4));
+          }
+
+          if (!isLocalPlayer) {
+            const pBarW = 46;
+            const barTop = hy - Math.round(21 * zoom);
+            const pHpRatio = Math.max(0, p.hp / Math.max(1, p.maxHp));
+            ctx.fillStyle = '#0F172A';
+            ctx.fillRect(hx - pBarW / 2 - 2, barTop - 1, pBarW + 4, 7);
+            ctx.fillStyle = isPvpRival ? '#EF4444' : '#38BDF8';
+            ctx.fillRect(hx - pBarW / 2, barTop + 1, Math.round(pBarW * pHpRatio), 3);
+            if (p.shield > 0) {
+              const pShieldRatio = Math.min(1, p.shield / 60);
+              ctx.fillStyle = '#0F172A';
+              ctx.fillRect(hx - pBarW / 2 - 2, barTop - 6, pBarW + 4, 4);
+              ctx.fillStyle = '#93C5FD';
+              ctx.fillRect(hx - pBarW / 2, barTop - 5, Math.max(2, Math.round(pBarW * pShieldRatio)), 2);
+            }
+          }
+
+          if (p.spellCastState && p.spellCastState.totalMs > 0) {
+            const castPct = Math.max(
+              0,
+              Math.min(1, 1 - p.spellCastState.remainingMs / p.spellCastState.totalMs)
+            );
+            const cbW = 54;
+            const cbX = hx - cbW / 2;
+            const cbY = hy - Math.round(52 * zoom);
+            ctx.fillStyle = 'rgba(15, 23, 42, 0.92)';
+            ctx.fillRect(cbX - 2, cbY - 2, cbW + 4, 9);
+            ctx.fillStyle = '#F97316';
+            ctx.fillRect(cbX, cbY, Math.round(cbW * castPct), 5);
+            ctx.strokeStyle = '#FDBA74';
+            ctx.lineWidth = 1;
+            ctx.strokeRect(cbX - 1.5, cbY - 1.5, cbW + 3, 8);
+          }
+
+          if ((p.eclipseChargeRatio ?? 0) > 0) {
+            const chargePct = Math.max(0, Math.min(1, p.eclipseChargeRatio || 0));
+            const ebW = 50;
+            const ebX = hx - ebW / 2;
+            const ebY = hy - Math.round(50 * zoom);
+            ctx.fillStyle = 'rgba(15, 23, 42, 0.92)';
+            ctx.fillRect(ebX - 2, ebY - 2, ebW + 4, 8);
+            ctx.fillStyle = chargePct >= 0.95 ? '#FDE047' : '#818CF8';
+            ctx.fillRect(ebX, ebY, Math.round(ebW * chargePct), 4);
+            ctx.strokeStyle = '#C4B5FD';
+            ctx.lineWidth = 1;
+            ctx.strokeRect(ebX - 1.5, ebY - 1.5, ebW + 3, 7);
+          }
+        }
+
+        // Pass 2D: Crisp Screen-Space Floating Numbers, Critical Hit Badges & Speech Bubbles
+        if (floatingTexts.length > 0) {
+          if (floatOffsetsBuf.length < floatingTexts.length) {
+            floatOffsetsBuf.length = floatingTexts.length;
+          }
+          floatOffsetsBuf.fill(0, 0, floatingTexts.length);
+          for (let i = 0; i < floatingTexts.length; i++) {
+            const ft = floatingTexts[i];
+            const age = now - ft.bornAt;
+            const isDialogue = ft.text.startsWith('"');
+            const duration = isDialogue ? 5500 : ft.kind === 'ping' ? 2600 : ft.kind === 'crit' ? 1200 : 950;
+            if (age >= duration) continue;
+            const t = age / duration;
+            const baseFloatY = ft.y - (isDialogue ? Math.min(10, t * 12) : t * (ft.kind === 'ping' ? 20 : ft.kind === 'crit' ? 36 : 28));
+
+            let stackSlot = 0;
+            for (let j = 0; j < i; j++) {
+              const other = floatingTexts[j];
+              const otherAge = now - other.bornAt;
+              const otherDuration = other.text.startsWith('"') ? 5500 : other.kind === 'ping' ? 2600 : other.kind === 'crit' ? 1200 : 950;
+              if (otherAge >= otherDuration) continue;
+              const otherT = otherAge / otherDuration;
+              const otherBaseFloatY = other.y - (other.text.startsWith('"') ? Math.min(10, otherT * 12) : otherT * (other.kind === 'ping' ? 20 : other.kind === 'crit' ? 36 : 28));
+              const otherFloatY = otherBaseFloatY - (floatOffsetsBuf[j] * 18);
+
+              if (Math.abs(ft.x - other.x) < 45 && Math.abs(baseFloatY - otherFloatY) < 20) {
+                stackSlot = Math.max(stackSlot, floatOffsetsBuf[j] + 1);
+              }
+            }
+            floatOffsetsBuf[i] = stackSlot;
+          }
+
+          for (let i = floatingTexts.length - 1; i >= 0; i--) {
+            const ft = floatingTexts[i];
+            const age = now - ft.bornAt;
+            const isDialogue = ft.text.startsWith('"');
+            const duration = isDialogue ? 5500 : ft.kind === 'ping' ? 2600 : ft.kind === 'crit' ? 1200 : 950;
+            if (age >= duration) {
+              floatingTexts.splice(i, 1);
+              continue;
+            }
+            const t = age / duration;
+            const alpha = Math.max(0, 1 - Math.pow(t, 4));
+            const baseFloatY = ft.y - (isDialogue ? Math.min(10, t * 12) : t * (ft.kind === 'ping' ? 20 : ft.kind === 'crit' ? 36 : 28));
+            const floatY = baseFloatY - (floatOffsetsBuf[i] * 18);
+
+            if (
+              ft.x < worldView.left - 160 ||
+              ft.x > worldView.right + 160 ||
+              floatY < worldView.top - 100 ||
+              floatY > worldView.bottom + 100
+            ) {
+              continue;
+            }
+
+            const sx = toScreenX(ft.x);
+            const sy = toScreenY(floatY);
+            ctx.save();
+            ctx.globalAlpha = alpha;
+
+            if (ft.kind === 'crit') {
+              const pop = t < 0.18 ? 0.7 + (t / 0.18) * 0.75 : Math.max(1, 1.45 - (t - 0.18) * 0.55);
+              ctx.translate(sx, sy);
+              ctx.scale(pop, pop);
+
+              const rawTrim = ft.text.trim();
+              const critDisplay = rawTrim.endsWith('!') ? rawTrim : `${rawTrim}!`;
+              const critFont = '700 16px "Pixelify Sans", "JetBrains Mono", monospace';
+              const badgeW = Math.max(54, Math.ceil(measureTextCached(critFont, critDisplay)) + 16);
+              ctx.font = critFont;
+
+              const critColor = ft.damageCategory
+                ? getDamageTypeColor(ft.damageCategory, true)
+                : ft.color || '#FEF08A';
+              const upperCol = critColor.toUpperCase();
+              const family = ft.damageCategory
+                ? getDamageTypeFamily(ft.damageCategory)
+                : upperCol === '#EF4444' || upperCol === '#F87171' || upperCol === '#FCA5A5' || upperCol === '#DC2626'
+                  ? 'physical'
+                  : upperCol === '#A855F7' || upperCol === '#C084FC' || upperCol === '#D8B4FE' || upperCol === '#E9D5FF'
+                    ? 'magic'
+                    : upperCol === '#FACC15' || upperCol === '#FDE047' || upperCol === '#FEF08A' || upperCol === '#FBBF24' || upperCol === '#FCD34D'
+                      ? 'divine'
+                      : 'other';
+
+              const badgeBg =
+                family === 'physical'
+                  ? 'rgba(127, 29, 29, 0.86)'
+                  : family === 'magic'
+                    ? 'rgba(88, 28, 135, 0.86)'
+                    : family === 'divine'
+                      ? 'rgba(113, 63, 18, 0.88)'
+                      : 'rgba(15, 23, 42, 0.88)';
+              const badgeStroke =
+                family === 'physical'
+                  ? '#EF4444'
+                  : family === 'magic'
+                    ? '#A855F7'
+                    : family === 'divine'
+                      ? '#FACC15'
+                      : critColor;
+
+              ctx.fillStyle = badgeBg;
+              ctx.fillRect(-badgeW / 2, -14, badgeW, 20);
+              ctx.strokeStyle = badgeStroke;
+              ctx.lineWidth = 2;
+              ctx.strokeRect(-badgeW / 2, -14, badgeW, 20);
+
+              ctx.textAlign = 'center';
+              ctx.textBaseline = 'middle';
+              ctx.fillStyle = '#0B0A10';
+              ctx.fillText(critDisplay, 1, -3);
+              ctx.fillStyle = critColor;
+              ctx.fillText(critDisplay, 0, -4);
+            } else if (ft.kind === 'status') {
+              const trimmed = ft.text.trim();
+              const upper = trimmed.toUpperCase();
+              const isMajorStatus =
+                isDialogue ||
+                upper.includes('PHASE') ||
+                upper.includes('ENRAGED') ||
+                upper.includes('LEVEL') ||
+                upper.includes('PORTAL') ||
+                upper.includes('WARD') ||
+                upper.includes('GUARDIAN') ||
+                upper.includes('ROOM CLEARED') ||
+                upper.includes('FLOOR CLEARED') ||
+                upper.includes('RELIC') ||
+                upper.includes('SCROLL') ||
+                upper.includes('OBELISK') ||
+                upper.includes('LOCKED') ||
+                upper.includes('DETONATION') ||
+                upper.includes('JUDGMENT') ||
+                upper.includes('PARRY') ||
+                upper.includes('SHIELD WALL') ||
+                upper.includes('WAR CHARGE') ||
+                upper.includes('SUPERNOVA') ||
+                upper.includes('SINGULARITY') ||
+                upper.includes('CHARM BROKEN') ||
+                upper.includes('COOLDOWNS') ||
+                upper.includes('SKILLS READY') ||
+                upper.includes('WAR FONT') ||
+                upper.includes('RESET');
+
+              ctx.translate(sx, sy);
+              if (isMajorStatus) {
+                const statusFont = isDialogue
+                  ? '600 13px "Pixelify Sans", "Plus Jakarta Sans", sans-serif'
+                  : '700 13px "Pixelify Sans", "JetBrains Mono", monospace';
+                const textW = measureTextCached(statusFont, ft.text);
+                ctx.font = statusFont;
+                ctx.fillStyle = 'rgba(15, 23, 42, 0.94)';
+                ctx.fillRect(-textW / 2 - 10, -14, textW + 20, 22);
+                ctx.strokeStyle = isDialogue ? '#FCD34D' : ft.color;
+                ctx.lineWidth = 2;
+                ctx.strokeRect(-textW / 2 - 10, -14, textW + 20, 22);
+                if (isDialogue) {
+                  ctx.fillStyle = '#FCD34D';
+                  ctx.fillRect(-3, 8, 6, 4);
+                }
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillStyle = isDialogue ? '#FDE68A' : ft.color;
+                ctx.fillText(ft.text, 0, -2);
+              } else {
+                ctx.font = '700 12px "Pixelify Sans", "JetBrains Mono", monospace';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillStyle = '#0B0A10';
+                ctx.fillText(trimmed, 1, 1);
+                ctx.fillStyle = ft.color;
+                ctx.fillText(trimmed, 0, 0);
+              }
+            } else {
+              ctx.font =
+                ft.kind === 'ping'
+                  ? '700 15px "Pixelify Sans", "JetBrains Mono", monospace'
+                  : '700 14px "Pixelify Sans", "JetBrains Mono", monospace';
+              ctx.textAlign = 'center';
+              ctx.textBaseline = 'middle';
+              ctx.fillStyle = '#0B0A10';
+              ctx.fillText(ft.text, sx + 1, sy + 1);
+              ctx.fillStyle =
+                ft.kind === 'heal'
+                  ? '#34D399'
+                  : ft.kind === 'damage' && ft.damageCategory
+                    ? getDamageTypeColor(ft.damageCategory, false)
+                    : ft.color;
+              ctx.fillText(ft.text, sx, sy);
+            }
+
+            ctx.restore();
+          }
+        }
 
       // Brief impact-frame screen accent flash for local player heavy finishers & crits
       if (impactVignetteFlash.until > now) {
@@ -6930,8 +7074,94 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
         ctx.restore();
       }
 
+      // ——— OFF-SCREEN OBJECTIVE COMPASS (DUNGEON & OPEN WORLD WAR FONT) ———
+      const isOverworldCanvas = map.biome === 'overworld' || snap.roomMode === 'open_world';
+      if (me && !me.downed) {
+        let objTarget: { x: number; y: number; label: string; color: string } | null = null;
+        if (isOverworldCanvas) {
+          const activeFont = snap.zones.find((z) => z.kind === 'overworld_font');
+          if (activeFont) {
+            const isContested = activeFont.ownerId === 'contested';
+            objTarget = {
+              x: activeFont.x,
+              y: activeFont.y,
+              label: isContested ? 'CONTESTED' : 'WAR FONT',
+              color: isContested ? '#EF4444' : '#F59E0B',
+            };
+          }
+        } else if (map.floor > 0) {
+          if (snap.bossDefeated && map.portalPos) {
+            objTarget = { x: map.portalPos.x, y: map.portalPos.y, label: 'EXIT', color: '#34D399' };
+          } else if (snap.bossRoomCleared && (snap.guardiansRemaining ?? 0) > 0) {
+            let bestDist = Infinity;
+            for (const rm of map.rooms) {
+              const rf = minimapFlagMap.get(rm.id);
+              const isGuard = Boolean(rm.guardian || rf?.guardian);
+              const isCleared = Boolean(rf ? rf.cleared : rm.cleared);
+              if (!isGuard || isCleared) continue;
+              const rwx = rm.cx * TILE_SIZE + TILE_SIZE / 2;
+              const rwy = rm.cy * TILE_SIZE + TILE_SIZE / 2;
+              const d = Math.hypot(rwx - me.x, rwy - me.y);
+              if (d < bestDist) {
+                bestDist = d;
+                objTarget = { x: rwx, y: rwy, label: 'GUARDIAN', color: '#F59E0B' };
+              }
+            }
+          } else if (!snap.bossRoomCleared && (snap.bossWards ?? 0) === 0) {
+            const bossRm = map.rooms.find((r) => r.type === 'boss');
+            if (bossRm) {
+              objTarget = {
+                x: bossRm.cx * TILE_SIZE + TILE_SIZE / 2,
+                y: bossRm.cy * TILE_SIZE + TILE_SIZE / 2,
+                label: 'BOSS',
+                color: '#EF4444',
+              };
+            }
+          }
+        }
+
+        if (objTarget) {
+          const meSm = smoothedPlayers.get(me.id) || { x: me.x, y: me.y };
+          const objDist = Math.hypot(objTarget.x - meSm.x, objTarget.y - meSm.y);
+          if (objDist > 260) {
+            const objAng = Math.atan2(objTarget.y - meSm.y, objTarget.x - meSm.x);
+            const meScreenX = cw / 2 + (meSm.x - snappedCamX) * zoom;
+            const meScreenY = ch / 2 + (meSm.y - snappedCamY) * zoom;
+            const orbitR = cw < 640 || ch < 520 ? 56 : 74;
+            const indX = Math.max(46, Math.min(cw - 46, meScreenX + Math.cos(objAng) * orbitR));
+            const indY = Math.max(66, Math.min(ch - 108, meScreenY + Math.sin(objAng) * orbitR));
+
+            ctx.save();
+            ctx.translate(indX, indY);
+            ctx.save();
+            ctx.rotate(objAng);
+            ctx.fillStyle = objTarget.color;
+            ctx.strokeStyle = '#0F1016';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(9, 0);
+            ctx.lineTo(-6, -6);
+            ctx.lineTo(-3, 0);
+            ctx.lineTo(-6, 6);
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+            ctx.restore();
+
+            ctx.font = '700 10px "Pixelify Sans", "JetBrains Mono", monospace';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'top';
+            ctx.fillStyle = '#0B0A10';
+            ctx.fillText(objTarget.label, 1, 11);
+            ctx.fillStyle = objTarget.color;
+            ctx.fillText(objTarget.label, 0, 10);
+            ctx.restore();
+          }
+        }
+      }
+
       // ——— FLOATING PIXEL-ART TYPEWRITER NPC DIALOGUE (LOCAL PLAYER ONLY) ———
-      const isMobileScreen = cw < 640;
+      const isMobileScreen = cw < 640 || ch < 520;
       const activeDlg = me?.npcDialogue ?? null;
       if (activeDlg && activeDlg.text) {
         const dlgKey = `${activeDlg.npcId}:${activeDlg.seq}:${activeDlg.text}`;
@@ -6956,10 +7186,10 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
         const maxLineChars = isMobileScreen ? 27 : 34;
         const wrappedLines = wrapDialogueLines(tw.fullText, maxLineChars);
         const bodyFont = isMobileScreen
-          ? '500 11.5px "Plus Jakarta Sans", sans-serif'
-          : '500 12px "Plus Jakarta Sans", sans-serif';
-        const headerFont = '700 9.5px "JetBrains Mono", monospace';
-        const hintFont = '600 8.5px "JetBrains Mono", monospace';
+          ? '500 12.5px "Pixelify Sans", "Plus Jakarta Sans", sans-serif'
+          : '500 13px "Pixelify Sans", "Plus Jakarta Sans", sans-serif';
+        const headerFont = '700 10.5px "Pixelify Sans", "JetBrains Mono", monospace';
+        const hintFont = '700 9px "Pixelify Sans", "JetBrains Mono", monospace';
 
         const headerText = activeDlg.npcName.toUpperCase();
         const hintText = isTyping
@@ -7121,18 +7351,18 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
       let mmScale = 2.5;
       if (isOverworldMinimap || map.width > 80) {
         const targetMaxW = isMobileScreen
-          ? Math.min(108, Math.floor(cw * 0.25))
+          ? Math.min(96, Math.floor(cw * 0.24))
           : Math.min(180, Math.floor(cw * 0.16));
-        mmScale = Math.max(1.0, Math.min(1.6, targetMaxW / Math.max(1, map.width)));
+        mmScale = Math.max(0.85, Math.min(1.6, targetMaxW / Math.max(1, map.width)));
       } else if (isMobileScreen) {
-        const targetMaxW = Math.min(100, Math.floor(cw * 0.24));
+        const targetMaxW = Math.min(92, Math.floor(cw * 0.23));
         mmScale = Math.max(1.0, Math.min(1.5, targetMaxW / Math.max(1, map.width)));
       }
       const mmW = map.width * mmScale;
       const mmH = map.height * mmScale;
       const pad = isMobileScreen ? 4 : 6;
       const mmX = cw - mmW - (isMobileScreen ? 8 : 20);
-      const mmY = isMobileScreen ? 42 : 74;
+      const mmY = isMobileScreen ? 52 : 74;
 
       // 1. Stone Outer Bevel Frame (.stone-panel aesthetic)
       ctx.save();
@@ -7153,7 +7383,7 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
       ctx.fillStyle = '#353442';
       ctx.fillRect(mmX - pad + 3, mmY - pad - 13, mmW + pad * 2 - 6, 14);
       ctx.fillStyle = '#FCD34D';
-      ctx.font = 'bold 9px "JetBrains Mono", monospace';
+      ctx.font = '700 10px "Pixelify Sans", "JetBrains Mono", monospace';
       ctx.textAlign = 'left';
       ctx.textBaseline = 'middle';
       const headerTitle =
@@ -7224,6 +7454,7 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
       }
 
       if (minimapTilesCanvas) {
+        ctx.imageSmoothingEnabled = false;
         ctx.drawImage(minimapTilesCanvas, mmX, mmY, mmW, mmH);
       } else {
         ctx.fillStyle = '#111018';
@@ -7290,7 +7521,7 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
         ctx.strokeRect(rx, ry, rw, rh);
 
         // Room Badge Text
-        ctx.font = 'bold 8px "JetBrains Mono", monospace';
+        ctx.font = '700 8.5px "Pixelify Sans", "JetBrains Mono", monospace';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         const cx = rx + rw / 2;
@@ -7313,8 +7544,28 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
         }
       }
 
-      // 6. Dungeon Portal Indicator (hidden in Open World)
-      if (map.portalPos && !isOverworldMinimap) {
+      // 6. Dungeon Portal Indicator OR Open World Active War Font Beacon
+      if (isOverworldMinimap) {
+        const activeFont = snap.zones.find((z) => z.kind === 'overworld_font');
+        if (activeFont) {
+          const fx = mmX + Math.floor(activeFont.x / TILE_SIZE) * mmScale;
+          const fy = mmY + Math.floor(activeFont.y / TILE_SIZE) * mmScale;
+          const fPulse = Math.sin(now / 180) * 1.4 + 4.2;
+          ctx.strokeStyle = activeFont.ownerId === 'contested' ? '#EF4444' : '#F59E0B';
+          ctx.lineWidth = 1.4;
+          ctx.beginPath();
+          ctx.arc(fx, fy, fPulse, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.fillStyle = '#FEF08A';
+          ctx.beginPath();
+          ctx.moveTo(fx, fy - 3);
+          ctx.lineTo(fx + 3, fy);
+          ctx.lineTo(fx, fy + 3);
+          ctx.lineTo(fx - 3, fy);
+          ctx.closePath();
+          ctx.fill();
+        }
+      } else if (map.portalPos) {
         const px = mmX + Math.floor(map.portalPos.x / TILE_SIZE) * mmScale;
         const py = mmY + Math.floor(map.portalPos.y / TILE_SIZE) * mmScale;
         const portalPulse = Math.sin(now / 200) * 1.5 + 3.5;
@@ -7322,6 +7573,34 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
         ctx.beginPath();
         ctx.arc(px, py, Math.max(2, portalPulse), 0, Math.PI * 2);
         ctx.fill();
+      }
+
+      // 6b. Unclaimed Dungeon Loot & Shrine Markers (hidden in Open World)
+      if (!isOverworldMinimap && snap.props) {
+        for (const pr of snap.props) {
+          if (pr.opened) continue;
+          const rx = mmX + Math.floor(pr.x / TILE_SIZE) * mmScale;
+          const ry = mmY + Math.floor(pr.y / TILE_SIZE) * mmScale;
+          if (pr.kind === 'relic_chest') {
+            ctx.fillStyle = '#FDE047';
+            ctx.beginPath();
+            ctx.moveTo(rx, ry - 3);
+            ctx.lineTo(rx + 3, ry);
+            ctx.lineTo(rx, ry + 3);
+            ctx.lineTo(rx - 3, ry);
+            ctx.closePath();
+            ctx.fill();
+          } else if (pr.kind === 'shrine') {
+            ctx.fillStyle = '#34D399';
+            ctx.fillRect(rx - 2, ry - 2, 4, 4);
+          } else if (pr.kind === 'totem' && !pr.locked) {
+            ctx.fillStyle = '#38BDF8';
+            ctx.fillRect(rx - 1.5, ry - 1.5, 3, 3);
+          } else if (pr.kind === 'chest' && !pr.locked) {
+            ctx.fillStyle = '#FBBF24';
+            ctx.fillRect(rx - 1.5, ry - 1.5, 3, 3);
+          }
+        }
       }
 
       // 7. Enemy Markers
@@ -7365,12 +7644,20 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
           ctx.arc(px, py, 2, 0, Math.PI * 2);
           ctx.fill();
         } else {
+          if (p.id === pvpLeaderId) {
+            ctx.strokeStyle = '#FACC15';
+            ctx.lineWidth = 1.2;
+            ctx.beginPath();
+            ctx.arc(px, py, 3.5, 0, Math.PI * 2);
+            ctx.stroke();
+          }
           ctx.fillStyle = snap.pvpEnabled ? '#F43F5E' : '#38BDF8';
           ctx.fillRect(px - 1.5, py - 1.5, 3, 3);
         }
       }
 
       ctx.restore();
+      }
 
       rafId = requestAnimationFrame(render);
     };
@@ -7380,6 +7667,9 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
       cancelAnimationFrame(rafId);
       dashAfterimageManager.clear();
       window.removeEventListener('resize', resize);
+      window.removeEventListener('orientationchange', resize);
+      window.visualViewport?.removeEventListener('resize', resize);
+      resizeObserver?.disconnect();
       window.removeEventListener('scroll', updateCanvasRect);
     };
   }, [latestSnapshotRef, map, playerId]);
@@ -7558,7 +7848,7 @@ const GameCanvasComponent: React.FC<GameCanvasProps> = ({
       onMouseDown={handleMouseDown}
       onMouseUp={handleMouseUp}
       onContextMenu={(e) => e.preventDefault()}
-      className="block w-screen h-screen cursor-crosshair pixelated touch-none"
+      className="fixed inset-0 block w-full h-full cursor-crosshair pixelated touch-none"
     />
   );
 };

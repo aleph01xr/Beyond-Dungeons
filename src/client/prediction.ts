@@ -119,7 +119,7 @@ export class LocalPredictionController {
       };
     }
 
-    const moveSpeed = computePlayerMoveSpeed(me);
+    const moveSpeed = computePlayerMoveSpeed(me, map);
     const isDisoriented = Boolean(
       me.statuses && me.statuses.some((s) => s.type === 'disoriented')
     );

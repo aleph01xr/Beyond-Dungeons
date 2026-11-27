@@ -708,7 +708,7 @@ export const SanctuaryLobby: React.FC<SanctuaryLobbyProps> = ({
 
                 <div className="pt-2 space-y-2 border-t border-[#2D2C3C] text-xs text-[#A5A3B5]">
                   <div className="flex justify-between">
-                    <span>Tactical Skill [Q]</span>
+                    <span>Skill 1 · Tactical [1]</span>
                     <span className="text-[#E6E4EE] font-medium truncate max-w-[170px]">
                       {
                         resolveActiveTacticalDef(
@@ -720,7 +720,7 @@ export const SanctuaryLobby: React.FC<SanctuaryLobbyProps> = ({
                     </span>
                   </div>
                   <div className="flex justify-between">
-                    <span>Co-op Ultimate [R]</span>
+                    <span>Skill 2 · Ultimate [2]</span>
                     <span className="text-[#D9AA52] font-medium truncate max-w-[170px]">
                       {currentClassDef.ultName}
                     </span>
@@ -951,13 +951,13 @@ export const SanctuaryLobby: React.FC<SanctuaryLobbyProps> = ({
                       </div>
                       <div>
                         <span className="font-semibold text-white font-mono">
-                          [Q] Tactical — {c.tacticalName} ({Math.round(c.tacticalCooldownMs / 1000)}s CD):
+                          [1] Tactical — {c.tacticalName} ({Math.round(c.tacticalCooldownMs / 1000)}s CD):
                         </span>{' '}
                         <span className="text-[#B4B2C4]">{c.tacticalDesc}</span>
                       </div>
                       <div>
                         <span className="font-semibold text-[#D9AA52] font-mono">
-                          [R] Ultimate — {c.ultName} ({Math.round(c.ultCooldownMs / 1000)}s CD):
+                          [2] Ultimate — {c.ultName} ({Math.round(c.ultCooldownMs / 1000)}s CD):
                         </span>{' '}
                         <span className="text-[#B4B2C4]">{c.ultDesc}</span>
                       </div>
@@ -1204,11 +1204,12 @@ export const SanctuaryLobby: React.FC<SanctuaryLobbyProps> = ({
               </h2>
               <div className="divide-y divide-[#2C2B3B] text-xs sm:text-sm">
                 {[
-                  ['Move Hero', 'Left On-screen Joystick (Mobile) or WASD / Arrows'],
-                  ['Attack & Aim', 'Right Attack Button (Mobile) or Mouse Click'],
-                  ['Tactical Skill [Q]', 'Q Button on Touchpad or Q / RMB'],
-                  ['Co-op Ultimate [R]', 'R Button on Touchpad or R / Shift'],
-                  ['Healing Flask [H]', 'HP Potion Button or H / 1 key'],
+                  ['Move Hero', 'Left Joystick (Mobile) or WASD / Arrows'],
+                  ['Attack & Aim', 'Attack Button (Mobile) or LMB / Space'],
+                  ['Evade Dash [Shift]', 'Dash Button (Mobile) or Shift'],
+                  ['Skill 1 · Tactical [1]', 'Skill 1 Button (Mobile) or 1 / RMB'],
+                  ['Skill 2 · Ultimate [2]', 'Skill 2 Button (Mobile) or 2'],
+                  ['Skill 3 · Heal Flask [3]', 'HP Potion Button (Mobile) or 3'],
                   ['Interact [E]', 'Interact Button or E key'],
                   ['Rally Ping [G]', 'Ping Button or G key'],
                 ].map(([action, keys]) => (

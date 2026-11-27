@@ -12,6 +12,8 @@ import { ARMAMENT_TUNING, resolveEquippedVestmentForClass } from './armaments.ts
 
 export interface MovablePlayerLike {
   heroClass: HeroClassId;
+  x?: number;
+  y?: number;
   dexterity?: number;
   relics: readonly string[];
   equippedVestment?: string | null;
@@ -208,7 +210,10 @@ export function moveWithCollision(
   }
 }
 
-export function computePlayerMoveSpeed(player: MovablePlayerLike): number {
+export function computePlayerMoveSpeed(
+  player: MovablePlayerLike,
+  map?: Pick<DungeonMap, 'biome' | 'width' | 'height' | 'tiles'>
+): number {
   const def = HERO_CLASSES[player.heroClass];
   let moveSpeed = def.speed * (1 + (player.dexterity || 0) * 0.0025);
   const equippedVestment = resolveEquippedVestmentForClass(player.heroClass, player.equippedVestment);
@@ -246,6 +251,22 @@ export function computePlayerMoveSpeed(player: MovablePlayerLike): number {
     }
     if (player.statuses.some((s) => s.type === 'impaled')) {
       moveSpeed *= 0.75;
+    }
+  }
+
+  if (
+    map?.biome === 'overworld' &&
+    typeof player.x === 'number' &&
+    typeof player.y === 'number' &&
+    (player.slowedMs || 0) <= 0
+  ) {
+    const tx = Math.floor(player.x / TILE_SIZE);
+    const ty = Math.floor(player.y / TILE_SIZE);
+    if (tx >= 0 && tx < map.width && ty >= 0 && ty < map.height) {
+      const underfoot = map.tiles[ty * map.width + tx];
+      if (underfoot === 4 || underfoot === 5) {
+        moveSpeed *= 1.12;
+      }
     }
   }
 

@@ -410,7 +410,7 @@ export const ArmamentShopPanel: React.FC<ArmamentShopPanelProps> = ({
                         size={14}
                       />
                       <span className="truncate">
-                        Tactical [Q]: <strong style={{ color: item.tacticalDef.accentColor }}>{item.tacticalDef.name}</strong>
+                        Skill [1]: <strong style={{ color: item.tacticalDef.accentColor }}>{item.tacticalDef.name}</strong>
                       </span>
                     </div>
                   )}
@@ -530,7 +530,7 @@ export const ArmamentShopPanel: React.FC<ArmamentShopPanelProps> = ({
                       size={16}
                     />
                     <span style={{ color: selectedItem.tacticalDef.accentColor }}>
-                      Replaces Tactical [Q]: {selectedItem.tacticalDef.name} (
+                      Replaces Skill [1]: {selectedItem.tacticalDef.name} (
                       {(selectedItem.tacticalDef.cooldownMs / 1000).toFixed(1)}s CD)
                     </span>
                   </div>

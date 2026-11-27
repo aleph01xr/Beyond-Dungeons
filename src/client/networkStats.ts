@@ -240,6 +240,14 @@ export function buildSnapshotHudKey(
     ? `${myDlg.npcId}:${myDlg.seq}:${myDlg.text}:${myDlg.options?.length ?? 0}`
     : '';
 
+  let fontKey = '';
+  if (isOpenWorld) {
+    const activeFont = snap.zones.find((z) => z.kind === 'overworld_font');
+    if (activeFont) {
+      fontKey = `${activeFont.id}:${activeFont.stage ?? 0}:${activeFont.ownerId}:${activeFont.quadrant ?? 1}`;
+    }
+  }
+
   return [
     snap.roomId,
     snap.hostId ?? '',
@@ -262,6 +270,7 @@ export function buildSnapshotHudKey(
     partyKey,
     flagsKey,
     npcKey,
+    fontKey,
   ].join('|');
 }
 

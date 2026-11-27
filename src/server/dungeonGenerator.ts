@@ -335,7 +335,7 @@ export function generateDungeonFloor(
   const diffMult =
     difficulty === 'Abyssal' ? 1.45 : difficulty === 'Heroic' ? 1.20 : 1.0;
   const partyMult = 1 + Math.max(0, partySize - 1) * 0.50;
-  const floorMult = 1 + (floor - 1) * 0.28;
+  const floorMult = 1 + (floor - 1) * 0.36;
   const hpScale = diffMult * partyMult * floorMult;
 
   let portalPos = {
@@ -420,8 +420,8 @@ export function generateDungeonFloor(
         value: 55,
       });
     } else if (room.type === 'combat') {
-      const baseEnemyCount = 3 + Math.floor(rng() * 3) + Math.min(2, Math.floor(floor / 2));
-      const enemyCount = room.guardian ? Math.max(4, baseEnemyCount) : baseEnemyCount;
+      const baseEnemyCount = 4 + Math.floor(rng() * 3) + Math.min(2, Math.floor(floor / 2));
+      const enemyCount = room.guardian ? Math.max(5, baseEnemyCount) : baseEnemyCount;
       const pool: EnemyKind[] =
         floor === 1
           ? ['slime', 'goblin', 'skeleton']
@@ -460,16 +460,30 @@ export function generateDungeonFloor(
         const ex = spawnTx * TILE_SIZE + TILE_SIZE / 2;
         const ey = spawnTy * TILE_SIZE + TILE_SIZE / 2;
         const isRoomGuardian = Boolean(room.guardian && i === 0);
-        const elite = isRoomGuardian || rng() < 0.16 + floor * 0.04;
+        const elite = isRoomGuardian || rng() < 0.22 + floor * 0.04;
         const enemy = makeEnemy(`en_${floor}_${enemySeq++}`, kind, room.id, ex, ey, hpScale, elite, floor, biomeSpec.id);
         if (isRoomGuardian) {
           enemy.name = `Guardian ${enemy.name.replace(/^Elite /, '')}`;
-          enemy.maxHp = Math.round(enemy.maxHp * 1.25);
+          enemy.maxHp = Math.round(enemy.maxHp * 1.3);
           enemy.hp = enemy.maxHp;
           enemy.radius += 2;
         }
         enemies.push(enemy);
       }
+
+      const findClearRoomFloorSpot = (minSpacing = 44): { x: number; y: number } | null => {
+        for (let attempt = 0; attempt < 14; attempt++) {
+          const candTx = Math.floor(room.x + 2 + rng() * Math.max(1, room.w - 4));
+          const candTy = Math.floor(room.y + 2 + rng() * Math.max(1, room.h - 4));
+          if (getTile(candTx, candTy) !== 1) continue;
+          const wx = candTx * TILE_SIZE + TILE_SIZE / 2;
+          const wy = candTy * TILE_SIZE + TILE_SIZE / 2;
+          if (Math.hypot(wx - centerWorldX, wy - centerWorldY) < 42) continue;
+          if (props.some((pr) => Math.hypot(pr.x - wx, pr.y - wy) < minSpacing)) continue;
+          return { x: wx, y: wy };
+        }
+        return null;
+      };
 
       if (room.guardian) {
         props.push({
@@ -494,6 +508,41 @@ export function generateDungeonFloor(
           roomId: room.id,
           value: 20 + floor * 8,
         });
+      }
+
+      // Tactical explosive cinder kegs (1-2 per combat room)
+      const kegCount = rng() > 0.45 ? 2 : 1;
+      for (let k = 0; k < kegCount; k++) {
+        const spot = findClearRoomFloorSpot(46);
+        if (spot) {
+          props.push({
+            id: `prop_${floor}_${propSeq++}`,
+            kind: 'keg',
+            x: spot.x,
+            y: spot.y,
+            opened: false,
+            roomId: room.id,
+            value: 48 + floor * 14,
+          });
+        }
+      }
+
+      // Periodic ancient floor spike traps in larger combat chambers
+      if (room.w >= 9 && room.h >= 9) {
+        const trapPhases = [0, 700, 1400];
+        const trapSpot = findClearRoomFloorSpot(48);
+        if (trapSpot) {
+          props.push({
+            id: `prop_${floor}_${propSeq++}`,
+            kind: 'spike_trap',
+            x: trapSpot.x,
+            y: trapSpot.y,
+            opened: false,
+            locked: false,
+            roomId: room.id,
+            value: trapPhases[(room.id + floor) % trapPhases.length],
+          });
+        }
       }
     } else if (room.type === 'boss') {
       const bossName =
@@ -553,6 +602,25 @@ export function generateDungeonFloor(
           opened: false,
           value: 100,
         });
+      }
+
+      // Flanking explosive cinder kegs in boss arena for tactical burst openings
+      for (const side of [-1, 1]) {
+        const kx = centerWorldX + side * 124;
+        const ky = centerWorldY + side * 24;
+        const ktx = Math.floor(kx / TILE_SIZE);
+        const kty = Math.floor(ky / TILE_SIZE);
+        if (getTile(ktx, kty) === 1) {
+          props.push({
+            id: `prop_${floor}_${propSeq++}`,
+            kind: 'keg',
+            x: kx,
+            y: ky,
+            opened: false,
+            roomId: room.id,
+            value: 58 + floor * 16,
+          });
+        }
       }
 
       portalPos = {
@@ -881,28 +949,28 @@ export function makeEnemy(
     EnemyKind,
     { name: string; hp: number; radius: number }
   > = {
-    slime: { name: 'Mire Slime', hp: 46, radius: 13 },
-    goblin: { name: 'Grimalkin Raider', hp: 56, radius: 13 },
-    skeleton: { name: 'Bone Marksman', hp: 52, radius: 13 },
-    cultist: { name: 'Void Acolyte', hp: 68, radius: 14 },
-    knight: { name: 'Dread Halberdier', hp: 105, radius: 16 },
-    shadow_stalker: { name: 'Abyssal Stalker', hp: 88, radius: 15 },
-    astral_sentinel: { name: 'Celestial Sentinel', hp: 122, radius: 17 },
-    hymn_phantom: { name: 'Hymn Phantom', hp: 96, radius: 15 },
-    relic_golem: { name: 'Relic Golem', hp: 135, radius: 17 },
-    veiled_heretic: { name: 'Veiled Heretic', hp: 110, radius: 15 },
-    celestial_arbiter: { name: 'Celestial Arbiter', hp: 145, radius: 16 },
-    warden_enforcer: { name: 'Warden Enforcer', hp: 160, radius: 18 },
+    slime: { name: 'Mire Slime', hp: 62, radius: 13 },
+    goblin: { name: 'Grimalkin Raider', hp: 72, radius: 13 },
+    skeleton: { name: 'Bone Marksman', hp: 66, radius: 13 },
+    cultist: { name: 'Void Acolyte', hp: 88, radius: 14 },
+    knight: { name: 'Dread Halberdier', hp: 140, radius: 16 },
+    shadow_stalker: { name: 'Abyssal Stalker', hp: 115, radius: 15 },
+    astral_sentinel: { name: 'Celestial Sentinel', hp: 160, radius: 17 },
+    hymn_phantom: { name: 'Hymn Phantom', hp: 125, radius: 15 },
+    relic_golem: { name: 'Relic Golem', hp: 185, radius: 17 },
+    veiled_heretic: { name: 'Veiled Heretic', hp: 142, radius: 15 },
+    celestial_arbiter: { name: 'Celestial Arbiter', hp: 190, radius: 16 },
+    warden_enforcer: { name: 'Warden Enforcer', hp: 215, radius: 18 },
     boss: { name: 'Warden Malakor', hp: 950, radius: 28 },
   };
   const spec = baseStats[kind];
   let maxHp: number;
   if (kind === 'boss') {
     // Linear boss HP progression scaling smoothly with floor and party size (no quadratic double-dipping)
-    const baseScale = floor > 1 ? hpScale / (1 + (floor - 1) * 0.28) : hpScale;
+    const baseScale = floor > 1 ? hpScale / (1 + (floor - 1) * 0.36) : hpScale;
     maxHp = Math.round(spec.hp * baseScale * (1 + (floor - 1) * 0.35));
   } else {
-    const eliteMult = elite ? 1.55 : 1;
+    const eliteMult = elite ? 1.75 : 1;
     maxHp = Math.round(spec.hp * hpScale * eliteMult);
   }
   return {
@@ -918,7 +986,7 @@ export function makeEnemy(
     maxHp,
     radius: kind === 'boss' ? 28 : elite ? spec.radius + 3 : spec.radius,
     state: 'idle',
-    windupMs: kind === 'boss' ? 700 : 800 + Math.floor(Math.random() * 600),
+    windupMs: kind === 'boss' ? 700 : 450 + Math.floor(Math.random() * 450),
     targetX: x,
     targetY: y,
     markedMs: 0,
@@ -930,6 +998,7 @@ export function makeEnemy(
     poisonedMs: 0,
     bleedingMs: 0,
     silencedMs: 0,
+    abilityCdMs: kind === 'boss' ? 0 : 900 + Math.floor(Math.random() * 1100),
     elite,
     resistances: getEnemyResistances(kind, elite, floor, biome),
     enraged: false,

@@ -821,7 +821,7 @@ export const CharacterInventoryModal: React.FC<CharacterInventoryModalProps> = (
                         <TacticalSkillIcon tacticalId={wTac.id} color={wTac.accentColor} size={18} />
                         <div className="text-[11px] font-mono">
                           <span className="font-bold" style={{ color: wTac.accentColor }}>
-                            Replaces Tactical [Q]: {wTac.name} ({(wTac.cooldownMs / 1000).toFixed(1)}s CD)
+                            Replaces Skill [1]: {wTac.name} ({(wTac.cooldownMs / 1000).toFixed(1)}s CD)
                           </span>
                           <span className="text-[#CBD5E1] block mt-0.5">{wTac.description}</span>
                         </div>
@@ -1434,7 +1434,7 @@ export const CharacterInventoryModal: React.FC<CharacterInventoryModalProps> = (
                     </div>
 
                     <div className="p-3 stone-input space-y-1">
-                      <div className="text-[#A19FAF] text-[10px] uppercase">Tactical [Q] · {stats.activeTacticalLabel}</div>
+                      <div className="text-[#A19FAF] text-[10px] uppercase">Skill [1] · {stats.activeTacticalLabel}</div>
                       <div className="text-sm font-bold" style={{ color: COMBAT_STAT_COLORS.cdr }}>{stats.tacticalCooldownSec}s</div>
                       <div className="text-[10px] text-[#A19FAF]">
                         Base {(stats.tacticalBaseCooldownMs / 1000).toFixed(1)}s
@@ -1445,7 +1445,7 @@ export const CharacterInventoryModal: React.FC<CharacterInventoryModalProps> = (
                     </div>
 
                     <div className="p-3 stone-input space-y-1">
-                      <div className="text-[#A19FAF] text-[10px] uppercase">Ultimate [R]</div>
+                      <div className="text-[#A19FAF] text-[10px] uppercase">Ultimate [2]</div>
                       <div className="text-sm font-bold" style={{ color: COMBAT_STAT_COLORS.gold }}>{stats.ultCooldownSec}s</div>
                       <div className="text-[10px] text-[#A19FAF]">Base {(heroDef.ultCooldownMs / 1000).toFixed(1)}s</div>
                     </div>

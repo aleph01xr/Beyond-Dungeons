@@ -3130,30 +3130,101 @@ export class ParticleManager {
         priority: 'low',
       });
     } else if (biome === 'overworld') {
-      // Verdant Borderlands open world: warm sunlit pollen motes & gentle emerald leaf drift
+      // Verdant Borderlands open world: region-flavored atmospheric motes
       const roll = Math.random();
-      const isLeaf = roll > 0.72;
-      const isPetal = !isLeaf && roll > 0.54;
-      this.acquireParticle({
-        x: rx,
-        y: ry,
-        vx: isLeaf || isPetal ? 16 + Math.random() * 14 : (Math.random() - 0.35) * 10,
-        vy: isLeaf || isPetal ? 8 + Math.random() * 9 : -8 - Math.random() * 9,
-        color: isLeaf ? '#34D399' : isPetal ? '#FDE047' : '#FEF08A',
-        secondaryColor: isLeaf ? '#A7F3D0' : '#FFFFFF',
-        size: isLeaf ? 2.2 : isPetal ? 1.8 : 1.5 + Math.random() * 0.9,
-        bornAt: now,
-        maxAgeMs: 1650 + Math.random() * 550,
-        fadeInRatio: 0.25,
-        turbulence: 20,
-        flutterAmplitude: isLeaf || isPetal ? 7 : 3,
-        flutterFrequency: 1.7,
-        alphaStart: isLeaf || isPetal ? 0.65 : 0.52,
-        alphaEnd: 0,
-        shape: isLeaf ? 'leaf' : isPetal ? 'petal' : 'dust',
-        glow: !isLeaf && !isPetal,
-        priority: 'low',
-      });
+      const inWoods = rx < 1650 && ry < 1350;
+      const inQuarry = rx >= 1980 && ry < 1350;
+      const inLake = rx < 1700 && ry >= 1450;
+      const inSanctum = rx >= 1980 && ry >= 1450;
+
+      if (inSanctum && roll > 0.4) {
+        this.acquireParticle({
+          x: rx,
+          y: ry,
+          vx: (Math.random() - 0.5) * 10,
+          vy: -10 - Math.random() * 10,
+          color: roll > 0.72 ? '#C4B5FD' : '#A78BFA',
+          secondaryColor: '#FFFFFF',
+          size: 1.9 + Math.random() * 0.9,
+          bornAt: now,
+          maxAgeMs: 1700 + Math.random() * 500,
+          fadeInRatio: 0.28,
+          turbulence: 22,
+          flutterAmplitude: 4,
+          flutterFrequency: 1.9,
+          alphaStart: 0.68,
+          alphaEnd: 0,
+          shape: 'rune',
+          glow: true,
+          priority: 'low',
+        });
+      } else if (inLake && roll > 0.45) {
+        this.acquireParticle({
+          x: rx,
+          y: ry,
+          vx: 14 + Math.random() * 12,
+          vy: (Math.random() - 0.5) * 9,
+          color: roll > 0.75 ? '#7DD3FC' : '#38BDF8',
+          secondaryColor: '#E0F2FE',
+          size: 1.8 + Math.random() * 0.8,
+          bornAt: now,
+          maxAgeMs: 1500 + Math.random() * 500,
+          fadeInRatio: 0.25,
+          turbulence: 26,
+          flutterAmplitude: 5,
+          flutterFrequency: 2.2,
+          alphaStart: 0.62,
+          alphaEnd: 0,
+          shape: 'dust',
+          glow: true,
+          priority: 'low',
+        });
+      } else if (inQuarry && roll > 0.42) {
+        this.acquireParticle({
+          x: rx,
+          y: ry,
+          vx: 10 + Math.random() * 12,
+          vy: -6 - Math.random() * 8,
+          color: roll > 0.72 ? '#FDE047' : '#F59E0B',
+          secondaryColor: '#FEF3C7',
+          size: 1.7 + Math.random() * 0.9,
+          bornAt: now,
+          maxAgeMs: 1550 + Math.random() * 500,
+          fadeInRatio: 0.25,
+          turbulence: 18,
+          flutterAmplitude: 3,
+          flutterFrequency: 1.5,
+          alphaStart: 0.62,
+          alphaEnd: 0,
+          shape: 'dust',
+          glow: true,
+          priority: 'low',
+        });
+      } else {
+        const isFirefly = inWoods && roll > 0.68;
+        const isLeaf = !isFirefly && roll > 0.62;
+        const isPetal = !isFirefly && !isLeaf && roll > 0.42;
+        this.acquireParticle({
+          x: rx,
+          y: ry,
+          vx: isLeaf || isPetal ? 16 + Math.random() * 14 : (Math.random() - 0.35) * 12,
+          vy: isLeaf || isPetal ? 8 + Math.random() * 9 : -8 - Math.random() * 10,
+          color: isFirefly ? '#86EFAC' : isLeaf ? '#34D399' : isPetal ? '#FDE047' : '#FEF08A',
+          secondaryColor: isFirefly ? '#FEF08A' : isLeaf ? '#A7F3D0' : '#FFFFFF',
+          size: isFirefly ? 2.4 : isLeaf ? 2.2 : isPetal ? 1.8 : 1.5 + Math.random() * 0.9,
+          bornAt: now,
+          maxAgeMs: 1650 + Math.random() * 550,
+          fadeInRatio: 0.25,
+          turbulence: isFirefly ? 28 : 20,
+          flutterAmplitude: isLeaf || isPetal ? 7 : 4,
+          flutterFrequency: 1.8,
+          alphaStart: isFirefly ? 0.82 : isLeaf || isPetal ? 0.65 : 0.52,
+          alphaEnd: 0,
+          shape: isLeaf ? 'leaf' : isPetal ? 'petal' : 'dust',
+          glow: isFirefly || (!isLeaf && !isPetal),
+          priority: 'low',
+        });
+      }
     } else {
       // 'courtyard' (Tavern / Floor 1 Sunken Courtyard): drifting green leaves, sunlit petals & dust motes
       const roll = Math.random();

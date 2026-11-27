@@ -142,7 +142,7 @@ export const GUARDIAN_STATUS_EFFECTS: Record<PlayerStatusType, StatusEffectMeta>
     color: '#E879F9',
     bgColor: 'bg-fuchsia-950/80',
     borderColor: 'border-fuchsia-500',
-    summary: 'Locks Tactical [Q] and Ultimate [R] abilities.',
+    summary: 'Locks Skill [1] and Ultimate [2] abilities.',
     detailedEffect: 'Inflicted by Sariel\'s Seal of Silence and Forbidden Verses. Binding divine runes seal all spellcasting and class abilities. Tactical and Ultimate skills cannot be activated; energy and cooldowns are preserved. Basic attacks, movement, and evasion dash remain fully functional.',
     resistanceMitigation: 'Faith Spiritual Tenacity (reduces duration up to 40%)',
     iconSlotId: 'icon_status_silenced',

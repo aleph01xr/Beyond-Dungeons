@@ -1822,7 +1822,7 @@ function moveWithCollision(map, props, entity, dx, dy, radius, npcs) {
     entity.y += dy * 0.5;
   }
 }
-function computePlayerMoveSpeed(player) {
+function computePlayerMoveSpeed(player, map) {
   const def = HERO_CLASSES[player.heroClass];
   let moveSpeed = def.speed * (1 + (player.dexterity || 0) * 25e-4);
   const equippedVestment = resolveEquippedVestmentForClass(player.heroClass, player.equippedVestment);
@@ -1844,12 +1844,28 @@ function computePlayerMoveSpeed(player) {
     if (swiftStacks > 0) moveSpeed *= 1 + swiftStacks * 0.08;
   }
   if (player.speedBoost) moveSpeed *= 1.8;
+  if ((player.stunnedMs || 0) > 0 || (player.frozenMs || 0) > 0) {
+    return 0;
+  }
+  if ((player.slowedMs || 0) > 0) {
+    moveSpeed *= 0.68;
+  }
   if (player.statuses && player.statuses.length > 0) {
     if (player.statuses.some((s) => s.type === "frostbite")) {
       moveSpeed *= 0.55;
     }
     if (player.statuses.some((s) => s.type === "impaled")) {
       moveSpeed *= 0.75;
+    }
+  }
+  if (map?.biome === "overworld" && typeof player.x === "number" && typeof player.y === "number" && (player.slowedMs || 0) <= 0) {
+    const tx = Math.floor(player.x / TILE_SIZE);
+    const ty = Math.floor(player.y / TILE_SIZE);
+    if (tx >= 0 && tx < map.width && ty >= 0 && ty < map.height) {
+      const underfoot = map.tiles[ty * map.width + tx];
+      if (underfoot === 4 || underfoot === 5) {
+        moveSpeed *= 1.12;
+      }
     }
   }
   return moveSpeed;
@@ -2208,6 +2224,10 @@ function findBestAutoTarget(opts) {
   };
   const enemyMatch = pickFrom(opts.enemies);
   if (enemyMatch) return enemyMatch;
+  if (opts.pvpPlayers && opts.pvpPlayers.length > 0) {
+    const pvpMatch = pickFrom(opts.pvpPlayers);
+    if (pvpMatch) return pvpMatch;
+  }
   if (opts.trainingDummies && opts.trainingDummies.length > 0) {
     return pickFrom(opts.trainingDummies);
   }
@@ -2249,6 +2269,9 @@ function resolveSkillSmartTarget(opts) {
       }
     };
     scanList(opts.enemies);
+    if (!closestNearCursor && opts.pvpPlayers) {
+      scanList(opts.pvpPlayers);
+    }
     if (!closestNearCursor && opts.trainingDummies) {
       scanList(opts.trainingDummies);
     }
@@ -2266,6 +2289,7 @@ function resolveSkillSmartTarget(opts) {
         map: opts.map,
         props: opts.props,
         enemies: opts.enemies,
+        pvpPlayers: opts.pvpPlayers,
         trainingDummies: opts.trainingDummies
       });
     }
@@ -2280,6 +2304,7 @@ function resolveSkillSmartTarget(opts) {
       map: opts.map,
       props: opts.props,
       enemies: opts.enemies,
+      pvpPlayers: opts.pvpPlayers,
       trainingDummies: opts.trainingDummies
     });
   }
@@ -2573,7 +2598,7 @@ function generateDungeonFloor(floor, baseSeed, difficulty, partySize) {
   let enemySeq = 1;
   const diffMult = difficulty === "Abyssal" ? 1.45 : difficulty === "Heroic" ? 1.2 : 1;
   const partyMult = 1 + Math.max(0, partySize - 1) * 0.5;
-  const floorMult = 1 + (floor - 1) * 0.28;
+  const floorMult = 1 + (floor - 1) * 0.36;
   const hpScale = diffMult * partyMult * floorMult;
   let portalPos = {
     x: (startRoom.cx + 1) * TILE_SIZE + TILE_SIZE / 2,
@@ -2653,8 +2678,8 @@ function generateDungeonFloor(floor, baseSeed, difficulty, partySize) {
         value: 55
       });
     } else if (room.type === "combat") {
-      const baseEnemyCount = 3 + Math.floor(rng() * 3) + Math.min(2, Math.floor(floor / 2));
-      const enemyCount = room.guardian ? Math.max(4, baseEnemyCount) : baseEnemyCount;
+      const baseEnemyCount = 4 + Math.floor(rng() * 3) + Math.min(2, Math.floor(floor / 2));
+      const enemyCount = room.guardian ? Math.max(5, baseEnemyCount) : baseEnemyCount;
       const pool = floor === 1 ? ["slime", "goblin", "skeleton"] : floor === 2 ? ["goblin", "skeleton", "cultist"] : floor === 3 ? ["skeleton", "knight", "cultist"] : floor === 4 ? ["cultist", "shadow_stalker", "skeleton"] : floor === 5 ? ["astral_sentinel", "cultist", "shadow_stalker"] : floor === 6 ? ["skeleton", "cultist", "hymn_phantom"] : floor === 7 ? ["knight", "relic_golem", "skeleton"] : floor === 8 ? ["cultist", "shadow_stalker", "veiled_heretic"] : floor === 9 ? ["astral_sentinel", "knight", "celestial_arbiter"] : ["astral_sentinel", "shadow_stalker", "warden_enforcer"];
       for (let i = 0; i < enemyCount; i++) {
         const kind = pool[Math.floor(rng() * pool.length)];
@@ -2672,16 +2697,29 @@ function generateDungeonFloor(floor, baseSeed, difficulty, partySize) {
         const ex = spawnTx * TILE_SIZE + TILE_SIZE / 2;
         const ey = spawnTy * TILE_SIZE + TILE_SIZE / 2;
         const isRoomGuardian = Boolean(room.guardian && i === 0);
-        const elite = isRoomGuardian || rng() < 0.16 + floor * 0.04;
+        const elite = isRoomGuardian || rng() < 0.22 + floor * 0.04;
         const enemy = makeEnemy(`en_${floor}_${enemySeq++}`, kind, room.id, ex, ey, hpScale, elite, floor, biomeSpec.id);
         if (isRoomGuardian) {
           enemy.name = `Guardian ${enemy.name.replace(/^Elite /, "")}`;
-          enemy.maxHp = Math.round(enemy.maxHp * 1.25);
+          enemy.maxHp = Math.round(enemy.maxHp * 1.3);
           enemy.hp = enemy.maxHp;
           enemy.radius += 2;
         }
         enemies.push(enemy);
       }
+      const findClearRoomFloorSpot = (minSpacing = 44) => {
+        for (let attempt = 0; attempt < 14; attempt++) {
+          const candTx = Math.floor(room.x + 2 + rng() * Math.max(1, room.w - 4));
+          const candTy = Math.floor(room.y + 2 + rng() * Math.max(1, room.h - 4));
+          if (getTile(candTx, candTy) !== 1) continue;
+          const wx = candTx * TILE_SIZE + TILE_SIZE / 2;
+          const wy = candTy * TILE_SIZE + TILE_SIZE / 2;
+          if (Math.hypot(wx - centerWorldX, wy - centerWorldY) < 42) continue;
+          if (props.some((pr) => Math.hypot(pr.x - wx, pr.y - wy) < minSpacing)) continue;
+          return { x: wx, y: wy };
+        }
+        return null;
+      };
       if (room.guardian) {
         props.push({
           id: `prop_${floor}_${propSeq++}`,
@@ -2705,6 +2743,37 @@ function generateDungeonFloor(floor, baseSeed, difficulty, partySize) {
           roomId: room.id,
           value: 20 + floor * 8
         });
+      }
+      const kegCount = rng() > 0.45 ? 2 : 1;
+      for (let k = 0; k < kegCount; k++) {
+        const spot = findClearRoomFloorSpot(46);
+        if (spot) {
+          props.push({
+            id: `prop_${floor}_${propSeq++}`,
+            kind: "keg",
+            x: spot.x,
+            y: spot.y,
+            opened: false,
+            roomId: room.id,
+            value: 48 + floor * 14
+          });
+        }
+      }
+      if (room.w >= 9 && room.h >= 9) {
+        const trapPhases = [0, 700, 1400];
+        const trapSpot = findClearRoomFloorSpot(48);
+        if (trapSpot) {
+          props.push({
+            id: `prop_${floor}_${propSeq++}`,
+            kind: "spike_trap",
+            x: trapSpot.x,
+            y: trapSpot.y,
+            opened: false,
+            locked: false,
+            roomId: room.id,
+            value: trapPhases[(room.id + floor) % trapPhases.length]
+          });
+        }
       }
     } else if (room.type === "boss") {
       const bossName = biomeSpec.bossNames[Math.floor(rng() * biomeSpec.bossNames.length)];
@@ -2758,6 +2827,23 @@ function generateDungeonFloor(floor, baseSeed, difficulty, partySize) {
           opened: false,
           value: 100
         });
+      }
+      for (const side of [-1, 1]) {
+        const kx = centerWorldX + side * 124;
+        const ky = centerWorldY + side * 24;
+        const ktx = Math.floor(kx / TILE_SIZE);
+        const kty = Math.floor(ky / TILE_SIZE);
+        if (getTile(ktx, kty) === 1) {
+          props.push({
+            id: `prop_${floor}_${propSeq++}`,
+            kind: "keg",
+            x: kx,
+            y: ky,
+            opened: false,
+            roomId: room.id,
+            value: 58 + floor * 16
+          });
+        }
       }
       portalPos = {
         x: centerWorldX,
@@ -3096,27 +3182,27 @@ function getEnemyResistances(kind, elite, floor, biome) {
 }
 function makeEnemy(id, kind, roomId, x, y, hpScale, elite, floor = 1, biome = "courtyard") {
   const baseStats = {
-    slime: { name: "Mire Slime", hp: 46, radius: 13 },
-    goblin: { name: "Grimalkin Raider", hp: 56, radius: 13 },
-    skeleton: { name: "Bone Marksman", hp: 52, radius: 13 },
-    cultist: { name: "Void Acolyte", hp: 68, radius: 14 },
-    knight: { name: "Dread Halberdier", hp: 105, radius: 16 },
-    shadow_stalker: { name: "Abyssal Stalker", hp: 88, radius: 15 },
-    astral_sentinel: { name: "Celestial Sentinel", hp: 122, radius: 17 },
-    hymn_phantom: { name: "Hymn Phantom", hp: 96, radius: 15 },
-    relic_golem: { name: "Relic Golem", hp: 135, radius: 17 },
-    veiled_heretic: { name: "Veiled Heretic", hp: 110, radius: 15 },
-    celestial_arbiter: { name: "Celestial Arbiter", hp: 145, radius: 16 },
-    warden_enforcer: { name: "Warden Enforcer", hp: 160, radius: 18 },
+    slime: { name: "Mire Slime", hp: 62, radius: 13 },
+    goblin: { name: "Grimalkin Raider", hp: 72, radius: 13 },
+    skeleton: { name: "Bone Marksman", hp: 66, radius: 13 },
+    cultist: { name: "Void Acolyte", hp: 88, radius: 14 },
+    knight: { name: "Dread Halberdier", hp: 140, radius: 16 },
+    shadow_stalker: { name: "Abyssal Stalker", hp: 115, radius: 15 },
+    astral_sentinel: { name: "Celestial Sentinel", hp: 160, radius: 17 },
+    hymn_phantom: { name: "Hymn Phantom", hp: 125, radius: 15 },
+    relic_golem: { name: "Relic Golem", hp: 185, radius: 17 },
+    veiled_heretic: { name: "Veiled Heretic", hp: 142, radius: 15 },
+    celestial_arbiter: { name: "Celestial Arbiter", hp: 190, radius: 16 },
+    warden_enforcer: { name: "Warden Enforcer", hp: 215, radius: 18 },
     boss: { name: "Warden Malakor", hp: 950, radius: 28 }
   };
   const spec = baseStats[kind];
   let maxHp;
   if (kind === "boss") {
-    const baseScale = floor > 1 ? hpScale / (1 + (floor - 1) * 0.28) : hpScale;
+    const baseScale = floor > 1 ? hpScale / (1 + (floor - 1) * 0.36) : hpScale;
     maxHp = Math.round(spec.hp * baseScale * (1 + (floor - 1) * 0.35));
   } else {
-    const eliteMult = elite ? 1.55 : 1;
+    const eliteMult = elite ? 1.75 : 1;
     maxHp = Math.round(spec.hp * hpScale * eliteMult);
   }
   return {
@@ -3132,7 +3218,7 @@ function makeEnemy(id, kind, roomId, x, y, hpScale, elite, floor = 1, biome = "c
     maxHp,
     radius: kind === "boss" ? 28 : elite ? spec.radius + 3 : spec.radius,
     state: "idle",
-    windupMs: kind === "boss" ? 700 : 800 + Math.floor(Math.random() * 600),
+    windupMs: kind === "boss" ? 700 : 450 + Math.floor(Math.random() * 450),
     targetX: x,
     targetY: y,
     markedMs: 0,
@@ -3144,6 +3230,7 @@ function makeEnemy(id, kind, roomId, x, y, hpScale, elite, floor = 1, biome = "c
     poisonedMs: 0,
     bleedingMs: 0,
     silencedMs: 0,
+    abilityCdMs: kind === "boss" ? 0 : 900 + Math.floor(Math.random() * 1100),
     elite,
     resistances: getEnemyResistances(kind, elite, floor, biome),
     enraged: false,
@@ -3317,6 +3404,398 @@ function generateTavernFloor() {
       x: 21 * TILE_SIZE,
       y: 18 * TILE_SIZE
     }
+  };
+}
+
+// src/server/overworldGenerator.ts
+function createSeededRng(seed) {
+  let s = (Math.floor(seed) || 777) >>> 0;
+  return () => {
+    s = s + 1831565813 | 0;
+    let t = Math.imul(s ^ s >>> 15, 1 | s);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+function generateOpenWorldMap(seed = 777) {
+  const width = 120;
+  const height = 90;
+  const tiles = new Array(width * height).fill(1);
+  const protectedWalkable = new Uint8Array(width * height);
+  const rng = createSeededRng(seed);
+  const inInnerBounds = (tx, ty) => tx >= 3 && tx < width - 3 && ty >= 3 && ty < height - 3;
+  const setTile = (tx, ty, code, protectWalk = false) => {
+    if (tx < 0 || tx >= width || ty < 0 || ty >= height) return;
+    tiles[ty * width + tx] = code;
+    if (protectWalk && code !== 0 && code !== 2 && code !== 3) {
+      protectedWalkable[ty * width + tx] = 1;
+    }
+  };
+  const getTile = (tx, ty) => {
+    if (tx < 0 || tx >= width || ty < 0 || ty >= height) return 0;
+    return tiles[ty * width + tx];
+  };
+  const fillDisc = (cx, cy, radius, code, opts) => {
+    const wobble = opts?.wobble ?? 0;
+    const minX = Math.floor(cx - radius - wobble - 1);
+    const maxX = Math.ceil(cx + radius + wobble + 1);
+    const minY = Math.floor(cy - radius - wobble - 1);
+    const maxY = Math.ceil(cy + radius + wobble + 1);
+    for (let y = minY; y <= maxY; y++) {
+      for (let x = minX; x <= maxX; x++) {
+        if (!inInnerBounds(x, y)) continue;
+        const dx = x - cx;
+        const dy = y - cy;
+        const dist = Math.hypot(dx, dy);
+        const angle = Math.atan2(dy, dx);
+        const localR = wobble > 0 ? radius + Math.sin(angle * 3 + cx * 0.4) * wobble * 0.55 + Math.cos(angle * 5 - cy * 0.3) * wobble * 0.45 : radius;
+        if (dist <= localR) {
+          if (opts?.onlyIf === void 0 || getTile(x, y) === opts.onlyIf) {
+            setTile(x, y, code, opts?.protectWalk);
+          }
+        }
+      }
+    }
+  };
+  const fillRect = (x0, y0, w, h, code, protectWalk = false) => {
+    for (let y = y0; y < y0 + h; y++) {
+      for (let x = x0; x < x0 + w; x++) {
+        if (inInnerBounds(x, y)) {
+          setTile(x, y, code, protectWalk);
+        }
+      }
+    }
+  };
+  const fillOctagon = (cx, cy, radius, chamferCut, code, protectWalk = false) => {
+    for (let y = cy - radius; y <= cy + radius; y++) {
+      for (let x = cx - radius; x <= cx + radius; x++) {
+        if (!inInnerBounds(x, y)) continue;
+        const adx = Math.abs(x - cx);
+        const ady = Math.abs(y - cy);
+        if (adx <= radius && ady <= radius && adx + ady <= chamferCut) {
+          setTile(x, y, code, protectWalk);
+        }
+      }
+    }
+  };
+  const carveOrganicTrail = (x0, y0, x1, y1, halfWidth, amplitude, frequency, phase, code = 4) => {
+    const totalDist = Math.hypot(x1 - x0, y1 - y0);
+    const steps = Math.max(12, Math.ceil(totalDist * 2.5));
+    const ux = (x1 - x0) / Math.max(1, totalDist);
+    const uy = (y1 - y0) / Math.max(1, totalDist);
+    const nx = -uy;
+    const ny = ux;
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps;
+      const taper = Math.sin(t * Math.PI);
+      const offset = Math.sin(t * Math.PI * frequency + phase) * amplitude * taper;
+      const px = x0 + (x1 - x0) * t + nx * offset;
+      const py = y0 + (y1 - y0) * t + ny * offset;
+      fillDisc(px, py, halfWidth, code, { protectWalk: true });
+    }
+  };
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      if (x < 2 || x >= width - 2 || y < 2 || y >= height - 2) {
+        setTile(x, y, 0);
+      } else if (x === 2 || x >= width - 3 || y === 2 || y >= height - 3) {
+        setTile(x, y, 2);
+      } else {
+        const edgeDist = Math.min(x - 2, width - 3 - x, y - 2, height - 3 - y);
+        const waveDepth = 1.4 + Math.sin(x * 0.24 + y * 0.17) * 0.85 + Math.cos(x * 0.11 - y * 0.29) * 0.65;
+        if (edgeDist <= Math.floor(waveDepth) || edgeDist <= 2 && rng() < 0.36) {
+          setTile(x, y, 2);
+        }
+      }
+    }
+  }
+  for (let i = 0; i < 46; i++) {
+    const px = 7 + Math.floor(rng() * (width - 14));
+    const py = 7 + Math.floor(rng() * (height - 14));
+    const r = 2.2 + rng() * 3;
+    fillDisc(px, py, r, 6, { onlyIf: 1, wobble: 0.7 });
+  }
+  carveOrganicTrail(8, 45, 51, 45, 1.6, 2.2, 2, 0.3, 4);
+  carveOrganicTrail(69, 45, width - 9, 45, 1.6, 2.2, 2, 1.7, 4);
+  carveOrganicTrail(60, 8, 60, 36, 1.6, 2, 1.8, 0.9, 4);
+  carveOrganicTrail(60, 54, 60, height - 9, 1.6, 2, 1.8, 2.4, 4);
+  carveOrganicTrail(16, 45, 19, 25, 1.3, 1.8, 1.5, 0.4, 4);
+  carveOrganicTrail(19, 25, 31, 22, 1.35, 1.2, 1.2, 1.1, 4);
+  carveOrganicTrail(31, 22, 60, 15, 1.35, 2.1, 2, 0.6, 4);
+  carveOrganicTrail(60, 15, 89, 23, 1.35, 2, 2, 2, 4);
+  carveOrganicTrail(89, 23, 104, 45, 1.35, 2.1, 1.6, 0.8, 4);
+  carveOrganicTrail(104, 45, 102, 66, 1.3, 1.6, 1.3, 1.5, 4);
+  carveOrganicTrail(102, 66, 88, 66, 1.35, 1, 1, 0.2, 4);
+  carveOrganicTrail(88, 66, 60, 75, 1.35, 2, 1.8, 2.5, 4);
+  carveOrganicTrail(60, 75, 43, 66, 1.35, 1.6, 1.5, 0.7, 4);
+  carveOrganicTrail(16, 45, 16, 66, 1.3, 1.5, 1.4, 1.9, 4);
+  carveOrganicTrail(30, 53, 31, 26, 1.25, 1.9, 1.8, 0.9, 4);
+  carveOrganicTrail(60, 45, 82, 28, 1.2, 1.8, 1.6, 1.3, 4);
+  carveOrganicTrail(60, 45, 79, 60, 1.2, 1.8, 1.6, 2.1, 4);
+  fillDisc(31, 22, 7.2, 6, { wobble: 0.9, protectWalk: true });
+  fillDisc(31, 22, 4.4, 1, { wobble: 0.4, protectWalk: true });
+  fillDisc(31, 22, 1.8, 5, { protectWalk: true });
+  const sylvanStones = [
+    [26, 18],
+    [36, 18],
+    [26, 26],
+    [36, 26]
+  ];
+  for (const [sx, sy] of sylvanStones) {
+    setTile(sx, sy, 3);
+  }
+  const nwGroves = [
+    [21, 18, 2.5],
+    [40, 17, 2.4],
+    [44, 30, 2.3],
+    [23, 33, 2.1],
+    [13, 24, 2.5],
+    [39, 9, 2.3],
+    [50, 22, 2],
+    [14, 13, 2.2]
+  ];
+  for (const [gx, gy, gr] of nwGroves) {
+    for (let dy = -Math.ceil(gr); dy <= Math.ceil(gr); dy++) {
+      for (let dx = -Math.ceil(gr); dx <= Math.ceil(gr); dx++) {
+        const tx = gx + dx;
+        const ty = gy + dy;
+        if (!inInnerBounds(tx, ty) || protectedWalkable[ty * width + tx]) continue;
+        if (dx * dx + dy * dy <= gr * gr) {
+          setTile(tx, ty, 2);
+        }
+      }
+    }
+  }
+  fillDisc(89, 23, 15.2, 6, { wobble: 1.4, protectWalk: true });
+  fillDisc(89, 23, 9.4, 4, { wobble: 1, protectWalk: true });
+  fillDisc(89, 23, 3.6, 5, { wobble: 0.4, protectWalk: true });
+  fillRect(88, 12, 3, 6, 5, true);
+  fillRect(96, 22, 6, 3, 5, true);
+  const neCanyonOutcrops = [
+    [77, 17, 2],
+    [83, 16, 1.5],
+    [96, 17, 2],
+    [99, 28, 2.1],
+    [80, 30, 1.8],
+    [72, 26, 2],
+    [106, 24, 2.2],
+    [92, 34, 1.7],
+    [85, 32, 1.4]
+  ];
+  for (const [bx, by, br] of neCanyonOutcrops) {
+    for (let dy = -Math.ceil(br); dy <= Math.ceil(br); dy++) {
+      for (let dx = -Math.ceil(br); dx <= Math.ceil(br); dx++) {
+        const tx = bx + dx;
+        const ty = by + dy;
+        if (!inInnerBounds(tx, ty) || protectedWalkable[ty * width + tx]) continue;
+        if (dx * dx + dy * dy <= br * br) {
+          setTile(tx, ty, 3);
+        }
+      }
+    }
+  }
+  fillDisc(29, 67, 14.5, 6, { wobble: 1.5 });
+  fillDisc(38, 63, 9.2, 6, { wobble: 1.1 });
+  fillDisc(29, 67, 10.6, 0, { wobble: 1.25 });
+  fillDisc(38, 63, 6.8, 0, { wobble: 0.95 });
+  fillDisc(25, 59, 5.2, 0, { wobble: 0.7 });
+  fillDisc(30, 66, 4.7, 6, { wobble: 0.35, protectWalk: true });
+  fillDisc(30, 66, 3.6, 5, { protectWalk: true });
+  fillRect(28, 52, 4, 11, 5, true);
+  fillRect(15, 65, 12, 4, 5, true);
+  fillRect(33, 63, 13, 4, 5, true);
+  fillDisc(30, 77, 4.2, 6, { wobble: 0.5, protectWalk: true });
+  fillRect(28, 70, 4, 6, 5, true);
+  fillOctagon(88, 66, 13, 21, 6, true);
+  fillOctagon(88, 66, 10, 16, 5, true);
+  fillDisc(88, 66, 6.2, 1, { wobble: 0.5, protectWalk: true });
+  fillDisc(88, 66, 3.3, 5, { protectWalk: true });
+  const sePillars = [
+    [79, 58],
+    [80, 58],
+    [79, 59],
+    [96, 58],
+    [97, 58],
+    [97, 59],
+    [79, 73],
+    [80, 73],
+    [79, 72],
+    [96, 73],
+    [97, 73],
+    [97, 72],
+    [83, 62],
+    [93, 62],
+    [83, 70],
+    [93, 70],
+    [73, 61],
+    [103, 62],
+    [74, 72],
+    [102, 72]
+  ];
+  for (const [rx, ry] of sePillars) {
+    setTile(rx, ry, 3);
+  }
+  fillOctagon(60, 45, 11, 17, 6, true);
+  fillOctagon(60, 45, 9, 14, 5, true);
+  const centerCornerClusters = [
+    [54, 40, -1, -1],
+    [66, 40, 1, -1],
+    [54, 50, -1, 1],
+    [66, 50, 1, 1]
+  ];
+  for (const [px, py, sx, sy] of centerCornerClusters) {
+    setTile(px, py, 3);
+    setTile(px + sx, py, 3);
+    setTile(px, py + sy, 3);
+  }
+  fillDisc(60, 45, 4.2, 5, { protectWalk: true });
+  for (let i = 0; i < 72; i++) {
+    const tx = 6 + Math.floor(rng() * (width - 12));
+    const ty = 6 + Math.floor(rng() * (height - 12));
+    if (protectedWalkable[ty * width + tx]) continue;
+    const cur = getTile(tx, ty);
+    if (cur !== 1 && cur !== 6) continue;
+    if (Math.hypot(tx - 60, ty - 45) <= 13.5) continue;
+    if (tx >= 20 && tx <= 46 && ty >= 51 && ty <= 81) continue;
+    if (tx >= 74 && tx <= 102 && ty >= 54 && ty <= 78) continue;
+    const obsCode = tx < 58 ? 2 : 3;
+    setTile(tx, ty, obsCode);
+    if (rng() < 0.4 && inInnerBounds(tx + 1, ty) && !protectedWalkable[ty * width + (tx + 1)] && (getTile(tx + 1, ty) === 1 || getTile(tx + 1, ty) === 6)) {
+      setTile(tx + 1, ty, obsCode);
+    }
+  }
+  const spawnTiles = [
+    { tx: 60, ty: 15, padCode: 4 },
+    // North Pilgrimage Trail
+    { tx: 60, ty: 75, padCode: 4 },
+    // South Pilgrimage Trail
+    { tx: 15, ty: 45, padCode: 4 },
+    // West Royal Road
+    { tx: 105, ty: 45, padCode: 4 },
+    // East Royal Road
+    { tx: 31, ty: 22, padCode: 6 },
+    // NW Emerald Woods Sylvan Ring
+    { tx: 89, ty: 23, padCode: 5 },
+    // NE Sunlit Quarry Terrace
+    { tx: 30, ty: 77, padCode: 6 },
+    // SW Whispering Lake South Pier
+    { tx: 88, ty: 66, padCode: 5 }
+    // SE Shattered Sanctum Dais
+  ];
+  const spawnPoints = [];
+  for (const sp of spawnTiles) {
+    for (let dy = -2; dy <= 2; dy++) {
+      for (let dx = -2; dx <= 2; dx++) {
+        const cx = sp.tx + dx;
+        const cy = sp.ty + dy;
+        if (inInnerBounds(cx, cy)) {
+          const cur = getTile(cx, cy);
+          if (cur === 0 || cur === 2 || cur === 3) {
+            setTile(cx, cy, sp.padCode, true);
+          }
+        }
+      }
+    }
+    spawnPoints.push({
+      x: (sp.tx + 0.5) * TILE_SIZE,
+      y: (sp.ty + 0.5) * TILE_SIZE
+    });
+  }
+  const regions = [
+    {
+      id: "crossroads_bastion",
+      name: "Crossroads Bastion",
+      subtitle: "Ancient Cobblestone Hub",
+      x: 60.5 * TILE_SIZE,
+      y: 45.5 * TILE_SIZE,
+      radius: 440,
+      accentColor: "#F59E0B"
+    },
+    {
+      id: "emerald_woods",
+      name: "Emerald Woods",
+      subtitle: "Sylvan Ring & Timber Trails",
+      x: 31.5 * TILE_SIZE,
+      y: 22.5 * TILE_SIZE,
+      radius: 560,
+      accentColor: "#34D399"
+    },
+    {
+      id: "sunlit_quarry",
+      name: "Sunlit Quarry",
+      subtitle: "Amberstone Canyon & Ramps",
+      x: 89.5 * TILE_SIZE,
+      y: 23.5 * TILE_SIZE,
+      radius: 540,
+      accentColor: "#FBBF24"
+    },
+    {
+      id: "whispering_lake",
+      name: "Whispering Lake",
+      subtitle: "Bastion Isle & Stone Bridges",
+      x: 30.5 * TILE_SIZE,
+      y: 66.5 * TILE_SIZE,
+      radius: 560,
+      accentColor: "#38BDF8"
+    },
+    {
+      id: "shattered_sanctum",
+      name: "Shattered Sanctum",
+      subtitle: "Overgrown Colonnade Ruins",
+      x: 88.5 * TILE_SIZE,
+      y: 66.5 * TILE_SIZE,
+      radius: 540,
+      accentColor: "#A78BFA"
+    }
+  ];
+  const torches = [
+    // Crossroads Bastion plaza braziers
+    { x: 57.5 * TILE_SIZE, y: 42.5 * TILE_SIZE },
+    { x: 63.5 * TILE_SIZE, y: 42.5 * TILE_SIZE },
+    { x: 57.5 * TILE_SIZE, y: 48.5 * TILE_SIZE },
+    { x: 63.5 * TILE_SIZE, y: 48.5 * TILE_SIZE },
+    // Emerald Woods sylvan ring lanterns
+    { x: 27.5 * TILE_SIZE, y: 19.5 * TILE_SIZE },
+    { x: 35.5 * TILE_SIZE, y: 19.5 * TILE_SIZE },
+    { x: 27.5 * TILE_SIZE, y: 25.5 * TILE_SIZE },
+    { x: 35.5 * TILE_SIZE, y: 25.5 * TILE_SIZE },
+    // Sunlit Quarry terrace braziers
+    { x: 86.5 * TILE_SIZE, y: 21.5 * TILE_SIZE },
+    { x: 92.5 * TILE_SIZE, y: 21.5 * TILE_SIZE },
+    { x: 89.5 * TILE_SIZE, y: 26.5 * TILE_SIZE },
+    // Whispering Lake bridgehead & island pier lanterns
+    { x: 28.5 * TILE_SIZE, y: 63.5 * TILE_SIZE },
+    { x: 32.5 * TILE_SIZE, y: 63.5 * TILE_SIZE },
+    { x: 28.5 * TILE_SIZE, y: 71.5 * TILE_SIZE },
+    { x: 32.5 * TILE_SIZE, y: 71.5 * TILE_SIZE },
+    // Shattered Sanctum colonnade braziers
+    { x: 84.5 * TILE_SIZE, y: 63.5 * TILE_SIZE },
+    { x: 92.5 * TILE_SIZE, y: 63.5 * TILE_SIZE },
+    { x: 84.5 * TILE_SIZE, y: 69.5 * TILE_SIZE },
+    { x: 92.5 * TILE_SIZE, y: 69.5 * TILE_SIZE }
+  ];
+  const map = {
+    floor: 1,
+    biome: "overworld",
+    biomeTitle: "Verdant Borderlands",
+    width,
+    height,
+    tiles,
+    rooms: [],
+    torches,
+    portalPos: { x: 60.5 * TILE_SIZE, y: 45.5 * TILE_SIZE },
+    portalActive: false,
+    seed,
+    spawnPoints,
+    regions
+  };
+  return {
+    map,
+    enemies: [],
+    props: [],
+    npcs: [],
+    trainingDummies: [],
+    spawnPoint: spawnPoints[0]
   };
 }
 
@@ -3635,16 +4114,29 @@ var GameRoom = class _GameRoom {
     this.triggeredOnceProjIds = /* @__PURE__ */ new Set();
     this.weaponZoneTickAccum = /* @__PURE__ */ new Map();
     this.cycloneArrowStates = /* @__PURE__ */ new Map();
+    this.pvpGaleburstStacks = /* @__PURE__ */ new Map();
+    this.pvpStreaks = /* @__PURE__ */ new Map();
+    this.spikeTrapCooldowns = /* @__PURE__ */ new Map();
+    this.overworldFontCooldownMs = 1500;
+    this.overworldFontRegionCursor = 0;
+    this.overworldFontTypeCursor = 0;
+    this.overworldFontChargeAcc = 0;
+    this.overworldFontPulseAccumMs = 0;
     this.recentStatusEvents = /* @__PURE__ */ new Map();
     this.roomId = opts.roomId;
     this.name = opts.name;
     this.hostId = opts.hostId || "";
     this.hostName = opts.hostName;
     this.difficulty = opts.difficulty;
-    this.maxPlayers = opts.roomId === "TAVERN-HUB" ? 50 : 4;
+    this.isTavern = opts.roomId === "TAVERN-HUB";
+    this.isOpenWorld = opts.roomId === "OPEN-WORLD";
+    this.isPersistentSocialRoom = this.isTavern || this.isOpenWorld;
+    this.roomMode = this.isOpenWorld ? "open_world" : this.isTavern ? "tavern" : "dungeon";
+    this.pvpEnabled = this.isOpenWorld;
+    this.maxPlayers = this.isPersistentSocialRoom ? 50 : 4;
     this.baseSeed = opts.seed && opts.seed > 0 ? Math.floor(opts.seed) : Math.floor(1e5 + Math.random() * 899999);
-    const startFloor = opts.initialFloor !== void 0 ? opts.initialFloor : opts.roomId === "TAVERN-HUB" ? 0 : 1;
-    this.status = opts.roomId === "TAVERN-HUB" ? "playing" : opts.initialStatus ?? "playing";
+    const startFloor = opts.initialFloor !== void 0 ? opts.initialFloor : this.isTavern ? 0 : 1;
+    this.status = this.isPersistentSocialRoom ? "playing" : opts.initialStatus ?? "playing";
     if (this.status === "waiting") {
       this.floor = startFloor;
       const preview = generateDungeonFloor(startFloor, this.baseSeed, this.difficulty, 1);
@@ -3683,12 +4175,85 @@ var GameRoom = class _GameRoom {
     if (pr) {
       pr.dummyGaleburstStacks.clear();
     }
+    this.pvpGaleburstStacks.delete(playerId);
+    for (const stacks of this.pvpGaleburstStacks.values()) {
+      stacks.delete(playerId);
+    }
     for (const enemy of this.enemies) {
       const meta = this.enemyMeta.get(enemy.id);
       if (meta?.galeburstByOwner?.delete(playerId)) {
         this.syncEnemyGaleburstMarks(enemy, meta);
       }
     }
+  }
+  getPvpTargetsFor(attacker) {
+    if (!this.pvpEnabled) return [];
+    const targets = [];
+    for (const pr of this.players.values()) {
+      const st = pr.state;
+      if (!st.connected || st.downed || st.hp <= 0) continue;
+      if (attacker && st.id === attacker.id) continue;
+      if ((st.spawnProtectionMs || 0) > 0) continue;
+      targets.push(st);
+    }
+    return targets;
+  }
+  pickOpenWorldSpawnPoint(excludePlayerId) {
+    const candidates = this.map?.spawnPoints && this.map.spawnPoints.length > 0 ? this.map.spawnPoints : [this.spawnPoint];
+    const rivals = [];
+    for (const pr of this.players.values()) {
+      if (pr.state.id === excludePlayerId || !pr.state.connected || pr.state.downed) continue;
+      rivals.push(pr.state);
+    }
+    let bestPt = candidates[0];
+    let bestScore = -1;
+    for (let i = 0; i < candidates.length; i++) {
+      const pt = candidates[i];
+      if (this.collidesCircle(pt.x, pt.y, 12)) continue;
+      let minDist = Infinity;
+      for (const r of rivals) {
+        const d = Math.hypot(r.x - pt.x, r.y - pt.y);
+        if (d < minDist) minDist = d;
+      }
+      if (rivals.length === 0) {
+        minDist = 1e3;
+      }
+      if (minDist > bestScore) {
+        bestScore = minDist;
+        bestPt = pt;
+      }
+    }
+    return { x: bestPt.x, y: bestPt.y };
+  }
+  respawnOpenWorldPlayer(pr) {
+    const p = pr.state;
+    const spawn = this.pickOpenWorldSpawnPoint(p.id);
+    p.x = spawn.x;
+    p.y = spawn.y;
+    p.vx = 0;
+    p.vy = 0;
+    p.downed = false;
+    p.downedTimerMs = 0;
+    p.reviveProgress = 0;
+    p.hp = p.maxHp;
+    p.shield = computePlayerStartingShield(p);
+    p.statuses = [];
+    p.slowedMs = 0;
+    p.stunnedMs = 0;
+    p.frozenMs = 0;
+    p.burnedMs = 0;
+    p.shockedMs = 0;
+    p.poisonedMs = 0;
+    p.bleedingMs = 0;
+    p.silencedMs = 0;
+    p.chronoSuspendedMs = 0;
+    p.skillCooldownMs = 0;
+    p.dashCooldownMs = 0;
+    p.spawnProtectionMs = 2500;
+    this.pvpGaleburstStacks.delete(p.id);
+    this.clearEclipseCharge(pr);
+    this.clearPlayerTacticalState(pr, { removeOwnedZones: true });
+    this.emitEvent("status", p.x, p.y - 26, "RESPAWNED!", "#34D399");
   }
   syncEnemyGaleburstMarks(enemy, meta) {
     let maxStacks = 0;
@@ -3928,9 +4493,9 @@ var GameRoom = class _GameRoom {
     const lvl = Math.max(1, level);
     return Math.round(80 + (lvl - 1) * 60 + Math.pow(lvl - 1, 1.75) * 12);
   }
-  computeEnemyDamage(baseHit, enemy) {
+  computeEnemyDamage(baseHit, enemy, opts) {
     const diffMult = this.difficulty === "Abyssal" ? 1.4 : this.difficulty === "Heroic" ? 1.18 : 1;
-    const floorBonus = (this.floor - 1) * 2;
+    const floorBonus = (this.floor - 1) * 2.2;
     const partyScale = 1 + Math.max(0, this.players.size - 1) * 0.1;
     let dmg = (baseHit + floorBonus) * diffMult * partyScale;
     if (enemy && enemy.kind === "boss" && this.floor > 0) {
@@ -3938,8 +4503,10 @@ var GameRoom = class _GameRoom {
       if (wards > 0) {
         dmg *= 1 + Math.min(0.28, wards * 0.07);
       }
+    } else if (enemy && enemy.kind !== "boss" && enemy.elite) {
+      dmg *= 1.22;
     }
-    if (enemy && (enemy.poisonedMs || 0) > 0) {
+    if (!opts?.skipPoison && enemy && (enemy.poisonedMs || 0) > 0) {
       dmg *= 0.7;
     }
     return Math.max(1, Math.round(dmg));
@@ -3976,8 +4543,10 @@ var GameRoom = class _GameRoom {
     return `${prefix}_${this.entitySeq++}`;
   }
   loadFloor(floorNum, partySize) {
-    if (this.roomId === "TAVERN-HUB") {
+    if (this.isTavern) {
       floorNum = 0;
+    } else if (this.isOpenWorld) {
+      floorNum = 1;
     }
     this.floor = floorNum;
     this.enemyMeta.clear();
@@ -3988,7 +4557,23 @@ var GameRoom = class _GameRoom {
     this.voidCreditedProjIds.clear();
     this.temporalCreditedProjIds.clear();
     this.triggeredOnceProjIds.clear();
-    if (floorNum === 0) {
+    this.pvpGaleburstStacks.clear();
+    this.pvpStreaks.clear();
+    this.spikeTrapCooldowns.clear();
+    this.overworldFontCooldownMs = 1500;
+    this.overworldFontChargeAcc = 0;
+    this.overworldFontPulseAccumMs = 0;
+    if (this.isOpenWorld) {
+      const ow = generateOpenWorldMap(this.baseSeed);
+      this.map = ow.map;
+      this.enemies = [];
+      this.props = [];
+      this.npcs = [];
+      this.trainingDummies = [];
+      this.projectiles = [];
+      this.zones = [];
+      this.spawnPoint = ow.spawnPoint;
+    } else if (floorNum === 0) {
       const tav = generateTavernFloor();
       this.map = tav.map;
       this.enemies = tav.enemies;
@@ -4192,11 +4777,104 @@ var GameRoom = class _GameRoom {
         bossStrafeDir: Math.random() < 0.5 ? 1 : -1,
         bossStrafeFlipAtMs: 0,
         bossRecentDmgTaken: 0,
-        bossRecentDmgAtMs: 0
+        bossRecentDmgAtMs: 0,
+        mobStrafeDir: Math.random() < 0.5 ? 1 : -1,
+        mobStrafeFlipAtMs: 0,
+        mobShotCounter: 0
       };
       this.enemyMeta.set(enemy.id, meta);
     }
     return meta;
+  }
+  aimAngleWithLead(enemy, target, projSpeed, leadFactor = 0.45) {
+    const dx = target.x - enemy.x;
+    const dy = target.y - enemy.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist <= 1 || projSpeed <= 0) return Math.atan2(dy, dx);
+    const travelSec = Math.min(0.85, dist / projSpeed) * leadFactor;
+    const predX = target.x + (target.vx || 0) * travelSec;
+    const predY = target.y + (target.vy || 0) * travelSec;
+    return Math.atan2(predY - enemy.y, predX - enemy.x);
+  }
+  startMobCharge(enemy, angle, windupMs, chargeDurationMs) {
+    const meta = this.getEnemyMeta(enemy);
+    meta.chargeHitPlayerIds.clear();
+    enemy.charging = true;
+    enemy.chargeAngle = angle;
+    enemy.chargeWindupMs = windupMs;
+    enemy.chargeTimerMs = chargeDurationMs;
+    enemy.state = "windup";
+    enemy.vx = 0;
+    enemy.vy = 0;
+  }
+  stepMobCharge(enemy, dashSpeed, impactRadiusBonus, baseHit, damageCat, dtMs, dtSec, onHitPlayer, onComplete) {
+    if (!enemy.charging) return false;
+    if ((enemy.chargeWindupMs || 0) > 0) {
+      enemy.chargeWindupMs = Math.max(0, (enemy.chargeWindupMs || 0) - dtMs);
+      enemy.state = "windup";
+      enemy.vx = 0;
+      enemy.vy = 0;
+      return true;
+    }
+    const cAng = enemy.chargeAngle ?? 0;
+    enemy.state = "charge";
+    enemy.vx = Math.cos(cAng) * dashSpeed;
+    enemy.vy = Math.sin(cAng) * dashSpeed;
+    const prevX = enemy.x;
+    const prevY = enemy.y;
+    this.moveWithCollision(enemy, enemy.vx * dtSec, enemy.vy * dtSec, enemy.radius - 2);
+    const moved = Math.hypot(enemy.x - prevX, enemy.y - prevY);
+    const meta = this.getEnemyMeta(enemy);
+    const hitR = enemy.radius + impactRadiusBonus;
+    const hitRSq = hitR * hitR;
+    for (const pr of this.players.values()) {
+      const p = pr.state;
+      if (!p.connected || p.downed || meta.chargeHitPlayerIds.has(p.id)) continue;
+      const dx = p.x - enemy.x;
+      const dy = p.y - enemy.y;
+      if (dx * dx + dy * dy <= hitRSq) {
+        meta.chargeHitPlayerIds.add(p.id);
+        this.damagePlayer(p, this.computeEnemyDamage(baseHit, enemy), damageCat);
+        if (onHitPlayer) onHitPlayer(p);
+      }
+    }
+    enemy.chargeTimerMs = Math.max(0, (enemy.chargeTimerMs || 0) - dtMs);
+    if (enemy.chargeTimerMs <= 0 || moved < 0.25) {
+      this.clearEnemyChargeState(enemy);
+      enemy.state = "recover";
+      if (onComplete) onComplete();
+    }
+    return true;
+  }
+  moveSkirmishRange(enemy, meta, nearestDist, directAngle, moveAngle, spd, minDist, maxDist, strafeWeight, dtSec) {
+    if (this.simTimeMs >= meta.mobStrafeFlipAtMs) {
+      meta.mobStrafeDir = -meta.mobStrafeDir;
+      meta.mobStrafeFlipAtMs = this.simTimeMs + 1400 + enemy.id.charCodeAt(0) * 137 % 900;
+    }
+    const prevX = enemy.x;
+    const prevY = enemy.y;
+    const strafeAng = directAngle + Math.PI / 2 * meta.mobStrafeDir;
+    if (nearestDist < minDist) {
+      const rx = (-Math.cos(directAngle) * 0.8 + Math.cos(strafeAng) * 0.45) * spd * dtSec;
+      const ry = (-Math.sin(directAngle) * 0.8 + Math.sin(strafeAng) * 0.45) * spd * dtSec;
+      this.moveWithCollision(enemy, rx, ry, enemy.radius - 2);
+    } else if (nearestDist > maxDist) {
+      const ax = (Math.cos(moveAngle) * 0.85 + Math.cos(strafeAng) * 0.35) * spd * dtSec;
+      const ay = (Math.sin(moveAngle) * 0.85 + Math.sin(strafeAng) * 0.35) * spd * dtSec;
+      this.moveWithCollision(enemy, ax, ay, enemy.radius - 2);
+    } else if (strafeWeight > 0) {
+      const sx = Math.cos(strafeAng) * spd * strafeWeight * dtSec;
+      const sy = Math.sin(strafeAng) * spd * strafeWeight * dtSec;
+      this.moveWithCollision(enemy, sx, sy, enemy.radius - 2);
+      if (Math.hypot(enemy.x - prevX, enemy.y - prevY) < 0.2) {
+        meta.mobStrafeDir = -meta.mobStrafeDir;
+      }
+    }
+    if (dtSec > 0) {
+      const distMoved = Math.hypot(enemy.x - prevX, enemy.y - prevY);
+      enemy.vx = distMoved > 0.05 ? (enemy.x - prevX) / dtSec : 0;
+      enemy.vy = distMoved > 0.05 ? (enemy.y - prevY) / dtSec : 0;
+    }
   }
   clearEnemyChargeState(enemy) {
     enemy.charging = false;
@@ -4556,7 +5234,7 @@ var GameRoom = class _GameRoom {
     return this.map;
   }
   returnToWaitingLobby() {
-    if (this.roomId === "TAVERN-HUB") return;
+    if (this.isPersistentSocialRoom) return;
     if (this.status === "victory" || this.status === "defeat") {
       this.lastRunSummary = {
         outcome: this.status,
@@ -4588,6 +5266,8 @@ var GameRoom = class _GameRoom {
     this.npcs = [];
     this.trainingDummies = [];
     this.pendingEvents = [];
+    this.pvpStreaks.clear();
+    this.spikeTrapCooldowns.clear();
     this.floor = 1;
     this.status = "waiting";
     this.startedAt = Date.now();
@@ -4613,10 +5293,10 @@ var GameRoom = class _GameRoom {
     this.endedAt = null;
     this.runEndRecorded = false;
     this.resetPlayersForNewRun();
-    const restartFloor = this.roomId === "TAVERN-HUB" ? 0 : 1;
+    const restartFloor = this.isTavern ? 0 : 1;
     this.loadFloor(restartFloor, Math.max(1, this.players.size));
     this.pushSystemChat(
-      this.roomId === "TAVERN-HUB" ? `Sanctuary Tavern refreshed.` : `Host ${this.hostName} restarted the expedition on Seed ${this.baseSeed}.`
+      this.isTavern ? `Sanctuary Tavern refreshed.` : this.isOpenWorld ? `Open World refreshed.` : `Host ${this.hostName} restarted the expedition on Seed ${this.baseSeed}.`
     );
     return this.map;
   }
@@ -4624,7 +5304,7 @@ var GameRoom = class _GameRoom {
     return Boolean(playerId && this.hostId === playerId);
   }
   isPartyLocked() {
-    return this.roomId !== "TAVERN-HUB" && this.status === "playing";
+    return !this.isPersistentSocialRoom && this.status === "playing";
   }
   isPlayerConnected(playerId) {
     return Boolean(this.players.get(playerId)?.state.connected);
@@ -4637,7 +5317,7 @@ var GameRoom = class _GameRoom {
     return count;
   }
   setPlayerReady(playerId, ready) {
-    if (this.roomId === "TAVERN-HUB") {
+    if (this.isPersistentSocialRoom) {
       return { ok: false, reason: "Ready status is only used in expedition party lobbies." };
     }
     if (this.status !== "waiting") {
@@ -4652,10 +5332,14 @@ var GameRoom = class _GameRoom {
     return { ok: true, ready: nextReady };
   }
   canAcceptJoin(playerId) {
-    if (this.roomId === "TAVERN-HUB") {
+    if (this.isPersistentSocialRoom) {
       if (this.hasPlayer(playerId)) return { allowed: true, isReconnect: true };
       if (this.players.size >= this.maxPlayers) {
-        return { allowed: false, code: "full", reason: "Sanctuary Tavern is currently full." };
+        return {
+          allowed: false,
+          code: "full",
+          reason: this.isOpenWorld ? "Open World instance is currently full." : "Sanctuary Tavern is currently full."
+        };
       }
       return { allowed: true, isReconnect: false };
     }
@@ -4747,11 +5431,17 @@ var GameRoom = class _GameRoom {
     const idx = this.players.size;
     let sx = this.spawnPoint.x + (idx % 2 === 0 ? -18 : 18);
     let sy = this.spawnPoint.y + (idx < 2 ? -14 : 14);
-    for (const ally of this.players.values()) {
-      if (ally.state.connected && !ally.state.downed) {
-        sx = ally.state.x + 22;
-        sy = ally.state.y;
-        break;
+    if (this.isOpenWorld) {
+      const owSpawn = this.pickOpenWorldSpawnPoint(playerId);
+      sx = owSpawn.x;
+      sy = owSpawn.y;
+    } else {
+      for (const ally of this.players.values()) {
+        if (ally.state.connected && !ally.state.downed) {
+          sx = ally.state.x + 22;
+          sy = ally.state.y;
+          break;
+        }
       }
     }
     const clampedLevel = Math.max(1, Math.min(MAX_LEVEL, Number(savedStats?.level) || 1));
@@ -4824,6 +5514,7 @@ var GameRoom = class _GameRoom {
       poisonedMs: 0,
       bleedingMs: 0,
       silencedMs: 0,
+      spawnProtectionMs: this.isOpenWorld ? 2500 : 0,
       kills: 0,
       damageDealt: 0,
       revives: 0,
@@ -4894,12 +5585,12 @@ var GameRoom = class _GameRoom {
       npcSpeechIndices: {},
       dialogueSeq: 0
     });
-    if (!this.hostId && this.roomId !== "TAVERN-HUB") {
+    if (!this.hostId && !this.isPersistentSocialRoom) {
       this.hostId = playerId;
       this.hostName = username;
     }
     this.pushSystemChat(
-      `${username} (${def.name}) joined the ${this.status === "waiting" ? "party lobby" : "expedition"}.`
+      this.isOpenWorld ? `${username} (${def.name}) entered the Verdant Borderlands.` : `${username} (${def.name}) joined the ${this.status === "waiting" ? "party lobby" : "expedition"}.`
     );
     return state;
   }
@@ -4926,7 +5617,7 @@ var GameRoom = class _GameRoom {
     this.cleanupChronoWellsForOwner(playerId);
     if (pr.state.connected) {
       pr.state.connected = false;
-      if (this.roomId !== "TAVERN-HUB") {
+      if (!this.isPersistentSocialRoom) {
         this.pushSystemChat(`${pr.state.username} disconnected.`);
       }
       return true;
@@ -5969,6 +6660,16 @@ var GameRoom = class _GameRoom {
         if (dist > 20 && !this.hasLineOfSight(p.x, p.y, e.x, e.y)) continue;
         hitTargets.push({ kind: "enemy", id: e.id, x: e.x, y: e.y, dist, enemy: e });
       }
+      for (const rival of this.getPvpTargetsFor(p)) {
+        const dx = rival.x - p.x;
+        const dy = rival.y - p.y;
+        const dist = Math.hypot(dx, dy);
+        if (dist > maxRange + 14) continue;
+        const diff = Math.abs(normalizeAngle(Math.atan2(dy, dx) - aimAngle));
+        if (diff > halfAngle) continue;
+        if (dist > 20 && !this.hasLineOfSight(p.x, p.y, rival.x, rival.y)) continue;
+        hitTargets.push({ kind: "player", id: rival.id, x: rival.x, y: rival.y, dist, player: rival });
+      }
       for (const d of this.trainingDummies) {
         const dx = d.x - p.x;
         const dy = d.y - p.y;
@@ -5988,6 +6689,8 @@ var GameRoom = class _GameRoom {
         chainPoints.push({ x: tgt.x, y: tgt.y });
         if (tgt.kind === "enemy") {
           this.damageEnemy(tgt.enemy, coneDmg, p, hasCrit, "lightning");
+        } else if (tgt.kind === "player") {
+          this.damagePlayer(tgt.player, coneDmg, "lightning", p, { isCrit: hasCrit });
         } else {
           this.damageDummy(tgt.dummy, coneDmg, p, hasCrit, false, "lightning");
         }
@@ -6070,6 +6773,7 @@ var GameRoom = class _GameRoom {
         map: this.map,
         props: this.props,
         enemies: this.enemies,
+        pvpPlayers: this.getPvpTargetsFor(p),
         trainingDummies: this.trainingDummies
       })?.target;
       this.fireArcaneBarrageWave(p, aimAngle, 0, lockTarget?.id, voidMult);
@@ -6098,7 +6802,7 @@ var GameRoom = class _GameRoom {
     const baseScaled = Math.round(this.getArcanistSpellDamage(p, "arcane_barrage") * empoweredMult);
     let fireAngle = aimAngle;
     if (targetEnemyId) {
-      const targetEntity = this.enemies.find((e) => e.id === targetEnemyId && e.hp > 0) || this.trainingDummies.find((d) => d.id === targetEnemyId);
+      const targetEntity = this.enemies.find((e) => e.id === targetEnemyId && e.hp > 0) || this.getPvpTargetsFor(p).find((pl) => pl.id === targetEnemyId) || this.trainingDummies.find((d) => d.id === targetEnemyId);
       if (targetEntity) {
         fireAngle = Math.atan2(targetEntity.y - p.y, targetEntity.x - p.x);
       }
@@ -6244,6 +6948,13 @@ var GameRoom = class _GameRoom {
           this.onTacticalHitConfirmed(p);
         }
       }
+      for (const rival of this.getPvpTargetsFor(p)) {
+        const d = distancePointToSegment(rival.x, rival.y, p.x, p.y, endX, endY);
+        if (d <= beamHalfWidth + 14) {
+          const dealt = this.damagePlayer(rival, tickDmg, "arcane", p);
+          if (dealt > 0) this.onTacticalHitConfirmed(p);
+        }
+      }
       for (const dummy of this.trainingDummies) {
         const d = distancePointToSegment(dummy.x, dummy.y, p.x, p.y, endX, endY);
         if (d <= beamHalfWidth + 18) {
@@ -6269,6 +6980,16 @@ var GameRoom = class _GameRoom {
         }
       }
     }
+    for (const rival of this.getPvpTargetsFor(attacker)) {
+      if (Math.hypot(rival.x - proj.x, rival.y - proj.y) <= radius + 14) {
+        const dealt = this.damagePlayer(rival, proj.damage, "fire", attacker, {
+          isCrit: Boolean(proj.crit)
+        });
+        if (dealt > 0 && isTacticalProj) {
+          this.onTacticalHitConfirmed(attacker);
+        }
+      }
+    }
     for (const dummy of this.trainingDummies) {
       if (Math.hypot(dummy.x - proj.x, dummy.y - proj.y) <= radius + 18) {
         this.damageDummy(dummy, proj.damage, attacker, Boolean(proj.crit), false, "fire");
@@ -6277,6 +6998,7 @@ var GameRoom = class _GameRoom {
         }
       }
     }
+    this.detonateKegsInRadius(proj.x, proj.y, radius + 16, attacker);
     const burnRadius = fbSpec.burnRadius ?? Math.round(radius * 0.85);
     const burnDuration = fbSpec.durationMs ?? 3500;
     const baseSpellDmg = attacker ? this.getArcanistSpellDamage(attacker, "fireball") : proj.damage;
@@ -6513,6 +7235,7 @@ var GameRoom = class _GameRoom {
             return {};
           }
         }
+        if (prop.kind === "spike_trap") continue;
         const isToggleableChest = prop.kind === "chest" || prop.kind === "relic_chest";
         if (prop.opened && !isToggleableChest) continue;
         const dist = Math.hypot(prop.x - p.x, prop.y - p.y);
@@ -6531,6 +7254,10 @@ var GameRoom = class _GameRoom {
           }
           if (isToggleableChest) {
             this.openChest(p.id, prop);
+            return {};
+          }
+          if (prop.kind === "keg") {
+            this.detonateCinderKeg(prop, p);
             return {};
           }
           prop.opened = true;
@@ -6647,6 +7374,7 @@ var GameRoom = class _GameRoom {
           map: this.map,
           props: this.props,
           enemies: this.enemies,
+          pvpPlayers: this.getPvpTargetsFor(p),
           trainingDummies: this.trainingDummies
         });
         if (smart.target) {
@@ -6665,6 +7393,7 @@ var GameRoom = class _GameRoom {
         );
         if (scrollActivated && p.relics.includes("oathbound_censer")) {
           for (const ally of this.players.values()) {
+            if (this.pvpEnabled && ally.state.id !== p.id) continue;
             if (!ally.state.downed && Math.hypot(ally.state.x - p.x, ally.state.y - p.y) <= 180) {
               const censerCurseMult = ally.state.statuses && ally.state.statuses.some((s) => s.type === "ashen_curse") ? 0.55 : 1;
               const censerHeal = Math.max(1, Math.round(8 * censerCurseMult));
@@ -6684,6 +7413,7 @@ var GameRoom = class _GameRoom {
       p.attackAnimMs = 240;
       if (p.relics.includes("oathbound_censer")) {
         for (const ally of this.players.values()) {
+          if (this.pvpEnabled && ally.state.id !== p.id) continue;
           if (!ally.state.downed && Math.hypot(ally.state.x - p.x, ally.state.y - p.y) <= 180) {
             const censerCurseMult = ally.state.statuses && ally.state.statuses.some((s) => s.type === "ashen_curse") ? 0.55 : 1;
             const censerHeal = Math.max(1, Math.round(8 * censerCurseMult));
@@ -6789,11 +7519,17 @@ var GameRoom = class _GameRoom {
             this.damageEnemy(enemy, burstDmg, p, hasCrit, "divine");
           }
         }
+        for (const rival of this.getPvpTargetsFor(p)) {
+          if (Math.hypot(rival.x - targetPos.x, rival.y - targetPos.y) <= burstRadius + 14) {
+            this.damagePlayer(rival, burstDmg, "divine", p, { isCrit: hasCrit });
+          }
+        }
         for (const dummy of this.trainingDummies) {
           if (Math.hypot(dummy.x - targetPos.x, dummy.y - targetPos.y) <= burstRadius + 18) {
             this.damageDummy(dummy, burstDmg, p, hasCrit, false, "divine");
           }
         }
+        this.detonateKegsInRadius(targetPos.x, targetPos.y, burstRadius + 14, p);
         this.emitEvent("status", targetPos.x, targetPos.y - 24, "SERAPHIC JUDGMENT!", "#FDE047");
       } else if (p.heroClass === "vanguard") {
         const dmgMult = this.computeDamageMult(p, "physical");
@@ -6822,6 +7558,7 @@ var GameRoom = class _GameRoom {
           ownerId: p.id
         });
         for (const ally of this.players.values()) {
+          if (this.pvpEnabled && ally.state.id !== p.id) continue;
           if (!ally.state.downed && Math.hypot(ally.state.x - p.x, ally.state.y - p.y) <= 170) {
             const shieldGained = this.grantShield(ally.state, 28, "add");
             if (shieldGained > 0) {
@@ -6838,11 +7575,18 @@ var GameRoom = class _GameRoom {
             this.damageEnemy(enemy, Math.round(32 * dmgMult), p, false, "physical");
           }
         }
+        for (const rival of this.getPvpTargetsFor(p)) {
+          if (Math.hypot(rival.x - p.x, rival.y - p.y) <= 84 + 12) {
+            this.applyStatusEffect(rival, "stun", 1100, p);
+            this.damagePlayer(rival, Math.round(32 * dmgMult), "physical", p);
+          }
+        }
         for (const dummy of this.trainingDummies) {
           if (Math.hypot(dummy.x - p.x, dummy.y - p.y) <= 84) {
             this.damageDummy(dummy, Math.round(32 * dmgMult), p, false, false, "physical");
           }
         }
+        this.detonateKegsInRadius(p.x, p.y, 92, p);
       } else if (p.heroClass === "ranger") {
         const dmgMult = this.computeDamageMult(p, "physical");
         const baseDmg = Math.round(18 * dmgMult);
@@ -6915,6 +7659,7 @@ var GameRoom = class _GameRoom {
           ownerId: p.id
         });
         for (const ally of this.players.values()) {
+          if (this.pvpEnabled && ally.state.id !== p.id) continue;
           if (!ally.state.downed && Math.hypot(ally.state.x - p.x, ally.state.y - p.y) <= 210) {
             const heal = _GameRoom.computeHealingAmount(baseHeal, p, ally.state);
             this.applyEffectiveHealing(p, ally.state, heal, "tactical");
@@ -6926,11 +7671,17 @@ var GameRoom = class _GameRoom {
             this.damageEnemy(enemy, Math.round(28 * dmgMult), p, false, "divine");
           }
         }
+        for (const rival of this.getPvpTargetsFor(p)) {
+          if (Math.hypot(rival.x - p.x, rival.y - p.y) <= 135 + 14) {
+            this.damagePlayer(rival, Math.round(28 * dmgMult), "divine", p);
+          }
+        }
         for (const dummy of this.trainingDummies) {
           if (Math.hypot(dummy.x - p.x, dummy.y - p.y) <= 135) {
             this.damageDummy(dummy, Math.round(28 * dmgMult), p, false, false, "divine");
           }
         }
+        this.detonateKegsInRadius(p.x, p.y, 145, p);
       }
       return {};
     }
@@ -6953,6 +7704,7 @@ var GameRoom = class _GameRoom {
           map: this.map,
           props: this.props,
           enemies: this.enemies,
+          pvpPlayers: this.getPvpTargetsFor(p),
           trainingDummies: this.trainingDummies
         });
         if (smart.target) {
@@ -6983,7 +7735,14 @@ var GameRoom = class _GameRoom {
             enemy.markedMs = 6500;
           }
         }
+        for (const rival of this.getPvpTargetsFor(p)) {
+          if (Math.hypot(rival.x - p.x, rival.y - p.y) <= 340) {
+            rival.slowedMs = Math.max(rival.slowedMs || 0, 2800);
+            this.emitEvent("status", rival.x, rival.y - 24, "QUARRY MARKED!", "#FBBF24");
+          }
+        }
         for (const ally of this.players.values()) {
+          if (this.pvpEnabled && ally.state.id !== p.id) continue;
           ally.state.hasteMs = 5e3;
         }
         this.emitEvent("status", p.x, p.y - 26, "Hunter Quarry Marked", "#FBBF24");
@@ -7131,6 +7890,14 @@ var GameRoom = class _GameRoom {
             }
           }
         }
+        for (const rival of this.getPvpTargetsFor(attacker)) {
+          const dx = rival.x - z.x;
+          const dy = rival.y - z.y;
+          if (dx * dx + dy * dy <= meteorRadSq) {
+            const dealt = this.damagePlayer(rival, meteorDmg, "arcane", attacker);
+            if (dealt > 0) this.onTacticalHitConfirmed(attacker);
+          }
+        }
         for (const dummy of this.trainingDummies) {
           const dx = dummy.x - z.x;
           const dy = dummy.y - z.y;
@@ -7139,6 +7906,7 @@ var GameRoom = class _GameRoom {
             this.onTacticalHitConfirmed(attacker);
           }
         }
+        this.detonateKegsInRadius(z.x, z.y, z.radius + 14, attacker);
         this.emitEvent("status", z.x, z.y - 20, "METEOR IMPACT!", "#E879F9");
         this.zones.splice(i, 1);
         continue;
@@ -7160,6 +7928,15 @@ var GameRoom = class _GameRoom {
               }
             }
           }
+          const pvpBurnHitR = z.radius + 14;
+          const pvpBurnHitRSq = pvpBurnHitR * pvpBurnHitR;
+          for (const rival of this.getPvpTargetsFor(attacker)) {
+            const dx = rival.x - z.x;
+            const dy = rival.y - z.y;
+            if (dx * dx + dy * dy <= pvpBurnHitRSq) {
+              this.damagePlayer(rival, burnDmg, "fire", attacker);
+            }
+          }
           const dummyHitR = z.radius + 18;
           const dummyHitRSq = dummyHitR * dummyHitR;
           for (const dummy of this.trainingDummies) {
@@ -7169,6 +7946,7 @@ var GameRoom = class _GameRoom {
               this.damageDummy(dummy, burnDmg, attacker, false, false, "fire");
             }
           }
+          this.detonateKegsInRadius(z.x, z.y, z.radius + 10, attacker);
         }
         if (z.ttlMs <= 0) {
           this.zones.splice(i, 1);
@@ -7197,10 +7975,12 @@ var GameRoom = class _GameRoom {
         continue;
       }
       if (z.kind === "lament_mark" && z.ttlMs <= 0) {
+        const dmg = z.damage ?? 28 + this.floor * 4;
+        const charmDur = z.damage !== void 0 ? 1700 : 3e3;
         for (const pr of this.players.values()) {
           if (!pr.state.downed && Math.hypot(pr.state.x - z.x, pr.state.y - z.y) <= z.radius) {
-            this.damagePlayer(pr.state, 28 + this.floor * 4, "divine");
-            this.applyPlayerStatus(pr.state, "charmed", 3e3);
+            this.damagePlayer(pr.state, dmg, "divine");
+            this.applyPlayerStatus(pr.state, z.damage !== void 0 ? "disoriented" : "charmed", charmDur);
           }
         }
         this.zones.splice(i, 1);
@@ -7263,13 +8043,53 @@ var GameRoom = class _GameRoom {
         continue;
       }
       if (z.kind === "silence_seal" && z.ttlMs <= 0) {
+        const dmg = z.damage ?? 28 + this.floor * 4;
+        const silenceDur = z.damage !== void 0 ? 2e3 : 4500;
         for (const pr of this.players.values()) {
           if (!pr.state.downed && Math.hypot(pr.state.x - z.x, pr.state.y - z.y) <= z.radius) {
-            this.damagePlayer(pr.state, 28 + this.floor * 4, "arcane");
-            this.applyPlayerStatus(pr.state, "silenced", 4500);
+            this.damagePlayer(pr.state, dmg, "arcane");
+            this.applyPlayerStatus(pr.state, "silenced", silenceDur);
           }
         }
         this.zones.splice(i, 1);
+        continue;
+      }
+      if (z.kind === "void_sigil" && z.ttlMs <= 0) {
+        const dmg = z.damage ?? this.computeEnemyDamage(18);
+        for (const pr of this.players.values()) {
+          if (!pr.state.downed && Math.hypot(pr.state.x - z.x, pr.state.y - z.y) <= z.radius) {
+            this.damagePlayer(pr.state, dmg, "arcane");
+            this.applyPlayerStatus(pr.state, "voidmarked", 2400);
+          }
+        }
+        this.zones.splice(i, 1);
+        continue;
+      }
+      if (z.kind === "seismic_ring" && z.ttlMs <= 0) {
+        const dmg = z.damage ?? this.computeEnemyDamage(24);
+        for (const pr of this.players.values()) {
+          if (!pr.state.downed && Math.hypot(pr.state.x - z.x, pr.state.y - z.y) <= z.radius) {
+            this.damagePlayer(pr.state, dmg, "physical");
+            this.applyStatusEffect(pr.state, "stun", 700);
+            this.emitEvent("status", pr.state.x, pr.state.y - 16, "TREMOR STUN!", "#F59E0B");
+          }
+        }
+        this.zones.splice(i, 1);
+        continue;
+      }
+      if (z.kind === "acid_pool") {
+        const tickDmg = z.damage ?? Math.max(4, Math.round(5 + this.floor * 1.4));
+        for (const pr of this.players.values()) {
+          if (!pr.state.downed && Math.hypot(pr.state.x - z.x, pr.state.y - z.y) <= z.radius) {
+            pr.state.slowedMs = Math.max(pr.state.slowedMs || 0, 500);
+            if (pulseZonesNow) {
+              this.damagePlayer(pr.state, tickDmg, "poison");
+            }
+          }
+        }
+        if (z.ttlMs <= 0) {
+          this.zones.splice(i, 1);
+        }
         continue;
       }
       if (z.kind === "lance_thrust" && z.ttlMs <= 0) {
@@ -7437,9 +8257,10 @@ var GameRoom = class _GameRoom {
         continue;
       }
       if (z.kind === "starlight_beam" && z.ttlMs <= 0) {
+        const dmg = z.damage ?? 30 + this.floor * 4;
         for (const pr of this.players.values()) {
           if (!pr.state.downed && Math.hypot(pr.state.x - z.x, pr.state.y - z.y) <= z.radius) {
-            this.damagePlayer(pr.state, 30 + this.floor * 4, "elemental");
+            this.damagePlayer(pr.state, dmg, "elemental");
             this.emitEvent("status", pr.state.x, pr.state.y - 14, " STARBEAM!", "#38BDF8");
           }
         }
@@ -7521,6 +8342,23 @@ var GameRoom = class _GameRoom {
             );
           }
         }
+        for (const rival of this.getPvpTargetsFor(ownerState)) {
+          const dx = z.x - rival.x;
+          const dy = z.y - rival.y;
+          const dist = Math.hypot(dx, dy);
+          if (dist > 8 && dist <= captureR) {
+            rival.slowedMs = Math.max(rival.slowedMs || 0, 350);
+            const stepDist = Math.min(dist - 6, pullPerSec * 0.45 * dtSec);
+            moveWithCollision(
+              this.map,
+              this.props,
+              rival,
+              dx / dist * stepDist,
+              dy / dist * stepDist,
+              9
+            );
+          }
+        }
         const accum = (this.weaponZoneTickAccum.get(z.id) || 0) + dtMs;
         if (accum >= gwCfg.cycloneTickIntervalMs) {
           this.weaponZoneTickAccum.set(z.id, accum - gwCfg.cycloneTickIntervalMs);
@@ -7557,6 +8395,26 @@ var GameRoom = class _GameRoom {
                     1
                   );
                 }
+              }
+            }
+          }
+          for (const rival of this.getPvpTargetsFor(ownerState)) {
+            if (Math.hypot(rival.x - z.x, rival.y - z.y) <= z.radius + 14) {
+              rival.slowedMs = Math.max(rival.slowedMs || 0, 700);
+              this.damagePlayer(rival, tickDmg, "physical", ownerState);
+              const targetMap = this.pvpGaleburstStacks.get(rival.id);
+              const ownerMarks = targetMap?.get(z.ownerId) || 0;
+              if (ownerMarks > 0 && targetMap && !rival.downed) {
+                targetMap.set(z.ownerId, 0);
+                this.emitEvent("status", rival.x, rival.y - 26, "CYCLONE DETONATION!", "#6EE7B7");
+                this.triggerGaleburstExplosion(
+                  ownerState,
+                  rival.x,
+                  rival.y,
+                  detDmg,
+                  gwCfg.aoeRadiusPx,
+                  1
+                );
               }
             }
           }
@@ -7611,6 +8469,12 @@ var GameRoom = class _GameRoom {
               this.damageEnemy(enemy, tickDmg, ownerState, false, "arcane", false);
             }
           }
+          for (const rival of this.getPvpTargetsFor(ownerState)) {
+            if (Math.hypot(rival.x - z.x, rival.y - z.y) <= z.radius + 14) {
+              rival.slowedMs = Math.max(rival.slowedMs || 0, 700);
+              this.damagePlayer(rival, tickDmg, "arcane", ownerState);
+            }
+          }
           for (const dummy of this.trainingDummies) {
             if (Math.hypot(dummy.x - z.x, dummy.y - z.y) <= z.radius + 18) {
               this.damageDummy(dummy, tickDmg, ownerState, false, false, "arcane");
@@ -7650,6 +8514,11 @@ var GameRoom = class _GameRoom {
               this.damageEnemy(enemy, strikeDmg, ownerState, hasCrit, "arcane", false);
             }
           }
+          for (const rival of this.getPvpTargetsFor(ownerState)) {
+            if (Math.hypot(rival.x - z.x, rival.y - z.y) <= z.radius + 14) {
+              this.damagePlayer(rival, strikeDmg, "arcane", ownerState, { isCrit: hasCrit });
+            }
+          }
           for (const dummy of this.trainingDummies) {
             if (Math.hypot(dummy.x - z.x, dummy.y - z.y) <= z.radius + 18) {
               this.damageDummy(dummy, strikeDmg, ownerState, hasCrit, false, "arcane");
@@ -7660,6 +8529,10 @@ var GameRoom = class _GameRoom {
         }
       }
       if (z.ttlMs <= 0) {
+        if (z.kind === "overworld_font") {
+          this.overworldFontChargeAcc = 0;
+          this.overworldFontCooldownMs = 4500;
+        }
         this.weaponZoneTickAccum.delete(z.id);
         this.zones.splice(i, 1);
         continue;
@@ -7669,6 +8542,7 @@ var GameRoom = class _GameRoom {
           const ownerPr = this.players.get(z.ownerId);
           const ownerState = ownerPr ? ownerPr.state : null;
           for (const pr of this.players.values()) {
+            if (this.pvpEnabled && pr.state.id !== z.ownerId) continue;
             const dist = Math.hypot(pr.state.x - z.x, pr.state.y - z.y);
             if (dist <= z.radius) {
               if (pr.state.downed) {
@@ -7684,6 +8558,7 @@ var GameRoom = class _GameRoom {
           }
         } else if (z.kind === "star_rift") {
           const ownerPr = this.players.get(z.ownerId);
+          const attacker = ownerPr ? ownerPr.state : null;
           const starRiftBonus = ownerPr ? resolveEquippedWeaponForClass(ownerPr.state.heroClass, ownerPr.state.equippedWeapon)?.modifiers.starRiftBonusDamagePct || 0 : 0;
           const riftDmg = Math.round((14 + this.floor * 2) * (1 + starRiftBonus));
           for (const enemy of this.enemies) {
@@ -7691,12 +8566,17 @@ var GameRoom = class _GameRoom {
               const pullAngle = Math.atan2(z.y - enemy.y, z.x - enemy.x);
               enemy.x += Math.cos(pullAngle) * 5;
               enemy.y += Math.sin(pullAngle) * 5;
-              this.damageEnemy(enemy, riftDmg, ownerPr ? ownerPr.state : null, false, "arcane");
+              this.damageEnemy(enemy, riftDmg, attacker, false, "arcane");
+            }
+          }
+          for (const rival of this.getPvpTargetsFor(attacker)) {
+            if (Math.hypot(rival.x - z.x, rival.y - z.y) <= z.radius + 10) {
+              this.damagePlayer(rival, riftDmg, "arcane", attacker);
             }
           }
           for (const dummy of this.trainingDummies) {
             if (Math.hypot(dummy.x - z.x, dummy.y - z.y) <= z.radius) {
-              this.damageDummy(dummy, riftDmg, ownerPr ? ownerPr.state : null, false, false, "arcane");
+              this.damageDummy(dummy, riftDmg, attacker, false, false, "arcane");
             }
           }
         }
@@ -7716,6 +8596,7 @@ var GameRoom = class _GameRoom {
           const targetsInRange = [];
           for (const allyPr of this.players.values()) {
             const ally = allyPr.state;
+            if (this.pvpEnabled && ally.id !== cleric.id) continue;
             if (!ally.downed && ally.connected && Math.hypot(ally.x - cleric.x, ally.y - cleric.y) <= 140) {
               targetsInRange.push(ally);
               if (ally.hp < ally.maxHp) {
@@ -7735,7 +8616,9 @@ var GameRoom = class _GameRoom {
           }
         }
       }
-      this.triggerSharedGraceTick();
+      if (!this.pvpEnabled) {
+        this.triggerSharedGraceTick();
+      }
     }
     if (this.clericAuraAccumMs === 0) {
       for (const pr of this.players.values()) {
@@ -7776,6 +8659,10 @@ var GameRoom = class _GameRoom {
       }
       p.attackAnimMs = Math.max(0, p.attackAnimMs - dtMs);
       p.hasteMs = Math.max(0, p.hasteMs - dtMs);
+      p.slowedMs = Math.max(0, (p.slowedMs || 0) - dtMs);
+      p.stunnedMs = Math.max(0, (p.stunnedMs || 0) - dtMs);
+      p.frozenMs = Math.max(0, (p.frozenMs || 0) - dtMs);
+      p.spawnProtectionMs = Math.max(0, (p.spawnProtectionMs || 0) - dtMs);
       if (p.downed) {
         if (p.disintegrationState?.active) {
           this.stopDisintegrationChannel(p.id);
@@ -7787,6 +8674,13 @@ var GameRoom = class _GameRoom {
         p.vx = 0;
         p.vy = 0;
         p.downedTimerMs = Math.max(0, p.downedTimerMs - dtMs);
+        if (this.isOpenWorld) {
+          p.reviveProgress = 0;
+          if (p.downedTimerMs <= 0) {
+            this.respawnOpenWorldPlayer(pr);
+          }
+          continue;
+        }
         let reviver = null;
         for (const ally of this.players.values()) {
           if (ally.state.id !== p.id && !ally.state.downed && ally.state.connected && Math.hypot(ally.state.x - p.x, ally.state.y - p.y) <= 56) {
@@ -7824,7 +8718,7 @@ var GameRoom = class _GameRoom {
         p.vanguardHeat = 0;
       }
       if (activePassive === "predators_instinct" && (p.predatorStacks || 0) > 0) {
-        const targetAlive = Boolean(p.predatorTargetId) && (this.enemies.some((e) => e.id === p.predatorTargetId && e.hp > 0) || this.trainingDummies.some((d) => d.id === p.predatorTargetId));
+        const targetAlive = Boolean(p.predatorTargetId) && (this.enemies.some((e) => e.id === p.predatorTargetId && e.hp > 0) || this.pvpEnabled && this.getPvpTargetsFor(p).some((pl) => pl.id === p.predatorTargetId) || this.trainingDummies.some((d) => d.id === p.predatorTargetId));
         if (!targetAlive || this.simTimeMs - pr.predatorLastHitAtMs >= ARMAMENT_TUNING.passives.predatorsInstinct.inactivityResetMs) {
           p.predatorTargetId = null;
           p.predatorStacks = 0;
@@ -7864,7 +8758,7 @@ var GameRoom = class _GameRoom {
         this.stepDisintegrationChannel(p, dtMs, dtSec);
       }
       const def = HERO_CLASSES[p.heroClass];
-      const moveSpeed = computePlayerMoveSpeed(p);
+      const moveSpeed = computePlayerMoveSpeed(p, this.map);
       const isDisoriented = p.statuses.some((s) => s.type === "disoriented");
       const { mx, my } = normalizePlayerInputDirection(pr.input, isDisoriented, Date.now());
       const charmed = p.statuses.find((s) => s.type === "charmed");
@@ -8032,14 +8926,14 @@ var GameRoom = class _GameRoom {
     const connectedPlayers = Array.from(this.players.values()).filter(
       (r) => r.state.connected
     );
-    if (connectedPlayers.length > 0) {
+    if (!this.isOpenWorld && connectedPlayers.length > 0) {
       const anyAlive = connectedPlayers.some(
         (r) => !r.state.downed || connectedPlayers.length > 1 && r.state.downedTimerMs > 0 && connectedPlayers.some((other) => !other.state.downed)
       );
       if (!anyAlive) {
         this.status = "defeat";
         this.endedAt = Date.now();
-        if (!this.runEndRecorded && this.roomId !== "TAVERN-HUB") {
+        if (!this.runEndRecorded && !this.isPersistentSocialRoom) {
           this.runEndRecorded = true;
           this.onRunEndedCallback?.(
             Array.from(this.players.keys()),
@@ -8047,7 +8941,7 @@ var GameRoom = class _GameRoom {
             this.floor
           );
         }
-        if (this.roomId !== "TAVERN-HUB" && !this.isPlayerConnected(this.hostId)) {
+        if (!this.isPersistentSocialRoom && !this.isPlayerConnected(this.hostId)) {
           this.transferHostToConnectedMember();
         }
         this.pushSystemChat(`The expedition has fallen on Floor ${this.floor}.`);
@@ -8145,8 +9039,8 @@ var GameRoom = class _GameRoom {
           const pInfo = alivePlayersWithRoom[pIdx];
           const pState = pInfo.state;
           const inSameRoom = enemyRoomId !== void 0 && pInfo.roomId === enemyRoomId;
-          let maxDetectDist = isBoss ? 380 : inSameRoom ? isRanged ? 220 : 190 : isRanged ? 175 : 145;
-          if (isAlerted) maxDetectDist += 45;
+          let maxDetectDist = isBoss ? 380 : inSameRoom ? isRanged ? 265 : 240 : 140;
+          if (isAlerted) maxDetectDist += 65;
           const dxP = pState.x - enemy.x;
           const dyP = pState.y - enemy.y;
           const distSq = dxP * dxP + dyP * dyP;
@@ -8174,6 +9068,9 @@ var GameRoom = class _GameRoom {
       }
       enemy.state = "chase";
       const slowFactor = enemy.slowedMs > 0 ? 0.55 : 1;
+      const eliteSpeedMult = enemy.kind !== "boss" && enemy.elite ? 1.12 : 1;
+      const eliteCdMult = enemy.kind !== "boss" && enemy.elite ? 0.85 : 1;
+      const mobMoveMult = slowFactor * eliteSpeedMult;
       const dx = nearest.x - enemy.x;
       const dy = nearest.y - enemy.y;
       const directAngle = Math.atan2(dy, dx);
@@ -8211,323 +9108,102 @@ var GameRoom = class _GameRoom {
           }
         }
       }
-      enemy.windupMs -= dtMs;
-      const moveStartX = enemy.x;
-      const moveStartY = enemy.y;
-      if (enemy.kind === "slime" || enemy.kind === "goblin" || enemy.kind === "knight") {
-        const baseSpd = enemy.kind === "goblin" ? 128 : enemy.kind === "knight" ? 96 : 86;
-        const spd = baseSpd * slowFactor;
-        if (nearestDist > enemy.radius + 14) {
-          enemy.vx = Math.cos(moveAngle) * spd;
-          enemy.vy = Math.sin(moveAngle) * spd;
-          this.moveWithCollision(enemy, enemy.vx * dtSec, enemy.vy * dtSec, enemy.radius - 2);
-        } else {
-          enemy.vx = 0;
-          enemy.vy = 0;
-        }
-        if (nearestDist <= enemy.radius + 22 && enemy.windupMs <= 0) {
-          const baseHit = enemy.kind === "knight" ? 19 : enemy.kind === "goblin" ? 13 : 11;
-          this.damagePlayer(nearest, this.computeEnemyDamage(baseHit, enemy));
-          enemy.windupMs = enemy.kind === "goblin" ? 850 : 1100;
-        }
-      } else if (enemy.kind === "shadow_stalker") {
-        const spd = 138 * slowFactor;
-        if (nearestDist > enemy.radius + 14) {
-          enemy.vx = Math.cos(moveAngle) * spd;
-          enemy.vy = Math.sin(moveAngle) * spd;
-          this.moveWithCollision(enemy, enemy.vx * dtSec, enemy.vy * dtSec, enemy.radius - 2);
-        } else {
-          enemy.vx = 0;
-          enemy.vy = 0;
-        }
-        if (nearestDist <= enemy.radius + 24 && enemy.windupMs <= 0) {
-          const baseHit = 22;
-          this.damagePlayer(nearest, this.computeEnemyDamage(baseHit, enemy), "physical");
-          nearest.hasteMs = Math.min(nearest.hasteMs, 0);
-          enemy.windupMs = 800;
-        }
-      } else if (enemy.kind === "astral_sentinel") {
-        const spd = 72 * slowFactor;
-        if (nearestDist < 140) {
-          this.moveWithCollision(
-            enemy,
-            -Math.cos(directAngle) * spd * dtSec,
-            -Math.sin(directAngle) * spd * dtSec,
-            enemy.radius - 2
-          );
-        } else if (nearestDist > 240) {
-          this.moveWithCollision(
-            enemy,
-            Math.cos(moveAngle) * spd * dtSec,
-            Math.sin(moveAngle) * spd * dtSec,
-            enemy.radius - 2
-          );
-        }
-        if (dtSec > 0) {
-          const distMoved = Math.hypot(enemy.x - moveStartX, enemy.y - moveStartY);
-          enemy.vx = distMoved > 0.05 ? (enemy.x - moveStartX) / dtSec : 0;
-          enemy.vy = distMoved > 0.05 ? (enemy.y - moveStartY) / dtSec : 0;
-        }
-        if (enemy.windupMs <= 0) {
-          if (enemy.silencedMs > 0) {
-            this.emitEvent("status", enemy.x, enemy.y - enemy.radius - 12, "[SILENCED]", "#C084FC");
-            enemy.windupMs = 1200;
-          } else {
-            for (let k = -0.18; k <= 0.18; k += 0.36) {
-              const a = angle + k;
-              this.spawnProjectile({
-                ownerType: "enemy",
-                ownerId: enemy.id,
-                style: "arcane",
+      enemy.windupMs = Math.max(0, enemy.windupMs - dtMs);
+      if (enemy.kind !== "boss") {
+        enemy.abilityCdMs = Math.max(0, (enemy.abilityCdMs ?? 0) - dtMs);
+      }
+      if (enemy.kind === "slime") {
+        const inCharge = this.stepMobCharge(
+          enemy,
+          265 * mobMoveMult,
+          16,
+          14,
+          "poison",
+          dtMs,
+          dtSec,
+          (p) => {
+            p.slowedMs = Math.max(p.slowedMs || 0, 1400);
+          },
+          () => {
+            if (!this.isTavern && !this.isOpenWorld) {
+              this.zones.push({
+                id: this.nextId("zone"),
+                kind: "acid_pool",
                 x: enemy.x,
                 y: enemy.y,
-                vx: Math.cos(a) * 230,
-                vy: Math.sin(a) * 230,
-                angle: a,
-                radius: 6,
-                damage: 18 + this.floor * 2,
-                pierce: 1,
-                ttlMs: 2e3
-              });
-            }
-            enemy.windupMs = 1850;
-          }
-        }
-      } else if (enemy.kind === "skeleton" || enemy.kind === "cultist") {
-        const spd = 82 * slowFactor;
-        if (nearestDist < 120) {
-          this.moveWithCollision(
-            enemy,
-            -Math.cos(directAngle) * spd * dtSec,
-            -Math.sin(directAngle) * spd * dtSec,
-            enemy.radius - 2
-          );
-        } else if (nearestDist > 215) {
-          this.moveWithCollision(
-            enemy,
-            Math.cos(moveAngle) * spd * dtSec,
-            Math.sin(moveAngle) * spd * dtSec,
-            enemy.radius - 2
-          );
-        }
-        if (dtSec > 0) {
-          const distMoved = Math.hypot(enemy.x - moveStartX, enemy.y - moveStartY);
-          enemy.vx = distMoved > 0.05 ? (enemy.x - moveStartX) / dtSec : 0;
-          enemy.vy = distMoved > 0.05 ? (enemy.y - moveStartY) / dtSec : 0;
-        }
-        if (enemy.windupMs <= 0) {
-          if (enemy.silencedMs > 0) {
-            this.emitEvent("status", enemy.x, enemy.y - enemy.radius - 12, "[SILENCED]", "#C084FC");
-            enemy.windupMs = 1200;
-          } else if (enemy.kind === "skeleton") {
-            this.spawnProjectile({
-              ownerType: "enemy",
-              ownerId: enemy.id,
-              style: "bone",
-              x: enemy.x,
-              y: enemy.y,
-              vx: Math.cos(angle) * 245,
-              vy: Math.sin(angle) * 245,
-              angle,
-              radius: 5,
-              damage: 13 + this.floor * 2,
-              pierce: 1,
-              ttlMs: 1700
-            });
-            enemy.windupMs = 1550;
-          } else {
-            for (let k = -1; k <= 1; k++) {
-              const a = angle + k * 0.25;
-              this.spawnProjectile({
-                ownerType: "enemy",
+                radius: enemy.elite ? 38 : 30,
+                ttlMs: 3e3,
+                maxTtlMs: 3e3,
                 ownerId: enemy.id,
-                style: "voidorb",
-                x: enemy.x,
-                y: enemy.y,
-                vx: Math.cos(a) * 195,
-                vy: Math.sin(a) * 195,
-                angle: a,
-                radius: 6,
-                damage: 14 + this.floor * 2,
-                pierce: 1,
-                ttlMs: 1900
+                damage: this.computeEnemyDamage(6, enemy)
               });
             }
-            enemy.windupMs = 2100;
           }
-        }
-      } else if (enemy.kind === "hymn_phantom") {
-        const spd = 92 * slowFactor;
-        if (nearestDist < 130) {
-          this.moveWithCollision(
-            enemy,
-            -Math.cos(directAngle) * spd * dtSec,
-            -Math.sin(directAngle) * spd * dtSec,
-            enemy.radius - 2
-          );
-        } else if (nearestDist > 220) {
-          this.moveWithCollision(
-            enemy,
-            Math.cos(moveAngle) * spd * dtSec,
-            Math.sin(moveAngle) * spd * dtSec,
-            enemy.radius - 2
-          );
-        }
-        if (dtSec > 0) {
-          const distMoved = Math.hypot(enemy.x - moveStartX, enemy.y - moveStartY);
-          enemy.vx = distMoved > 0.05 ? (enemy.x - moveStartX) / dtSec : 0;
-          enemy.vy = distMoved > 0.05 ? (enemy.y - moveStartY) / dtSec : 0;
-        }
-        if (enemy.windupMs <= 0) {
-          if (enemy.silencedMs > 0) {
-            this.emitEvent("status", enemy.x, enemy.y - enemy.radius - 12, "[SILENCED]", "#C084FC");
-            enemy.windupMs = 1200;
+        );
+        if (!inCharge) {
+          if (enemy.windupMs <= 0 && (enemy.abilityCdMs ?? 0) <= 0 && nearestDist >= 52 && nearestDist <= 155 && this.hasLineOfSight(enemy.x, enemy.y, nearest.x, nearest.y)) {
+            this.startMobCharge(enemy, directAngle, 320, 250);
+            enemy.abilityCdMs = Math.round(3200 * eliteCdMult);
           } else {
-            for (let k = -1; k <= 1; k += 2) {
-              const a = angle + k * 0.18;
-              this.spawnProjectile({
-                ownerType: "enemy",
-                ownerId: enemy.id,
-                style: "arcane",
-                x: enemy.x,
-                y: enemy.y,
-                vx: Math.cos(a) * 220,
-                vy: Math.sin(a) * 220,
-                angle: a,
-                radius: 6,
-                damage: 18 + this.floor * 2,
-                pierce: 1,
-                ttlMs: 2e3
-              });
-            }
-            this.emitEvent("status", enemy.x, enemy.y - enemy.radius - 12, "CHORAL WAIL", "#C084FC");
-            enemy.windupMs = 1750;
-          }
-        }
-      } else if (enemy.kind === "relic_golem") {
-        const spd = 74 * slowFactor;
-        if (nearestDist > enemy.radius + 14) {
-          enemy.vx = Math.cos(moveAngle) * spd;
-          enemy.vy = Math.sin(moveAngle) * spd;
-          this.moveWithCollision(enemy, enemy.vx * dtSec, enemy.vy * dtSec, enemy.radius - 2);
-        } else {
-          enemy.vx = 0;
-          enemy.vy = 0;
-        }
-        if (nearestDist <= enemy.radius + 28 && enemy.windupMs <= 0) {
-          const baseHit = 26;
-          this.damagePlayer(nearest, this.computeEnemyDamage(baseHit, enemy), "physical");
-          this.emitEvent("status", nearest.x, nearest.y - 14, "SEISMIC SLAM!", "#F59E0B");
-          for (let k = 0; k < 6; k++) {
-            const sa = k * Math.PI * 2 / 6;
-            this.spawnProjectile({
-              ownerType: "enemy",
-              ownerId: enemy.id,
-              style: "slash",
-              x: enemy.x,
-              y: enemy.y,
-              vx: Math.cos(sa) * 160,
-              vy: Math.sin(sa) * 160,
-              angle: sa,
-              radius: 6,
-              damage: 14 + this.floor,
-              pierce: 1,
-              ttlMs: 800
-            });
-          }
-          enemy.windupMs = 1800;
-        }
-      } else if (enemy.kind === "veiled_heretic") {
-        const spd = 84 * slowFactor;
-        if (nearestDist < 140) {
-          this.moveWithCollision(
-            enemy,
-            -Math.cos(directAngle) * spd * dtSec,
-            -Math.sin(directAngle) * spd * dtSec,
-            enemy.radius - 2
-          );
-        } else if (nearestDist > 230) {
-          this.moveWithCollision(
-            enemy,
-            Math.cos(moveAngle) * spd * dtSec,
-            Math.sin(moveAngle) * spd * dtSec,
-            enemy.radius - 2
-          );
-        }
-        if (dtSec > 0) {
-          const distMoved = Math.hypot(enemy.x - moveStartX, enemy.y - moveStartY);
-          enemy.vx = distMoved > 0.05 ? (enemy.x - moveStartX) / dtSec : 0;
-          enemy.vy = distMoved > 0.05 ? (enemy.y - moveStartY) / dtSec : 0;
-        }
-        if (enemy.windupMs <= 0) {
-          if (enemy.silencedMs > 0) {
-            this.emitEvent("status", enemy.x, enemy.y - enemy.radius - 12, "[SILENCED]", "#C084FC");
-            enemy.windupMs = 1200;
-          } else {
-            for (let k = -1; k <= 1; k++) {
-              const a = angle + k * 0.22;
-              this.spawnProjectile({
-                ownerType: "enemy",
-                ownerId: enemy.id,
-                style: "voidorb",
-                x: enemy.x,
-                y: enemy.y,
-                vx: Math.cos(a) * 215,
-                vy: Math.sin(a) * 215,
-                angle: a,
-                radius: 7,
-                damage: 19 + this.floor * 2,
-                pierce: 1,
-                ttlMs: 1900
-              });
-            }
-            this.emitEvent("status", enemy.x, enemy.y - enemy.radius - 12, "CORRUPTED SCRIPTURE", "#A855F7");
-            enemy.windupMs = 1950;
-          }
-        }
-      } else if (enemy.kind === "celestial_arbiter") {
-        const spd = 112 * slowFactor;
-        if (nearestDist > enemy.radius + 16) {
-          enemy.vx = Math.cos(moveAngle) * spd;
-          enemy.vy = Math.sin(moveAngle) * spd;
-          this.moveWithCollision(enemy, enemy.vx * dtSec, enemy.vy * dtSec, enemy.radius - 2);
-        } else {
-          enemy.vx = 0;
-          enemy.vy = 0;
-        }
-        if (enemy.windupMs <= 0) {
-          if (nearestDist <= enemy.radius + 24) {
-            const baseHit = 24;
-            this.damagePlayer(nearest, this.computeEnemyDamage(baseHit, enemy), "divine");
-            this.emitEvent("status", nearest.x, nearest.y - 14, "JUDGEMENT!", "#FDE047");
-            enemy.windupMs = 1100;
-          } else if (nearestDist <= 220) {
-            if (enemy.silencedMs > 0) {
-              this.emitEvent("status", enemy.x, enemy.y - enemy.radius - 12, "[SILENCED]", "#C084FC");
-              enemy.windupMs = 1200;
+            const spd = 96 * mobMoveMult;
+            if (nearestDist > enemy.radius + 13) {
+              enemy.vx = Math.cos(moveAngle) * spd;
+              enemy.vy = Math.sin(moveAngle) * spd;
+              this.moveWithCollision(enemy, enemy.vx * dtSec, enemy.vy * dtSec, enemy.radius - 2);
             } else {
-              this.spawnProjectile({
-                ownerType: "enemy",
-                ownerId: enemy.id,
-                style: "radiant",
-                x: enemy.x,
-                y: enemy.y,
-                vx: Math.cos(angle) * 310,
-                vy: Math.sin(angle) * 310,
-                angle,
-                radius: 8,
-                damage: 22 + this.floor * 2,
-                pierce: 1,
-                ttlMs: 1600
-              });
-              this.emitEvent("status", enemy.x, enemy.y - enemy.radius - 12, "SOLAR THRUST", "#FBBF24");
-              enemy.windupMs = 1400;
+              enemy.vx = 0;
+              enemy.vy = 0;
+            }
+            if (nearestDist <= enemy.radius + 22 && enemy.windupMs <= 0) {
+              this.damagePlayer(nearest, this.computeEnemyDamage(13, enemy), "poison");
+              nearest.slowedMs = Math.max(nearest.slowedMs || 0, 1e3);
+              enemy.windupMs = Math.round(920 * eliteCdMult);
             }
           }
         }
-      } else if (enemy.kind === "warden_enforcer") {
-        const spd = 94 * slowFactor;
-        if (nearestDist > enemy.radius + 14) {
+      } else if (enemy.kind === "goblin") {
+        const inCharge = this.stepMobCharge(
+          enemy,
+          310 * mobMoveMult,
+          17,
+          17,
+          "physical",
+          dtMs,
+          dtSec,
+          (p) => {
+            this.applyPlayerStatus(p, "guard_broken", 1800);
+          }
+        );
+        if (!inCharge) {
+          if (enemy.windupMs <= 0 && (enemy.abilityCdMs ?? 0) <= 0 && nearestDist >= 56 && nearestDist <= 150 && this.hasLineOfSight(enemy.x, enemy.y, nearest.x, nearest.y)) {
+            this.startMobCharge(enemy, directAngle, 250, 210);
+            enemy.abilityCdMs = Math.round(2900 * eliteCdMult);
+          } else {
+            const spd = 142 * mobMoveMult;
+            const flankBias = enemy.windupMs <= 0 && nearestDist > 68 ? meta.mobStrafeDir * 0.36 : 0;
+            const flankAngle = moveAngle + flankBias;
+            if (nearestDist > enemy.radius + 13) {
+              enemy.vx = Math.cos(flankAngle) * spd;
+              enemy.vy = Math.sin(flankAngle) * spd;
+              this.moveWithCollision(enemy, enemy.vx * dtSec, enemy.vy * dtSec, enemy.radius - 2);
+            } else {
+              enemy.vx = 0;
+              enemy.vy = 0;
+            }
+            if (nearestDist <= enemy.radius + 22 && enemy.windupMs <= 0) {
+              this.damagePlayer(nearest, this.computeEnemyDamage(15, enemy), "physical");
+              enemy.windupMs = Math.round(720 * eliteCdMult);
+            }
+          }
+        }
+      } else if (enemy.kind === "knight") {
+        if ((enemy.abilityCdMs ?? 0) <= 0 && nearestDist <= 175 && (enemy.shieldWallMs || 0) <= 0) {
+          enemy.shieldWallMs = 1500;
+          enemy.abilityCdMs = Math.round(4500 * eliteCdMult);
+          this.emitThrottledEntityStatus(enemy.id, enemy.x, enemy.y - enemy.radius - 12, "SHIELD WALL", "#94A3B8", 2500);
+        }
+        const spd = (enemy.shieldWallMs || 0) > 0 ? 112 * mobMoveMult : 104 * mobMoveMult;
+        if (nearestDist > enemy.radius + 15) {
           enemy.vx = Math.cos(moveAngle) * spd;
           enemy.vy = Math.sin(moveAngle) * spd;
           this.moveWithCollision(enemy, enemy.vx * dtSec, enemy.vy * dtSec, enemy.radius - 2);
@@ -8536,28 +9212,439 @@ var GameRoom = class _GameRoom {
           enemy.vy = 0;
         }
         if (nearestDist <= enemy.radius + 26 && enemy.windupMs <= 0) {
-          const baseHit = 25;
-          this.damagePlayer(nearest, this.computeEnemyDamage(baseHit, enemy), "physical");
-          this.emitEvent("status", nearest.x, nearest.y - 14, "HALBERD CLEAVE!", "#38BDF8");
-          enemy.shieldWallMs = 1200;
-          for (let off = -0.22; off <= 0.22; off += 0.44) {
-            const a = angle + off;
+          this.damagePlayer(nearest, this.computeEnemyDamage(22, enemy), "physical");
+          this.applyPlayerStatus(nearest, "guard_broken", 1800);
+          this.spawnProjectile({
+            ownerType: "enemy",
+            ownerId: enemy.id,
+            style: "slash",
+            x: enemy.x,
+            y: enemy.y,
+            vx: Math.cos(angle) * 215,
+            vy: Math.sin(angle) * 215,
+            angle,
+            radius: 8,
+            damage: this.computeEnemyDamage(16, enemy, { skipPoison: true }),
+            pierce: 1,
+            ttlMs: 580
+          });
+          enemy.windupMs = Math.round(920 * eliteCdMult);
+        }
+      } else if (enemy.kind === "shadow_stalker") {
+        const inCharge = this.stepMobCharge(
+          enemy,
+          365 * mobMoveMult,
+          18,
+          24,
+          "physical",
+          dtMs,
+          dtSec,
+          (p) => {
+            p.slowedMs = Math.max(p.slowedMs || 0, 1600);
+            this.applyPlayerStatus(p, "voidmarked", 2400);
+          }
+        );
+        if (!inCharge) {
+          if (enemy.windupMs <= 0 && (enemy.abilityCdMs ?? 0) <= 0 && nearestDist >= 58 && nearestDist <= 190 && this.hasLineOfSight(enemy.x, enemy.y, nearest.x, nearest.y)) {
+            this.startMobCharge(enemy, directAngle, 260, 230);
+            enemy.abilityCdMs = Math.round(3300 * eliteCdMult);
+            this.emitThrottledEntityStatus(enemy.id, enemy.x, enemy.y - enemy.radius - 12, "SHADOW LUNGE!", "#C084FC", 1800);
+          } else {
+            const spd = 152 * mobMoveMult;
+            if (nearestDist > enemy.radius + 14) {
+              enemy.vx = Math.cos(moveAngle) * spd;
+              enemy.vy = Math.sin(moveAngle) * spd;
+              this.moveWithCollision(enemy, enemy.vx * dtSec, enemy.vy * dtSec, enemy.radius - 2);
+            } else {
+              enemy.vx = 0;
+              enemy.vy = 0;
+            }
+            if (nearestDist <= enemy.radius + 24 && enemy.windupMs <= 0) {
+              this.damagePlayer(nearest, this.computeEnemyDamage(23, enemy), "physical");
+              nearest.hasteMs = Math.min(nearest.hasteMs, 0);
+              nearest.slowedMs = Math.max(nearest.slowedMs || 0, 1200);
+              enemy.windupMs = Math.round(720 * eliteCdMult);
+            }
+          }
+        }
+      } else if (enemy.kind === "astral_sentinel") {
+        const spd = 86 * mobMoveMult;
+        this.moveSkirmishRange(enemy, meta, nearestDist, directAngle, moveAngle, spd, 130, 235, 0.72, dtSec);
+        if (enemy.windupMs <= 0) {
+          if (enemy.silencedMs > 0) {
+            this.emitEvent("status", enemy.x, enemy.y - enemy.radius - 12, "[SILENCED]", "#C084FC");
+            enemy.windupMs = 1100;
+          } else {
+            const leadAngle = this.aimAngleWithLead(enemy, nearest, 255, 0.45);
+            const projDmg = this.computeEnemyDamage(19, enemy, { skipPoison: true });
+            for (let k = -1; k <= 1; k++) {
+              const a = leadAngle + k * 0.2;
+              this.spawnProjectile({
+                ownerType: "enemy",
+                ownerId: enemy.id,
+                style: "arcane",
+                x: enemy.x,
+                y: enemy.y,
+                vx: Math.cos(a) * 255,
+                vy: Math.sin(a) * 255,
+                angle: a,
+                radius: 6,
+                damage: projDmg,
+                pierce: 1,
+                ttlMs: 1950
+              });
+            }
+            if ((enemy.abilityCdMs ?? 0) <= 0 && !this.isTavern && !this.isOpenWorld) {
+              this.zones.push({
+                id: this.nextId("zone"),
+                kind: "starlight_beam",
+                x: nearest.x,
+                y: nearest.y,
+                radius: 42,
+                ttlMs: 1100,
+                maxTtlMs: 1100,
+                ownerId: enemy.id,
+                damage: this.computeEnemyDamage(22, enemy)
+              });
+              enemy.abilityCdMs = Math.round(4200 * eliteCdMult);
+            }
+            enemy.windupMs = Math.round(1500 * eliteCdMult);
+          }
+        }
+      } else if (enemy.kind === "skeleton") {
+        const spd = 96 * mobMoveMult;
+        this.moveSkirmishRange(enemy, meta, nearestDist, directAngle, moveAngle, spd, 118, 215, 0.3, dtSec);
+        if (enemy.windupMs <= 0) {
+          if (enemy.silencedMs > 0) {
+            this.emitEvent("status", enemy.x, enemy.y - enemy.radius - 12, "[SILENCED]", "#C084FC");
+            enemy.windupMs = 1050;
+          } else {
+            meta.mobShotCounter = (meta.mobShotCounter + 1) % 3;
+            const projSpd = 275;
+            const leadAngle = this.aimAngleWithLead(enemy, nearest, projSpd, 0.45);
+            const projDmg = this.computeEnemyDamage(15, enemy, { skipPoison: true });
+            const isFanVolley = meta.mobShotCounter === 0;
+            const offsets = isFanVolley ? [-0.19, 0, 0.19] : [0];
+            for (const off of offsets) {
+              const a = leadAngle + off;
+              this.spawnProjectile({
+                ownerType: "enemy",
+                ownerId: enemy.id,
+                style: "bone",
+                x: enemy.x,
+                y: enemy.y,
+                vx: Math.cos(a) * projSpd,
+                vy: Math.sin(a) * projSpd,
+                angle: a,
+                radius: 5,
+                damage: isFanVolley ? Math.max(1, Math.round(projDmg * 0.85)) : projDmg,
+                pierce: 1,
+                ttlMs: 1750
+              });
+            }
+            enemy.windupMs = Math.round((isFanVolley ? 1550 : 1220) * eliteCdMult);
+          }
+        }
+      } else if (enemy.kind === "cultist") {
+        const spd = 92 * mobMoveMult;
+        this.moveSkirmishRange(enemy, meta, nearestDist, directAngle, moveAngle, spd, 125, 220, 0.65, dtSec);
+        if (enemy.windupMs <= 0) {
+          if (enemy.silencedMs > 0) {
+            this.emitEvent("status", enemy.x, enemy.y - enemy.radius - 12, "[SILENCED]", "#C084FC");
+            enemy.windupMs = 1100;
+          } else {
+            const projSpd = 225;
+            const leadAngle = this.aimAngleWithLead(enemy, nearest, projSpd, 0.38);
+            const projDmg = this.computeEnemyDamage(16, enemy, { skipPoison: true });
+            for (let k = -1; k <= 1; k++) {
+              const a = leadAngle + k * 0.23;
+              this.spawnProjectile({
+                ownerType: "enemy",
+                ownerId: enemy.id,
+                style: "voidorb",
+                x: enemy.x,
+                y: enemy.y,
+                vx: Math.cos(a) * projSpd,
+                vy: Math.sin(a) * projSpd,
+                angle: a,
+                radius: 6,
+                damage: projDmg,
+                pierce: 1,
+                ttlMs: 1900
+              });
+            }
+            if ((enemy.abilityCdMs ?? 0) <= 0 && !this.isTavern && !this.isOpenWorld) {
+              this.zones.push({
+                id: this.nextId("zone"),
+                kind: "void_sigil",
+                x: nearest.x,
+                y: nearest.y,
+                radius: 42,
+                ttlMs: 1100,
+                maxTtlMs: 1100,
+                ownerId: enemy.id,
+                damage: this.computeEnemyDamage(18, enemy)
+              });
+              enemy.abilityCdMs = Math.round(4300 * eliteCdMult);
+            }
+            enemy.windupMs = Math.round(1650 * eliteCdMult);
+          }
+        }
+      } else if (enemy.kind === "hymn_phantom") {
+        const spd = 104 * mobMoveMult;
+        this.moveSkirmishRange(enemy, meta, nearestDist, directAngle, moveAngle, spd, 125, 225, 0.78, dtSec);
+        if (enemy.windupMs <= 0) {
+          if (enemy.silencedMs > 0) {
+            this.emitEvent("status", enemy.x, enemy.y - enemy.radius - 12, "[SILENCED]", "#C084FC");
+            enemy.windupMs = 1100;
+          } else {
+            const projSpd = 245;
+            const leadAngle = this.aimAngleWithLead(enemy, nearest, projSpd, 0.42);
+            const projDmg = this.computeEnemyDamage(18, enemy, { skipPoison: true });
+            for (let k = -1; k <= 1; k++) {
+              const a = leadAngle + k * 0.17;
+              this.spawnProjectile({
+                ownerType: "enemy",
+                ownerId: enemy.id,
+                style: "arcane",
+                x: enemy.x,
+                y: enemy.y,
+                vx: Math.cos(a) * projSpd,
+                vy: Math.sin(a) * projSpd,
+                angle: a,
+                radius: 6,
+                damage: projDmg,
+                pierce: 1,
+                ttlMs: 1950
+              });
+            }
+            if ((enemy.abilityCdMs ?? 0) <= 0 && !this.isTavern && !this.isOpenWorld) {
+              this.zones.push({
+                id: this.nextId("zone"),
+                kind: "lament_mark",
+                x: nearest.x,
+                y: nearest.y,
+                radius: 42,
+                ttlMs: 1150,
+                maxTtlMs: 1150,
+                ownerId: enemy.id,
+                damage: this.computeEnemyDamage(20, enemy)
+              });
+              enemy.abilityCdMs = Math.round(4600 * eliteCdMult);
+            }
+            this.emitThrottledEntityStatus(enemy.id, enemy.x, enemy.y - enemy.radius - 12, "CHORAL WAIL", "#C084FC", 2500);
+            enemy.windupMs = Math.round(1480 * eliteCdMult);
+          }
+        }
+      } else if (enemy.kind === "relic_golem") {
+        const spd = 84 * mobMoveMult;
+        if (nearestDist > enemy.radius + 14) {
+          enemy.vx = Math.cos(moveAngle) * spd;
+          enemy.vy = Math.sin(moveAngle) * spd;
+          this.moveWithCollision(enemy, enemy.vx * dtSec, enemy.vy * dtSec, enemy.radius - 2);
+        } else {
+          enemy.vx = 0;
+          enemy.vy = 0;
+        }
+        if ((enemy.abilityCdMs ?? 0) <= 0 && nearestDist <= 95 && !this.isTavern && !this.isOpenWorld) {
+          this.zones.push({
+            id: this.nextId("zone"),
+            kind: "seismic_ring",
+            x: enemy.x,
+            y: enemy.y,
+            radius: 64,
+            ttlMs: 920,
+            maxTtlMs: 920,
+            ownerId: enemy.id,
+            damage: this.computeEnemyDamage(24, enemy)
+          });
+          enemy.abilityCdMs = Math.round(4100 * eliteCdMult);
+          this.emitThrottledEntityStatus(enemy.id, enemy.x, enemy.y - enemy.radius - 12, "QUAKE!", "#F59E0B", 2200);
+        }
+        if (nearestDist <= enemy.radius + 28 && enemy.windupMs <= 0) {
+          this.damagePlayer(nearest, this.computeEnemyDamage(27, enemy), "physical");
+          this.emitEvent("status", nearest.x, nearest.y - 14, "SEISMIC SLAM!", "#F59E0B");
+          const shardDmg = this.computeEnemyDamage(15, enemy, { skipPoison: true });
+          for (let k = 0; k < 8; k++) {
+            const sa = k * Math.PI * 2 / 8;
             this.spawnProjectile({
               ownerType: "enemy",
               ownerId: enemy.id,
               style: "slash",
               x: enemy.x,
               y: enemy.y,
-              vx: Math.cos(a) * 230,
-              vy: Math.sin(a) * 230,
-              angle: a,
-              radius: 8,
-              damage: 18 + this.floor * 2,
+              vx: Math.cos(sa) * 185,
+              vy: Math.sin(sa) * 185,
+              angle: sa,
+              radius: 6,
+              damage: shardDmg,
               pierce: 1,
-              ttlMs: 1200
+              ttlMs: 850
             });
           }
-          enemy.windupMs = 1500;
+          enemy.windupMs = Math.round(1450 * eliteCdMult);
+        }
+      } else if (enemy.kind === "veiled_heretic") {
+        const spd = 94 * mobMoveMult;
+        this.moveSkirmishRange(enemy, meta, nearestDist, directAngle, moveAngle, spd, 132, 230, 0.72, dtSec);
+        if (enemy.windupMs <= 0) {
+          if (enemy.silencedMs > 0) {
+            this.emitEvent("status", enemy.x, enemy.y - enemy.radius - 12, "[SILENCED]", "#C084FC");
+            enemy.windupMs = 1100;
+          } else {
+            const projSpd = 240;
+            const leadAngle = this.aimAngleWithLead(enemy, nearest, projSpd, 0.45);
+            const projDmg = this.computeEnemyDamage(20, enemy, { skipPoison: true });
+            for (let k = -1; k <= 1; k++) {
+              const a = leadAngle + k * 0.21;
+              this.spawnProjectile({
+                ownerType: "enemy",
+                ownerId: enemy.id,
+                style: "voidorb",
+                x: enemy.x,
+                y: enemy.y,
+                vx: Math.cos(a) * projSpd,
+                vy: Math.sin(a) * projSpd,
+                angle: a,
+                radius: 7,
+                damage: projDmg,
+                pierce: 1,
+                ttlMs: 1900
+              });
+            }
+            if ((enemy.abilityCdMs ?? 0) <= 0 && !this.isTavern && !this.isOpenWorld) {
+              this.zones.push({
+                id: this.nextId("zone"),
+                kind: "silence_seal",
+                x: nearest.x,
+                y: nearest.y,
+                radius: 44,
+                ttlMs: 1150,
+                maxTtlMs: 1150,
+                ownerId: enemy.id,
+                damage: this.computeEnemyDamage(20, enemy)
+              });
+              enemy.abilityCdMs = Math.round(4500 * eliteCdMult);
+            }
+            this.emitThrottledEntityStatus(enemy.id, enemy.x, enemy.y - enemy.radius - 12, "CORRUPTED SCRIPTURE", "#A855F7", 2500);
+            enemy.windupMs = Math.round(1580 * eliteCdMult);
+          }
+        }
+      } else if (enemy.kind === "celestial_arbiter") {
+        const inCharge = this.stepMobCharge(
+          enemy,
+          335 * mobMoveMult,
+          18,
+          25,
+          "divine",
+          dtMs,
+          dtSec,
+          (p) => {
+            this.applyPlayerStatus(p, "impaled", 2200);
+          }
+        );
+        if (!inCharge) {
+          if (enemy.windupMs <= 0 && (enemy.abilityCdMs ?? 0) <= 0 && nearestDist >= 72 && nearestDist <= 190 && this.hasLineOfSight(enemy.x, enemy.y, nearest.x, nearest.y)) {
+            this.startMobCharge(enemy, directAngle, 280, 235);
+            enemy.abilityCdMs = Math.round(3500 * eliteCdMult);
+            this.emitThrottledEntityStatus(enemy.id, enemy.x, enemy.y - enemy.radius - 12, "SOLAR THRUST", "#FBBF24", 2e3);
+          } else {
+            const spd = 124 * mobMoveMult;
+            if (nearestDist > enemy.radius + 16) {
+              enemy.vx = Math.cos(moveAngle) * spd;
+              enemy.vy = Math.sin(moveAngle) * spd;
+              this.moveWithCollision(enemy, enemy.vx * dtSec, enemy.vy * dtSec, enemy.radius - 2);
+            } else {
+              enemy.vx = 0;
+              enemy.vy = 0;
+            }
+            if (enemy.windupMs <= 0) {
+              if (nearestDist <= enemy.radius + 26) {
+                this.damagePlayer(nearest, this.computeEnemyDamage(25, enemy), "divine");
+                this.applyPlayerStatus(nearest, "impaled", 2e3);
+                this.emitEvent("status", nearest.x, nearest.y - 14, "JUDGEMENT!", "#FDE047");
+                enemy.windupMs = Math.round(920 * eliteCdMult);
+              } else if (nearestDist <= 240) {
+                if (enemy.silencedMs > 0) {
+                  this.emitEvent("status", enemy.x, enemy.y - enemy.radius - 12, "[SILENCED]", "#C084FC");
+                  enemy.windupMs = 1100;
+                } else {
+                  const leadAngle = this.aimAngleWithLead(enemy, nearest, 330, 0.4);
+                  this.spawnProjectile({
+                    ownerType: "enemy",
+                    ownerId: enemy.id,
+                    style: "radiant",
+                    x: enemy.x,
+                    y: enemy.y,
+                    vx: Math.cos(leadAngle) * 330,
+                    vy: Math.sin(leadAngle) * 330,
+                    angle: leadAngle,
+                    radius: 8,
+                    damage: this.computeEnemyDamage(22, enemy, { skipPoison: true }),
+                    pierce: 1,
+                    ttlMs: 1650
+                  });
+                  this.emitThrottledEntityStatus(enemy.id, enemy.x, enemy.y - enemy.radius - 12, "SOLAR RAY", "#FBBF24", 2200);
+                  enemy.windupMs = Math.round(1180 * eliteCdMult);
+                }
+              }
+            }
+          }
+        }
+      } else if (enemy.kind === "warden_enforcer") {
+        const inCharge = this.stepMobCharge(
+          enemy,
+          295 * mobMoveMult,
+          20,
+          26,
+          "physical",
+          dtMs,
+          dtSec,
+          (p) => {
+            this.applyPlayerStatus(p, "guard_broken", 2200);
+          }
+        );
+        if (!inCharge) {
+          if (enemy.windupMs <= 0 && (enemy.abilityCdMs ?? 0) <= 0 && nearestDist >= 65 && nearestDist <= 175 && this.hasLineOfSight(enemy.x, enemy.y, nearest.x, nearest.y)) {
+            enemy.shieldWallMs = 1500;
+            this.startMobCharge(enemy, directAngle, 300, 235);
+            enemy.abilityCdMs = Math.round(3900 * eliteCdMult);
+            this.emitThrottledEntityStatus(enemy.id, enemy.x, enemy.y - enemy.radius - 12, "BASTION RUSH!", "#38BDF8", 2200);
+          } else {
+            const spd = 104 * mobMoveMult;
+            if (nearestDist > enemy.radius + 14) {
+              enemy.vx = Math.cos(moveAngle) * spd;
+              enemy.vy = Math.sin(moveAngle) * spd;
+              this.moveWithCollision(enemy, enemy.vx * dtSec, enemy.vy * dtSec, enemy.radius - 2);
+            } else {
+              enemy.vx = 0;
+              enemy.vy = 0;
+            }
+            if (nearestDist <= enemy.radius + 28 && enemy.windupMs <= 0) {
+              this.damagePlayer(nearest, this.computeEnemyDamage(27, enemy), "physical");
+              this.emitEvent("status", nearest.x, nearest.y - 14, "HALBERD CLEAVE!", "#38BDF8");
+              enemy.shieldWallMs = Math.max(enemy.shieldWallMs || 0, 1200);
+              const waveDmg = this.computeEnemyDamage(19, enemy, { skipPoison: true });
+              for (let off = -0.25; off <= 0.25; off += 0.25) {
+                const a = angle + off;
+                this.spawnProjectile({
+                  ownerType: "enemy",
+                  ownerId: enemy.id,
+                  style: "slash",
+                  x: enemy.x,
+                  y: enemy.y,
+                  vx: Math.cos(a) * 245,
+                  vy: Math.sin(a) * 245,
+                  angle: a,
+                  radius: 8,
+                  damage: waveDmg,
+                  pierce: 1,
+                  ttlMs: 1200
+                });
+              }
+              enemy.windupMs = Math.round(1250 * eliteCdMult);
+            }
+          }
         }
       } else if (enemy.kind === "boss") {
         this.updateBossAi(enemy, enemyRoom, nearest, dtMs, dtSec, slowFactor);
@@ -8594,6 +9681,7 @@ var GameRoom = class _GameRoom {
         continue;
       }
       if (proj.ownerType === "player" && proj.weaponId === "arcanist_chronostar_scepter" && !proj.targetEnemyId) {
+        const ownerState = this.players.get(proj.ownerId)?.state;
         const seekRange = 170;
         let bestSeekDist = seekRange;
         let bestSeekId;
@@ -8604,6 +9692,16 @@ var GameRoom = class _GameRoom {
           if (d <= bestSeekDist) {
             bestSeekDist = d;
             bestSeekId = e.id;
+          }
+        }
+        if (!bestSeekId && this.pvpEnabled) {
+          for (const rival of this.getPvpTargetsFor(ownerState)) {
+            if (proj.hitEntityIds?.includes(rival.id)) continue;
+            const d = Math.hypot(rival.x - proj.x, rival.y - proj.y);
+            if (d <= bestSeekDist) {
+              bestSeekDist = d;
+              bestSeekId = rival.id;
+            }
           }
         }
         if (!bestSeekId) {
@@ -8624,6 +9722,12 @@ var GameRoom = class _GameRoom {
         let target = this.enemies.find(
           (e) => e.id === proj.targetEnemyId && e.hp > 0
         );
+        if (!target && this.pvpEnabled) {
+          const rivalPr = this.players.get(proj.targetEnemyId);
+          if (rivalPr && rivalPr.state.id !== proj.ownerId && rivalPr.state.connected && !rivalPr.state.downed && (rivalPr.state.spawnProtectionMs || 0) <= 0) {
+            target = rivalPr.state;
+          }
+        }
         if (!target) {
           target = this.trainingDummies.find((d) => d.id === proj.targetEnemyId);
         }
@@ -8733,7 +9837,8 @@ var GameRoom = class _GameRoom {
         const crateHitR = 18 + proj.radius;
         const crateHitRSq = crateHitR * crateHitR;
         for (const prop of this.props) {
-          if (!prop.opened && prop.kind === "crate") {
+          if (prop.opened) continue;
+          if (prop.kind === "crate") {
             const dx = prop.x - proj.x;
             const dy = prop.y - proj.y;
             if (dx * dx + dy * dy <= crateHitRSq) {
@@ -8742,6 +9847,13 @@ var GameRoom = class _GameRoom {
                 ally.state.gold += prop.value;
               }
               this.emitEvent("gold", prop.x, prop.y - 10, `+${prop.value}g`, "#F4D378");
+            }
+          } else if (prop.kind === "keg") {
+            const dx = prop.x - proj.x;
+            const dy = prop.y - proj.y;
+            if (dx * dx + dy * dy <= crateHitRSq) {
+              const ownerPr2 = this.players.get(proj.ownerId);
+              this.detonateCinderKeg(prop, ownerPr2 ? ownerPr2.state : null);
             }
           }
         }
@@ -8769,9 +9881,7 @@ var GameRoom = class _GameRoom {
               }
             }
           }
-          for (let eIdx = this.enemies.length - 1; eIdx >= 0; eIdx--) {
-            if (eIdx >= this.enemies.length) continue;
-            const enemy = this.enemies[eIdx];
+          for (const enemy of this.enemies) {
             if (!enemy || !enemy.id || enemy.hp <= 0) continue;
             const dx = enemy.x - proj.x;
             const dy = enemy.y - proj.y;
@@ -8781,6 +9891,19 @@ var GameRoom = class _GameRoom {
               if (!rec || rec.hits < maxHits && this.simTimeMs - rec.lastHitAtMs >= hitInterval) {
                 orbMap.set(enemy.id, { hits: (rec?.hits || 0) + 1, lastHitAtMs: this.simTimeMs });
                 const dealtOrb = this.damageEnemy(enemy, proj.damage, ownerPr ? ownerPr.state : null, false, "arcane");
+                if (dealtOrb > 0 && isTacticalOrb) this.onTacticalHitConfirmed(ownerPr?.state);
+              }
+            }
+          }
+          for (const rival of this.getPvpTargetsFor(ownerPr?.state)) {
+            const dx = rival.x - proj.x;
+            const dy = rival.y - proj.y;
+            const hitR = 14 + proj.radius;
+            if (dx * dx + dy * dy <= hitR * hitR) {
+              const rec = orbMap.get(rival.id);
+              if (!rec || rec.hits < maxHits && this.simTimeMs - rec.lastHitAtMs >= hitInterval) {
+                orbMap.set(rival.id, { hits: (rec?.hits || 0) + 1, lastHitAtMs: this.simTimeMs });
+                const dealtOrb = this.damagePlayer(rival, proj.damage, "arcane", ownerPr?.state ?? null);
                 if (dealtOrb > 0 && isTacticalOrb) this.onTacticalHitConfirmed(ownerPr?.state);
               }
             }
@@ -8850,6 +9973,73 @@ var GameRoom = class _GameRoom {
           }
         }
         if (hitDummy) continue;
+        let consumedProj = false;
+        for (const rival of this.getPvpTargetsFor(ownerPr?.state)) {
+          if (proj.hitEntityIds.includes(rival.id)) continue;
+          const dx = rival.x - proj.x;
+          const dy = rival.y - proj.y;
+          const hitR = 14 + proj.radius;
+          if (dx * dx + dy * dy <= hitR * hitR) {
+            if (proj.spellId === "fireball") {
+              this.explodeFireball(proj);
+              this.cleanupProjectileTracking(proj.id);
+              this.projectiles.splice(i, 1);
+              consumedProj = true;
+              break;
+            }
+            const isPrimaryProj = this.primaryAttackProjIds.has(proj.id);
+            const isTacticalProj = this.tacticalProjIds.has(proj.id);
+            const pierceHitIndex = proj.hitEntityIds.length;
+            proj.hitEntityIds.push(rival.id);
+            if (proj.slowOnHit) {
+              rival.slowedMs = Math.max(rival.slowedMs || 0, 2200);
+            }
+            const hitDamage = this.computePrimaryProjectileHitDamage(
+              proj,
+              rival.x,
+              rival.y,
+              ownerPr ? ownerPr.state : null,
+              pierceHitIndex,
+              null
+            );
+            const dealtPvp = this.damagePlayer(
+              rival,
+              hitDamage,
+              proj.damageCategory ?? inferDamageCategoryFromProjectileStyle(proj.style),
+              ownerPr ? ownerPr.state : null,
+              { isCrit: Boolean(proj.crit), isPrimaryAttack: isPrimaryProj }
+            );
+            if (!isPrimaryProj && isTacticalProj && dealtPvp > 0) {
+              this.onTacticalHitConfirmed(ownerPr?.state);
+            }
+            if (proj.style === "cyclone_arrow" && cycState) {
+              rival.slowedMs = Math.max(rival.slowedMs || 0, 700);
+              if (cycState.carryMsRemaining === null) {
+                cycState.carryMsRemaining = ARMAMENT_TUNING.weapons.galewind.cycloneArrowCarryDurationMs;
+              }
+            }
+            if (isPrimaryProj && ownerPr && dealtPvp > 0) {
+              this.applyWeaponPrimaryHitSpecial(
+                proj,
+                rival.x,
+                rival.y,
+                ownerPr.state,
+                null,
+                null,
+                dealtPvp,
+                rival
+              );
+            }
+            proj.pierce -= 1;
+            if (proj.pierce <= 0) {
+              this.cleanupProjectileTracking(proj.id);
+              this.projectiles.splice(i, 1);
+              consumedProj = true;
+              break;
+            }
+          }
+        }
+        if (consumedProj) continue;
         for (let eIdx = this.enemies.length - 1; eIdx >= 0; eIdx--) {
           if (eIdx >= this.enemies.length) continue;
           const enemy = this.enemies[eIdx];
@@ -9001,6 +10191,251 @@ var GameRoom = class _GameRoom {
         );
       }
     }
+    this.stepDungeonSpikeTraps(dtMs);
+    this.stepOverworldEvents(dtMs);
+  }
+  detonateCinderKeg(prop, attacker = null, chainDepth = 0) {
+    if (!prop || prop.opened || prop.kind !== "keg") return;
+    prop.opened = true;
+    const blastRadius = 112;
+    const blastDmg = Math.max(40, prop.value || 48 + this.floor * 14);
+    this.zones.push({
+      id: this.nextId("zone"),
+      kind: "cinderflare_blast",
+      x: prop.x,
+      y: prop.y,
+      radius: blastRadius,
+      ttlMs: 420,
+      maxTtlMs: 420,
+      ownerId: attacker?.id || "env"
+    });
+    const enemiesSnap = [...this.enemies];
+    for (const enemy of enemiesSnap) {
+      if (!enemy || enemy.hp <= 0 || !this.enemies.includes(enemy)) continue;
+      const hitR = blastRadius + enemy.radius * 0.35;
+      if (Math.hypot(enemy.x - prop.x, enemy.y - prop.y) <= hitR) {
+        this.damageEnemy(enemy, blastDmg, attacker, false, "fire", false);
+        if (enemy.hp > 0 && this.enemies.includes(enemy)) {
+          this.applyDotStatus(enemy, "burn", attacker, 3500, "weapon");
+        }
+      }
+    }
+    for (const rival of this.getPvpTargetsFor(attacker)) {
+      if (Math.hypot(rival.x - prop.x, rival.y - prop.y) <= blastRadius + 14) {
+        this.damagePlayer(rival, Math.round(blastDmg * 0.7), "fire", attacker);
+      }
+    }
+    for (const dummy of this.trainingDummies) {
+      if (Math.hypot(dummy.x - prop.x, dummy.y - prop.y) <= blastRadius + 18) {
+        this.damageDummy(dummy, blastDmg, attacker, false, false, "fire");
+      }
+    }
+    this.emitEvent("status", prop.x, prop.y - 20, "CINDER BLAST!", "#F97316");
+    if (chainDepth < 4) {
+      for (const other of this.props) {
+        if (!other.opened && other.kind === "keg") {
+          if (Math.hypot(other.x - prop.x, other.y - prop.y) <= blastRadius + 12) {
+            this.detonateCinderKeg(other, attacker, chainDepth + 1);
+          }
+        }
+      }
+    }
+  }
+  detonateKegsInRadius(x, y, radius, attacker = null) {
+    const rSq = radius * radius;
+    for (const prop of this.props) {
+      if (!prop.opened && prop.kind === "keg") {
+        const dx = prop.x - x;
+        const dy = prop.y - y;
+        if (dx * dx + dy * dy <= rSq) {
+          this.detonateCinderKeg(prop, attacker);
+        }
+      }
+    }
+  }
+  stepDungeonSpikeTraps(dtMs) {
+    if (this.isTavern || this.isOpenWorld || this.floor <= 0) return;
+    if (this.spikeTrapCooldowns.size > 0) {
+      for (const [key, rem] of this.spikeTrapCooldowns.entries()) {
+        const next = rem - dtMs;
+        if (next <= 0) {
+          this.spikeTrapCooldowns.delete(key);
+        } else {
+          this.spikeTrapCooldowns.set(key, next);
+        }
+      }
+    }
+    const cycleMs = 2800;
+    const warnStartMs = 1550;
+    const activeStartMs = 2100;
+    for (const prop of this.props) {
+      if (prop.kind !== "spike_trap") continue;
+      const phaseMs = (this.simTimeMs + (prop.value || 0)) % cycleMs;
+      const isWarning = phaseMs >= warnStartMs && phaseMs < activeStartMs;
+      const isActive = phaseMs >= activeStartMs;
+      prop.locked = isWarning;
+      prop.opened = isActive;
+      if (!isActive) continue;
+      const enemyDmg = Math.round(20 + this.floor * 5);
+      const enemiesSnap = [...this.enemies];
+      for (const enemy of enemiesSnap) {
+        if (!enemy || enemy.hp <= 0 || enemy.kind === "boss" || !this.enemies.includes(enemy)) {
+          continue;
+        }
+        const hitR = 24 + enemy.radius * 0.35;
+        if (Math.hypot(enemy.x - prop.x, enemy.y - prop.y) <= hitR) {
+          const cdKey = `${prop.id}:${enemy.id}`;
+          if ((this.spikeTrapCooldowns.get(cdKey) || 0) > 0) continue;
+          this.spikeTrapCooldowns.set(cdKey, 650);
+          this.damageEnemy(enemy, enemyDmg, null, false, "physical", false);
+          if (enemy.hp > 0 && this.enemies.includes(enemy)) {
+            this.applyDotStatus(enemy, "bleed", null, 2e3, "class");
+          }
+        }
+      }
+      const playerDmg = Math.round(14 + this.floor * 3);
+      for (const pr of this.players.values()) {
+        const p = pr.state;
+        if (!p.connected || p.downed) continue;
+        if (Math.hypot(p.x - prop.x, p.y - prop.y) <= 22) {
+          const cdKey = `${prop.id}:${p.id}`;
+          if ((this.spikeTrapCooldowns.get(cdKey) || 0) > 0) continue;
+          this.spikeTrapCooldowns.set(cdKey, 650);
+          this.damagePlayer(p, playerDmg, "physical");
+          this.emitEvent("status", p.x, p.y - 20, "SPIKE TRAP!", "#EF4444");
+        }
+      }
+    }
+  }
+  stepOverworldEvents(dtMs) {
+    if (!this.isOpenWorld || this.status !== "playing" || !this.map?.regions?.length) {
+      return;
+    }
+    const connectedAlive = [];
+    let anyConnected = false;
+    for (const pr of this.players.values()) {
+      if (!pr.state.connected) continue;
+      anyConnected = true;
+      if (!pr.state.downed && pr.state.hp > 0) {
+        connectedAlive.push(pr);
+      }
+    }
+    if (!anyConnected) return;
+    const dtSec = dtMs / 1e3;
+    const fontIdx = this.zones.findIndex((z) => z.kind === "overworld_font");
+    if (fontIdx === -1) {
+      this.overworldFontChargeAcc = 0;
+      this.overworldFontPulseAccumMs = 0;
+      this.overworldFontCooldownMs = Math.max(0, this.overworldFontCooldownMs - dtMs);
+      if (this.overworldFontCooldownMs <= 0) {
+        const regions = this.map.regions;
+        const region = regions[this.overworldFontRegionCursor % regions.length];
+        const fontKind2 = this.overworldFontTypeCursor % 3 + 1;
+        const fontTitle2 = fontKind2 === 1 ? "Blood Fury Font" : fontKind2 === 2 ? "Zephyr Wind Font" : "Bastion Vitality Font";
+        this.overworldFontRegionCursor = (this.overworldFontRegionCursor + 1 + this.overworldFontTypeCursor % 2) % regions.length;
+        this.overworldFontTypeCursor = (this.overworldFontTypeCursor + 1) % 3;
+        this.overworldFontChargeAcc = 0;
+        this.zones.push({
+          id: this.nextId("zone"),
+          kind: "overworld_font",
+          x: region.x,
+          y: region.y,
+          radius: 108,
+          quadrant: fontKind2,
+          stage: 0,
+          label: region.name,
+          ttlMs: 4e4,
+          maxTtlMs: 4e4,
+          ownerId: "neutral"
+        });
+        this.pushSystemChat(
+          `A ${fontTitle2} has awakened at ${region.name}! Stand inside to claim its bounty.`
+        );
+      }
+      return;
+    }
+    const font = this.zones[fontIdx];
+    const fontKind = font.quadrant || 1;
+    const fontTitle = fontKind === 1 ? "Blood Fury Font" : fontKind === 2 ? "Zephyr Wind Font" : "Bastion Vitality Font";
+    const occupants = [];
+    for (const pr of connectedAlive) {
+      if (Math.hypot(pr.state.x - font.x, pr.state.y - font.y) <= font.radius) {
+        occupants.push(pr);
+      }
+    }
+    this.overworldFontPulseAccumMs += dtMs;
+    const doAuraPulse = this.overworldFontPulseAccumMs >= 500;
+    if (doAuraPulse) {
+      this.overworldFontPulseAccumMs -= 500;
+    }
+    for (const pr of occupants) {
+      const st = pr.state;
+      if (fontKind === 1) {
+        if (st.skillCooldownMs > 0) {
+          st.skillCooldownMs = Math.max(0, st.skillCooldownMs - Math.round(dtMs * 0.35));
+        }
+        if (st.dashCooldownMs > 0) {
+          st.dashCooldownMs = Math.max(0, st.dashCooldownMs - Math.round(dtMs * 0.35));
+        }
+      } else if (fontKind === 2) {
+        st.hasteMs = Math.max(st.hasteMs, 650);
+      } else if (doAuraPulse) {
+        const healAmt = Math.min(Math.max(0, st.maxHp - st.hp), 6);
+        if (healAmt > 0) {
+          st.hp += healAmt;
+        }
+        this.grantShield(st, 6, "add");
+      }
+    }
+    if (occupants.length === 1) {
+      const capturer = occupants[0].state;
+      font.ownerId = capturer.id;
+      this.overworldFontChargeAcc = Math.min(100, this.overworldFontChargeAcc + dtSec * 20);
+      const stepStage = Math.min(100, Math.floor(this.overworldFontChargeAcc));
+      if (stepStage !== (font.stage ?? 0)) {
+        font.stage = stepStage;
+      }
+      if (this.overworldFontChargeAcc >= 100) {
+        this.zones.splice(fontIdx, 1);
+        this.overworldFontChargeAcc = 0;
+        this.overworldFontCooldownMs = 6e3;
+        capturer.gold += 50;
+        this.grantXp(capturer, 45);
+        const healAmt = Math.min(
+          Math.max(0, capturer.maxHp - capturer.hp),
+          Math.max(20, Math.round(capturer.maxHp * 0.3))
+        );
+        if (healAmt > 0) {
+          capturer.hp += healAmt;
+          this.emitEvent("heal", capturer.x, capturer.y - 18, `+${healAmt}`, "#34D399");
+        }
+        this.grantShield(capturer, 35, "add");
+        capturer.hasteMs = Math.max(capturer.hasteMs, 6e3);
+        this.emitEvent("gold", capturer.x, capturer.y - 28, "+50g", "#FACC15");
+        this.emitEvent("status", font.x, font.y - 36, "WAR FONT CLAIMED!", "#F59E0B");
+        for (const pr of connectedAlive) {
+          if (pr.state.id === capturer.id) continue;
+          const dx = pr.state.x - font.x;
+          const dy = pr.state.y - font.y;
+          const dist = Math.hypot(dx, dy);
+          if (dist <= font.radius + 40 && dist > 1) {
+            this.moveWithCollision(pr.state, dx / dist * 48, dy / dist * 48, 9);
+          }
+        }
+        const regionName = font.label || "the Borderlands";
+        this.pushSystemChat(
+          `${capturer.username} conquered the ${fontTitle} at ${regionName} (+50g)!`
+        );
+      }
+    } else if (occupants.length >= 2) {
+      font.ownerId = "contested";
+    } else {
+      font.ownerId = "neutral";
+      if (this.overworldFontChargeAcc > 0) {
+        this.overworldFontChargeAcc = Math.max(0, this.overworldFontChargeAcc - dtSec * 5);
+        font.stage = Math.floor(this.overworldFontChargeAcc);
+      }
+    }
   }
   awardCombatRoomClear(room) {
     const isGuardian = Boolean(room.guardian);
@@ -9139,6 +10574,18 @@ var GameRoom = class _GameRoom {
         }
       }
     }
+    for (const rival of this.getPvpTargetsFor(p)) {
+      const dx = rival.x - p.x;
+      const dy = rival.y - p.y;
+      const dist = Math.hypot(dx, dy);
+      if (dist <= cleaveRadius + 14) {
+        const diff = Math.abs(normalizeAngle(Math.atan2(dy, dx) - cleaveAngle));
+        if (diff <= halfAngle) {
+          this.applyStatusEffect(rival, "stun", 600, p);
+          this.damagePlayer(rival, cleaveDmg, "physical", p, { isCrit: blockedHits > 0 });
+        }
+      }
+    }
     for (const dummy of this.trainingDummies) {
       const dx = dummy.x - p.x;
       const dy = dummy.y - p.y;
@@ -9175,11 +10622,17 @@ var GameRoom = class _GameRoom {
         this.damageEnemy(other, burstBase, owner, false, burstCategory, false);
       }
     }
+    for (const rival of this.getPvpTargetsFor(owner)) {
+      if (Math.hypot(rival.x - cx, rival.y - cy) <= radius + 14) {
+        this.damagePlayer(rival, burstBase, burstCategory, owner);
+      }
+    }
     for (const d of this.trainingDummies) {
       if (Math.hypot(d.x - cx, d.y - cy) <= radius + 18) {
         this.damageDummy(d, burstBase, owner, false, false, burstCategory);
       }
     }
+    this.detonateKegsInRadius(cx, cy, radius + 14, owner);
     this.emitEvent("status", cx, cy - 22, "GALEBURST!", "#38BDF8");
   }
   triggerSacredRetributionShockwave(cleric) {
@@ -9204,6 +10657,11 @@ var GameRoom = class _GameRoom {
         this.damageEnemy(enemy, enemyDmg, cleric, false, "divine", false);
       }
     }
+    for (const rival of this.getPvpTargetsFor(cleric)) {
+      if (Math.hypot(rival.x - cleric.x, rival.y - cleric.y) <= radius + 14) {
+        this.damagePlayer(rival, enemyDmg, "divine", cleric);
+      }
+    }
     for (const dummy of this.trainingDummies) {
       if (Math.hypot(dummy.x - cleric.x, dummy.y - cleric.y) <= radius + 18) {
         this.damageDummy(dummy, enemyDmg, cleric, false, false, "divine");
@@ -9211,6 +10669,7 @@ var GameRoom = class _GameRoom {
     }
     for (const allyPr of this.players.values()) {
       const ally = allyPr.state;
+      if (this.pvpEnabled && ally.id !== cleric.id) continue;
       if (ally.downed || !ally.connected) continue;
       if (Math.hypot(ally.x - cleric.x, ally.y - cleric.y) <= radius) {
         const healAmt = _GameRoom.computeHealingAmount(srCfg.allyBaseHeal, cleric, ally);
@@ -9219,7 +10678,7 @@ var GameRoom = class _GameRoom {
     }
     this.emitEvent("status", cleric.x, cleric.y - 28, "SACRED RETRIBUTION!", "#FDE047");
   }
-  applyWeaponPrimaryHitSpecial(proj, targetX, targetY, owner, enemy, dummy, dealtDmg) {
+  applyWeaponPrimaryHitSpecial(proj, targetX, targetY, owner, enemy, dummy, dealtDmg, pvpTarget) {
     this.onConfirmedPrimaryHit(owner, proj.id);
     const weaponDef = resolveEquippedWeaponForClass(owner.heroClass, proj.weaponId);
     if (!weaponDef) return;
@@ -9245,6 +10704,26 @@ var GameRoom = class _GameRoom {
         } else {
           meta.galeburstByOwner.set(owner.id, nextStacks);
           this.syncEnemyGaleburstMarks(enemy, meta);
+        }
+      } else if (pvpTarget) {
+        let targetMap = this.pvpGaleburstStacks.get(pvpTarget.id);
+        if (!targetMap) {
+          targetMap = /* @__PURE__ */ new Map();
+          this.pvpGaleburstStacks.set(pvpTarget.id, targetMap);
+        }
+        const nextStacks = (targetMap.get(owner.id) || 0) + 1;
+        if (nextStacks >= mods.galeburstTriggerHits) {
+          targetMap.set(owner.id, 0);
+          this.triggerGaleburstExplosion(
+            owner,
+            targetX,
+            targetY,
+            baseDmgForBurst,
+            mods.galeburstRadiusPx,
+            mods.galeburstDamageRatio
+          );
+        } else {
+          targetMap.set(owner.id, nextStacks);
         }
       } else if (dummy) {
         const pr = this.players.get(owner.id);
@@ -9296,6 +10775,16 @@ var GameRoom = class _GameRoom {
           splashed++;
         }
       }
+      for (const otherRival of this.getPvpTargetsFor(owner)) {
+        if (otherRival === pvpTarget) continue;
+        const dx = otherRival.x - targetX;
+        const dy = otherRival.y - targetY;
+        const hitR = splashRad + 14;
+        if (dx * dx + dy * dy <= hitR * hitR) {
+          this.damagePlayer(otherRival, splashBase, "fire", owner);
+          splashed++;
+        }
+      }
       for (const otherDummy of this.trainingDummies) {
         if (!otherDummy || otherDummy === dummy) continue;
         const dx = otherDummy.x - targetX;
@@ -9305,7 +10794,7 @@ var GameRoom = class _GameRoom {
           splashed++;
         }
       }
-      if (splashed > 0 || enemy || dummy) {
+      if (splashed > 0 || enemy || dummy || pvpTarget) {
         this.emitEvent("status", targetX, targetY - 18, "EMBER BLAST!", "#F97316");
       }
     }
@@ -9318,7 +10807,7 @@ var GameRoom = class _GameRoom {
         owner.ultCooldownMs = Math.max(0, owner.ultCooldownMs - mods.ultSiphonMs);
       }
     }
-    if (mods.allyHealOnHitBase && !triggeredBefore) {
+    if (mods.allyHealOnHitBase && !triggeredBefore && !this.pvpEnabled) {
       this.triggeredOnceProjIds.add(proj.id);
       const pr = this.players.get(owner.id);
       const procCd = mods.allyHealProcCooldownMs ?? ARMAMENT_TUNING.weapons.solaris.procCooldownMs;
@@ -9394,6 +10883,7 @@ var GameRoom = class _GameRoom {
       map: this.map,
       props: this.props,
       enemies: this.enemies,
+      pvpPlayers: this.getPvpTargetsFor(p),
       trainingDummies: this.trainingDummies
     })?.target ?? null;
     const shotCount = 1 + relicExtraCount;
@@ -9481,13 +10971,18 @@ var GameRoom = class _GameRoom {
       });
       const hitIds = /* @__PURE__ */ new Set();
       for (const prop of this.props) {
-        if (!prop.opened && prop.kind === "crate") {
+        if (prop.opened) continue;
+        if (prop.kind === "crate") {
           if (Math.hypot(prop.x - slamPos.x, prop.y - slamPos.y) <= slamRadius + 18) {
             prop.opened = true;
             for (const ally of this.players.values()) {
               ally.state.gold += prop.value;
             }
             this.emitEvent("gold", prop.x, prop.y - 10, `+${prop.value}g`, "#F4D378");
+          }
+        } else if (prop.kind === "keg") {
+          if (Math.hypot(prop.x - slamPos.x, prop.y - slamPos.y) <= slamRadius + 18) {
+            this.detonateCinderKeg(prop, p);
           }
         }
       }
@@ -9499,6 +10994,17 @@ var GameRoom = class _GameRoom {
         if (Math.hypot(enemy.x - slamPos.x, enemy.y - slamPos.y) <= slamRadius + enemy.radius * 0.35) {
           hitIds.add(enemy.id);
           const dealt = this.damageEnemy(enemy, slamDmg, p, hasCrit, category, true);
+          if (dealt > 0) this.onConfirmedPrimaryHit(p);
+        }
+      }
+      for (const rival of this.getPvpTargetsFor(p)) {
+        if (hitIds.has(rival.id)) continue;
+        if (Math.hypot(rival.x - slamPos.x, rival.y - slamPos.y) <= slamRadius + 14) {
+          hitIds.add(rival.id);
+          const dealt = this.damagePlayer(rival, slamDmg, category, p, {
+            isCrit: hasCrit,
+            isPrimaryAttack: true
+          });
           if (dealt > 0) this.onConfirmedPrimaryHit(p);
         }
       }
@@ -9540,6 +11046,17 @@ var GameRoom = class _GameRoom {
           }
         }
       }
+      for (const rival of this.getPvpTargetsFor(p)) {
+        const dx = rival.x - p.x;
+        const dy = rival.y - p.y;
+        const dist = Math.hypot(dx, dy);
+        if (dist <= sfCfg.shockwaveRangePx + 14) {
+          const diff = Math.abs(normalizeAngle(Math.atan2(dy, dx) - p.aimAngle));
+          if (diff <= sfCfg.shockwaveHalfAngleRad) {
+            this.damagePlayer(rival, sfDmg, category, p);
+          }
+        }
+      }
       for (const dummy of this.trainingDummies) {
         const dx = dummy.x - p.x;
         const dy = dummy.y - p.y;
@@ -9562,6 +11079,7 @@ var GameRoom = class _GameRoom {
       map: this.map,
       props: this.props,
       enemies: this.enemies,
+      pvpPlayers: this.getPvpTargetsFor(p),
       trainingDummies: this.trainingDummies
     })?.target ?? null;
     const shotCount = 1 + relicExtraCount;
@@ -11451,6 +12969,19 @@ var GameRoom = class _GameRoom {
     this.enemies.splice(idx, 1);
     this.removeEntityZones(enemy.id);
     this.enemyMeta.delete(enemy.id);
+    if (enemy.kind === "slime" && !this.isTavern && !this.isOpenWorld && this.status === "playing") {
+      this.zones.push({
+        id: this.nextId("zone"),
+        kind: "acid_pool",
+        x: enemy.x,
+        y: enemy.y,
+        radius: enemy.elite ? 40 : 32,
+        ttlMs: 2600,
+        maxTtlMs: 2600,
+        ownerId: "slime_death",
+        damage: this.computeEnemyDamage(6, enemy)
+      });
+    }
     for (const pr of this.players.values()) {
       if (pr.state.predatorTargetId === enemy.id) {
         pr.state.predatorTargetId = null;
@@ -11566,11 +13097,50 @@ var GameRoom = class _GameRoom {
       this.onProgressionUpdateCallback(p.id, p);
     }
   }
-  damagePlayer(p, rawDamage, damageType = "physical") {
+  damagePlayer(p, rawDamage, damageType = "physical", attacker = null, opts) {
     if (p.downed || p.godMode) return 0;
+    if (attacker) {
+      if (!this.pvpEnabled || attacker.id === p.id) return 0;
+      if ((p.spawnProtectionMs || 0) > 0) {
+        this.emitThrottledEntityStatus(p.id, p.x, p.y - 24, "PROTECTED", "#FDE047", 900);
+        return 0;
+      }
+    }
+    const attackerActivePassive = attacker ? this.getActivePassive(attacker) : null;
+    const attackerWeapon = attacker ? resolveEquippedWeaponForClass(attacker.heroClass, attacker.equippedWeapon)?.modifiers : void 0;
+    let effectiveRaw = rawDamage;
+    let isCrit = Boolean(opts?.isCrit);
+    if (attacker && this.pvpEnabled) {
+      effectiveRaw = Math.max(1, Math.round(rawDamage * 0.55));
+      if (this.zones.some(
+        (z) => z.kind === "overworld_font" && z.quadrant === 1 && Math.hypot(attacker.x - z.x, attacker.y - z.y) <= z.radius
+      )) {
+        effectiveRaw = Math.round(effectiveRaw * 1.22);
+      }
+      if (attackerActivePassive === "eagle_keenness") {
+        const distToTarget = Math.hypot(p.x - attacker.x, p.y - attacker.y);
+        if (distToTarget >= 180) {
+          const longshotBonus = 0.25 + (attackerWeapon?.longshotBonusPct || 0);
+          effectiveRaw = Math.round(effectiveRaw * (1 + longshotBonus));
+          isCrit = true;
+        }
+      }
+      if (attackerActivePassive === "predators_instinct") {
+        const predCfg = ARMAMENT_TUNING.passives.predatorsInstinct;
+        if (attacker.predatorTargetId !== p.id) {
+          attacker.predatorTargetId = p.id;
+          attacker.predatorStacks = 0;
+        } else if ((attacker.predatorStacks || 0) > 0) {
+          effectiveRaw = Math.max(
+            1,
+            Math.round(effectiveRaw * (1 + (attacker.predatorStacks || 0) * predCfg.damagePerStackPct))
+          );
+        }
+      }
+    }
     const resist = computeIncomingDamageTypeResistance(p, damageType);
     const vestmentMods = resolveEquippedVestmentForClass(p.heroClass, p.equippedVestment)?.modifiers;
-    let dmg = Math.max(1, Math.round(rawDamage * (1 - resist)));
+    let dmg = Math.max(1, Math.round(effectiveRaw * (1 - resist)));
     if (p.statuses.some((s) => s.type === "guard_broken")) {
       dmg = Math.round(dmg * 1.3);
     }
@@ -11585,7 +13155,7 @@ var GameRoom = class _GameRoom {
       dmg = Math.max(1, Math.round(dmg * vestmentMods.damageTakenMult));
     }
     const inAegis = this.zones.some(
-      (z) => z.kind === "aegis_dome" && Math.hypot(p.x - z.x, p.y - z.y) <= z.radius
+      (z) => z.kind === "aegis_dome" && (!this.pvpEnabled || z.ownerId === p.id) && Math.hypot(p.x - z.x, p.y - z.y) <= z.radius
     );
     if (inAegis) dmg = Math.max(1, Math.round(dmg * 0.65));
     if ((p.bastionCounterMs || 0) > 0) {
@@ -11622,36 +13192,134 @@ var GameRoom = class _GameRoom {
       const mPr = this.players.get(p.id);
       if (mPr) mPr.momentumHoldMs = 0;
     }
+    if (attacker && this.pvpEnabled) {
+      attacker.damageDealt += finalMitigatedDamage;
+      if (attackerActivePassive === "predators_instinct") {
+        const predCfg = ARMAMENT_TUNING.passives.predatorsInstinct;
+        const predPr = this.players.get(attacker.id);
+        attacker.predatorStacks = Math.min(
+          predCfg.maxStacks,
+          (attacker.predatorStacks || 0) + 1
+        );
+        if (predPr) predPr.predatorLastHitAtMs = this.simTimeMs;
+      }
+      if (attackerActivePassive === "war_monger" && !attacker.downed && attacker.hp < attacker.maxHp) {
+        const wmCfg = ARMAMENT_TUNING.passives.warMonger;
+        const hpRatio = attacker.hp / Math.max(1, attacker.maxHp);
+        const isLowHp = wmCfg.thresholdInclusive ? hpRatio <= wmCfg.lowHpThresholdRatio : hpRatio < wmCfg.lowHpThresholdRatio;
+        const pct = isLowHp ? wmCfg.atOrBelowThresholdLifestealPct : wmCfg.aboveThresholdLifestealPct;
+        const missing = Math.max(0, attacker.maxHp - attacker.hp);
+        const lsHeal = Math.min(missing, Math.max(1, Math.round(finalMitigatedDamage * pct)));
+        if (lsHeal > 0) {
+          attacker.hp += lsHeal;
+          this.emitEvent("heal", attacker.x, attacker.y - 20, `+${lsHeal}`, "#34D399");
+        }
+      }
+      if (isCrimsonFrenzyActive(attacker) && !attacker.downed && attacker.hp < attacker.maxHp) {
+        const lsPct = ARMAMENT_TUNING.weapons.crimson.frenzyLifestealPct;
+        const missing = Math.max(0, attacker.maxHp - attacker.hp);
+        const lsHeal = Math.min(missing, Math.max(1, Math.round(finalMitigatedDamage * lsPct)));
+        if (lsHeal > 0) {
+          attacker.hp += lsHeal;
+          this.emitEvent("heal", attacker.x, attacker.y - 20, `+${lsHeal}`, "#34D399");
+        }
+      }
+      if (opts?.isPrimaryAttack && attackerWeapon) {
+        if (attacker.heroClass === "vanguard" && attackerWeapon.shieldOnPrimaryHit) {
+          this.grantShield(attacker, attackerWeapon.shieldOnPrimaryHit, "add");
+        }
+        if (attackerWeapon.chillChance && Math.random() < attackerWeapon.chillChance) {
+          p.slowedMs = Math.max(p.slowedMs || 0, 2e3);
+        }
+      }
+    }
     if (dmg > 0) {
       p.hp = Math.max(0, p.hp - dmg);
+      this.emitEvent(
+        isCrit ? "crit" : "damage",
+        p.x,
+        p.y - 18,
+        isCrit ? `-${dmg}!` : `-${dmg}`,
+        getDamageTypeColor(damageType, isCrit),
+        damageType,
+        attacker ? { attackerId: attacker.id, isPrimaryHit: opts?.isPrimaryAttack, hitTargetId: p.id } : void 0
+      );
+    } else if (absorbed > 0 && attacker) {
       this.emitEvent(
         "damage",
         p.x,
         p.y - 18,
-        `-${dmg}`,
-        getDamageTypeColor(damageType, false),
-        damageType
+        `-${absorbed} (Shield)`,
+        "#93C5FD",
+        damageType,
+        { attackerId: attacker.id, isPrimaryHit: opts?.isPrimaryAttack, hitTargetId: p.id }
       );
     }
-    if ((dmg >= 20 || absorbed >= 20 || rawDamage >= 20) && p.statuses && p.statuses.some((s) => s.type === "charmed")) {
+    if ((dmg >= 20 || absorbed >= 20 || effectiveRaw >= 20) && p.statuses && p.statuses.some((s) => s.type === "charmed")) {
       p.statuses = p.statuses.filter((s) => s.type !== "charmed");
       this.emitEvent("status", p.x, p.y - 30, "CHARM BROKEN!", "#F472B6");
     }
     if (p.hp <= 0) {
       p.downed = true;
-      p.downedTimerMs = 18e3;
+      p.downedTimerMs = this.isOpenWorld ? 3500 : 18e3;
       p.reviveProgress = 0;
       const dPr = this.players.get(p.id);
       if (dPr) {
+        if (p.disintegrationState?.active) {
+          this.stopDisintegrationChannel(p.id);
+        }
+        p.spellCastState = null;
+        dPr.pendingBarrage = null;
         this.clearEclipseCharge(dPr);
-        this.clearPlayerTacticalState(dPr, { removeOwnedZones: false });
+        this.clearPlayerTacticalState(dPr, { removeOwnedZones: this.isOpenWorld });
+        this.cleanupChronoWellsForOwner(p.id);
       }
-      if (this.players.size > 1) {
+      if (this.isOpenWorld) {
+        this.pvpGaleburstStacks.delete(p.id);
+        const endedStreak = this.pvpStreaks.get(p.id) || 0;
+        this.pvpStreaks.set(p.id, 0);
+        if (attacker) {
+          attacker.kills += 1;
+          const nextStreak = (this.pvpStreaks.get(attacker.id) || 0) + 1;
+          this.pvpStreaks.set(attacker.id, nextStreak);
+          const shutdownBonus = endedStreak >= 3 ? Math.min(125, endedStreak * 20) : 0;
+          const bountyGold = 25 + shutdownBonus;
+          attacker.gold += bountyGold;
+          this.grantXp(attacker, 25 + (endedStreak >= 3 ? 25 : 0));
+          if (!attacker.downed && attacker.hp > 0) {
+            const healAmt = Math.min(
+              Math.max(0, attacker.maxHp - attacker.hp),
+              Math.max(8, Math.round(attacker.maxHp * 0.12))
+            );
+            if (healAmt > 0) {
+              attacker.hp += healAmt;
+              this.emitEvent("heal", attacker.x, attacker.y - 18, `+${healAmt}`, "#34D399");
+            }
+            this.grantShield(attacker, 10, "add");
+          }
+          this.emitEvent("gold", attacker.x, attacker.y - 28, `+${bountyGold}g`, "#FACC15");
+          this.onKillCallback?.(attacker.id, { isBoss: false });
+          this.emitEvent("status", p.x, p.y - 30, "SLAYED!", "#EF4444");
+          if (endedStreak >= 3) {
+            this.pushSystemChat(
+              `SHUTDOWN! ${attacker.username} ended ${p.username}'s ${endedStreak}-kill streak (+${bountyGold}g bounty)!`
+            );
+          } else {
+            this.pushSystemChat(`${attacker.username} defeated ${p.username} (+${bountyGold}g)!`);
+          }
+          if (nextStreak === 3 || nextStreak === 5 || nextStreak === 8) {
+            this.emitEvent("status", attacker.x, attacker.y - 42, `${nextStreak} KILL STREAK!`, "#F59E0B");
+            this.pushSystemChat(`${attacker.username} is on a ${nextStreak}-kill rampage!`);
+          }
+        } else {
+          this.pushSystemChat(`${p.username} fell in the Open World.`);
+        }
+      } else if (this.players.size > 1) {
         this.pushSystemChat(
           `${p.username} is downed! Stand near your ally to revive them.`
         );
       }
-    } else if (dmg > 0) {
+    } else if (dmg > 0 && !this.pvpEnabled) {
       this.triggerSharedGraceForAlly(p);
     }
     return finalMitigatedDamage;
@@ -11750,7 +13418,9 @@ var GameRoom = class _GameRoom {
       seed: this.baseSeed,
       playerCount: this.players.size,
       maxPlayers: this.maxPlayers,
-      status: this.status
+      status: this.status,
+      roomMode: this.roomMode,
+      pvpEnabled: this.pvpEnabled
     };
   }
   buildSnapshot() {
@@ -11804,6 +13474,8 @@ var GameRoom = class _GameRoom {
       combatRoomsTotal,
       floorMasteryAwarded: this.floorMasteryAwarded,
       portalReadyCount,
+      roomMode: this.roomMode,
+      pvpEnabled: this.pvpEnabled,
       players: activePlayers,
       enemies: this.enemies,
       projectiles: this.projectiles,
@@ -11908,7 +13580,7 @@ var GameRoom = class _GameRoom {
     const netProps = [];
     for (let i = 0; i < base.props.length; i++) {
       const prop = base.props[i];
-      if (prop.opened && (prop.kind === "crate" || prop.kind === "coin" || prop.kind === "potion")) {
+      if (prop.opened && (prop.kind === "crate" || prop.kind === "keg" || prop.kind === "coin" || prop.kind === "potion")) {
         continue;
       }
       netProps.push(prop);
@@ -12085,6 +13757,23 @@ var PartyCoordinator = class {
     }
     return tavern;
   }
+  ensureOpenWorldRoom() {
+    let openWorld = this.rooms.get("OPEN-WORLD");
+    if (!openWorld) {
+      openWorld = new GameRoom({
+        roomId: "OPEN-WORLD",
+        name: "Verdant Borderlands (Open World)",
+        hostName: "Frontier",
+        difficulty: "Normal",
+        seed: 777,
+        initialFloor: 1,
+        initialStatus: "playing"
+      });
+      this.wireRoomCallbacks(openWorld);
+      this.rooms.set("OPEN-WORLD", openWorld);
+    }
+    return openWorld;
+  }
   createParty(client, account, opts) {
     if (client.roomId) {
       this.leaveRoomExplicit(client);
@@ -12125,7 +13814,7 @@ var PartyCoordinator = class {
   }
   joinOrReconnectRoom(client, account, rawRoomId) {
     const normalizedCode = rawRoomId.trim().toUpperCase();
-    const room = normalizedCode === "TAVERN-HUB" ? this.ensureTavernRoom() : this.rooms.get(normalizedCode);
+    const room = normalizedCode === "TAVERN-HUB" ? this.ensureTavernRoom() : normalizedCode === "OPEN-WORLD" ? this.ensureOpenWorldRoom() : this.rooms.get(normalizedCode);
     if (!room) {
       const reason = `Room "${normalizedCode}" was not found or has closed.`;
       this.sendJson(client.ws, { type: "error", message: reason });
@@ -12173,7 +13862,7 @@ var PartyCoordinator = class {
       return { ok: false, reason: "You are not in a party room." };
     }
     const room = this.rooms.get(client.roomId);
-    if (!room || room.roomId === "TAVERN-HUB") {
+    if (!room || room.roomId === "TAVERN-HUB" || room.roomId === "OPEN-WORLD") {
       return { ok: false, reason: "Invalid party room." };
     }
     if (!room.isHost(client.userId)) {
@@ -12211,7 +13900,7 @@ var PartyCoordinator = class {
       return { ok: false, reason: "You are not in a party room." };
     }
     const room = this.rooms.get(client.roomId);
-    if (!room || room.roomId === "TAVERN-HUB") {
+    if (!room || room.roomId === "TAVERN-HUB" || room.roomId === "OPEN-WORLD") {
       const reason = "Ready status is only used in expedition party lobbies.";
       this.sendJson(client.ws, { type: "error", message: reason });
       return { ok: false, reason };
@@ -12232,12 +13921,12 @@ var PartyCoordinator = class {
     if (!room) {
       return { ok: false, reason: "Room not found." };
     }
-    if (room.roomId !== "TAVERN-HUB" && !room.isHost(client.userId)) {
+    if (room.roomId !== "TAVERN-HUB" && room.roomId !== "OPEN-WORLD" && !room.isHost(client.userId)) {
       const reason = "Only the party host can restart the expedition.";
       this.sendJson(client.ws, { type: "error", message: reason });
       return { ok: false, reason };
     }
-    if (room.roomId !== "TAVERN-HUB" && room.status === "waiting") {
+    if (room.roomId !== "TAVERN-HUB" && room.roomId !== "OPEN-WORLD" && room.status === "waiting") {
       const reason = "Start the expedition from the waiting lobby first.";
       this.sendJson(client.ws, { type: "error", message: reason });
       return { ok: false, reason };
@@ -12257,7 +13946,7 @@ var PartyCoordinator = class {
       return { ok: false, reason: "You are not in a party room." };
     }
     const room = this.rooms.get(client.roomId);
-    if (!room || room.roomId === "TAVERN-HUB") {
+    if (!room || room.roomId === "TAVERN-HUB" || room.roomId === "OPEN-WORLD") {
       return { ok: false, reason: "Invalid party room." };
     }
     if (!room.isHost(client.userId)) {
@@ -12295,7 +13984,7 @@ var PartyCoordinator = class {
       ).some((other) => other.userId === client.userId);
       if (!stillConnected) {
         room.removePlayer(client.userId);
-        if (room.getPlayerCount() === 0 && oldRoomId !== "TAVERN-HUB") {
+        if (room.getPlayerCount() === 0 && oldRoomId !== "TAVERN-HUB" && oldRoomId !== "OPEN-WORLD") {
           this.clearRoomTimers(oldRoomId);
           this.rooms.delete(oldRoomId);
           this.roomDeltaStates.delete(oldRoomId);
@@ -12325,9 +14014,9 @@ var PartyCoordinator = class {
       this.broadcastRoomList();
       return;
     }
-    if (oldRoomId === "TAVERN-HUB" || room.status === "waiting") {
+    if (oldRoomId === "TAVERN-HUB" || oldRoomId === "OPEN-WORLD" || room.status === "waiting") {
       room.removePlayer(client.userId);
-      if (room.getPlayerCount() === 0 && oldRoomId !== "TAVERN-HUB") {
+      if (room.getPlayerCount() === 0 && oldRoomId !== "TAVERN-HUB" && oldRoomId !== "OPEN-WORLD") {
         this.clearRoomTimers(oldRoomId);
         this.rooms.delete(oldRoomId);
         this.roomDeltaStates.delete(oldRoomId);
@@ -12641,7 +14330,9 @@ var SCALAR_KEYS = [
   "combatRoomsCleared",
   "combatRoomsTotal",
   "floorMasteryAwarded",
-  "portalReadyCount"
+  "portalReadyCount",
+  "roomMode",
+  "pvpEnabled"
 ];
 function cloneSnapshotBaseline(snap) {
   const baseline = {
@@ -12740,12 +14431,14 @@ function computeSnapshotDelta(prev, next, baseSeq, nextSeq) {
   if (enemyDiff.added) delta.enemiesAdded = enemyDiff.added;
   if (enemyDiff.updated) delta.enemiesUpdated = enemyDiff.updated;
   if (enemyDiff.removed) delta.enemiesRemoved = enemyDiff.removed;
-  if (!shallowEqualValues(prev.projectiles, next.projectiles)) {
-    delta.projectiles = next.projectiles;
-  }
-  if (!shallowEqualValues(prev.zones, next.zones)) {
-    delta.zones = next.zones;
-  }
+  const projDiff = diffEntityArray(prev.projectiles, next.projectiles);
+  if (projDiff.added) delta.projectilesAdded = projDiff.added;
+  if (projDiff.updated) delta.projectilesUpdated = projDiff.updated;
+  if (projDiff.removed) delta.projectilesRemoved = projDiff.removed;
+  const zoneDiff = diffEntityArray(prev.zones, next.zones);
+  if (zoneDiff.added) delta.zonesAdded = zoneDiff.added;
+  if (zoneDiff.updated) delta.zonesUpdated = zoneDiff.updated;
+  if (zoneDiff.removed) delta.zonesRemoved = zoneDiff.removed;
   if (!shallowEqualValues(prev.props, next.props)) {
     delta.props = next.props;
   }
@@ -12767,6 +14460,156 @@ function computeSnapshotDelta(prev, next, baseSeq, nextSeq) {
     delta.lastRunSummary = nextRun;
   }
   return delta;
+}
+function isSnapshotDeltaEmpty(delta) {
+  return delta.scalars === void 0 && delta.playersAdded === void 0 && delta.playersUpdated === void 0 && delta.playersRemoved === void 0 && delta.enemiesAdded === void 0 && delta.enemiesUpdated === void 0 && delta.enemiesRemoved === void 0 && delta.projectilesAdded === void 0 && delta.projectilesUpdated === void 0 && delta.projectilesRemoved === void 0 && delta.zonesAdded === void 0 && delta.zonesUpdated === void 0 && delta.zonesRemoved === void 0 && delta.projectiles === void 0 && delta.zones === void 0 && delta.props === void 0 && delta.npcs === void 0 && delta.trainingDummies === void 0 && delta.roomClearedFlags === void 0 && delta.events === void 0 && delta.lastRunSummary === void 0;
+}
+
+// src/server/openWorldNetwork.ts
+var OPEN_WORLD_ENTITY_INTEREST_RADIUS = 1250;
+var OPEN_WORLD_EVENT_INTEREST_RADIUS = 1050;
+var OPEN_WORLD_FAR_SYNC_INTERVAL_TICKS = 10;
+var OPEN_WORLD_FAR_POSITION_QUANT_PX = 16;
+function quantizeStepUp(ms, stepMs) {
+  if (!ms || ms <= 0) return 0;
+  return Math.ceil(ms / stepMs) * stepMs;
+}
+function quantizeCoord(val, stepPx) {
+  return Math.round(val / stepPx) * stepPx;
+}
+function sanitizeRemotePlayerBase(p) {
+  const cleaned = {
+    ...p,
+    storage: [],
+    pendingRelicChoices: [],
+    lastInputSeq: void 0
+  };
+  if (cleaned.pendingScrollChoices !== void 0) {
+    cleaned.pendingScrollChoices = void 0;
+  }
+  if (cleaned.ownedWeapons !== void 0) {
+    cleaned.ownedWeapons = void 0;
+  }
+  if (cleaned.ownedVestments !== void 0) {
+    cleaned.ownedVestments = void 0;
+  }
+  return cleaned;
+}
+function projectOpenWorldSnapshotForClient(baseNetSnap, viewerId, tickIndex, prevClientBaseline) {
+  const viewer = baseNetSnap.players.find((p) => p.id === viewerId) || baseNetSnap.players[0];
+  if (!viewer) {
+    return baseNetSnap;
+  }
+  const vxCenter = viewer.x;
+  const vyCenter = viewer.y;
+  const nearRadiusSq = OPEN_WORLD_ENTITY_INTEREST_RADIUS * OPEN_WORLD_ENTITY_INTEREST_RADIUS;
+  const eventRadiusSq = OPEN_WORLD_EVENT_INTEREST_RADIUS * OPEN_WORLD_EVENT_INTEREST_RADIUS;
+  const isFarRefreshTick = tickIndex % OPEN_WORLD_FAR_SYNC_INTERVAL_TICKS === 0;
+  let prevPlayerById = null;
+  if (prevClientBaseline && prevClientBaseline.players.length > 0) {
+    prevPlayerById = /* @__PURE__ */ new Map();
+    for (let i = 0; i < prevClientBaseline.players.length; i++) {
+      const pp = prevClientBaseline.players[i];
+      prevPlayerById.set(pp.id, pp);
+    }
+  }
+  const projectedPlayers = new Array(baseNetSnap.players.length);
+  for (let i = 0; i < baseNetSnap.players.length; i++) {
+    const p = baseNetSnap.players[i];
+    if (p.id === viewerId) {
+      projectedPlayers[i] = p;
+      continue;
+    }
+    const dx = p.x - vxCenter;
+    const dy = p.y - vyCenter;
+    const distSq = dx * dx + dy * dy;
+    if (distSq <= nearRadiusSq) {
+      const nearP = sanitizeRemotePlayerBase(p);
+      nearP.skillCooldownMs = quantizeStepUp(p.skillCooldownMs, 500);
+      nearP.ultCooldownMs = quantizeStepUp(p.ultCooldownMs, 500);
+      nearP.dashCooldownMs = quantizeStepUp(p.dashCooldownMs, 500);
+      if (p.starRiftCooldownMs !== void 0) {
+        nearP.starRiftCooldownMs = quantizeStepUp(p.starRiftCooldownMs, 500);
+      }
+      nearP.spawnProtectionMs = quantizeStepUp(p.spawnProtectionMs, 500);
+      nearP.hasteMs = quantizeStepUp(p.hasteMs, 500);
+      nearP.slowedMs = quantizeStepUp(p.slowedMs, 500);
+      nearP.stunnedMs = quantizeStepUp(p.stunnedMs, 500);
+      nearP.frozenMs = quantizeStepUp(p.frozenMs, 500);
+      projectedPlayers[i] = nearP;
+    } else {
+      const prevP = prevPlayerById?.get(p.id);
+      const wasNear = prevP ? (prevP.x - vxCenter) * (prevP.x - vxCenter) + (prevP.y - vyCenter) * (prevP.y - vyCenter) <= nearRadiusSq : false;
+      const stateChanged = !prevP || wasNear || prevP.downed !== p.downed || prevP.connected !== p.connected || prevP.heroClass !== p.heroClass || prevP.level !== p.level || prevP.kills !== p.kills || prevP.equippedWeapon !== p.equippedWeapon || prevP.equippedVestment !== p.equippedVestment;
+      const nextX = isFarRefreshTick || stateChanged ? quantizeCoord(p.x, OPEN_WORLD_FAR_POSITION_QUANT_PX) : prevP.x;
+      const nextY = isFarRefreshTick || stateChanged ? quantizeCoord(p.y, OPEN_WORLD_FAR_POSITION_QUANT_PX) : prevP.y;
+      const farP = sanitizeRemotePlayerBase(p);
+      farP.x = nextX;
+      farP.y = nextY;
+      farP.vx = 0;
+      farP.vy = 0;
+      farP.aimAngle = 0;
+      farP.attackAnimMs = 0;
+      farP.attackComboStep = 0;
+      farP.skillCooldownMs = 0;
+      farP.ultCooldownMs = 0;
+      farP.dashCooldownMs = 0;
+      if (farP.starRiftCooldownMs !== void 0) farP.starRiftCooldownMs = 0;
+      farP.spawnProtectionMs = (p.spawnProtectionMs || 0) > 0 ? 1e3 : 0;
+      farP.hasteMs = 0;
+      farP.slowedMs = 0;
+      farP.stunnedMs = 0;
+      farP.frozenMs = 0;
+      farP.statuses = [];
+      projectedPlayers[i] = farP;
+    }
+  }
+  const projectedProjectiles = [];
+  for (let i = 0; i < baseNetSnap.projectiles.length; i++) {
+    const pr = baseNetSnap.projectiles[i];
+    const dx = pr.x - vxCenter;
+    const dy = pr.y - vyCenter;
+    if (dx * dx + dy * dy <= nearRadiusSq || pr.ownerId === viewerId) {
+      projectedProjectiles.push(pr);
+    }
+  }
+  const projectedZones = [];
+  for (let i = 0; i < baseNetSnap.zones.length; i++) {
+    const z = baseNetSnap.zones[i];
+    const maxReach = OPEN_WORLD_ENTITY_INTEREST_RADIUS + (z.radius || 0);
+    const dx = z.x - vxCenter;
+    const dy = z.y - vyCenter;
+    if (dx * dx + dy * dy <= maxReach * maxReach || z.ownerId === viewerId || z.kind === "overworld_font") {
+      if (z.maxTtlMs >= 1500) {
+        projectedZones.push({
+          ...z,
+          ttlMs: quantizeStepUp(z.ttlMs, 150)
+        });
+      } else {
+        projectedZones.push(z);
+      }
+    }
+  }
+  const projectedEvents = [];
+  for (let i = 0; i < baseNetSnap.events.length; i++) {
+    const ev = baseNetSnap.events[i];
+    if (ev.attackerId === viewerId || ev.hitTargetId === viewerId || ev.targetPlayerId === viewerId) {
+      projectedEvents.push(ev);
+      continue;
+    }
+    const dx = ev.x - vxCenter;
+    const dy = ev.y - vyCenter;
+    if (dx * dx + dy * dy <= eventRadiusSq) {
+      projectedEvents.push(ev);
+    }
+  }
+  return {
+    ...baseNetSnap,
+    players: projectedPlayers,
+    projectiles: projectedProjectiles,
+    zones: projectedZones,
+    events: projectedEvents
+  };
 }
 
 // src/client/networkStats.ts
@@ -14137,12 +15980,12 @@ function syncClientNpcDialogue(c, room) {
 function broadcastRoomList() {
   const lobbyTargets = [];
   for (const c of clients) {
-    if (!c.roomId || c.roomId === "TAVERN-HUB") {
+    if (!c.roomId || c.roomId === "TAVERN-HUB" || c.roomId === "OPEN-WORLD") {
       lobbyTargets.push(c);
     }
   }
   if (lobbyTargets.length === 0) return;
-  const summaries = Array.from(rooms.values()).filter((r) => r.roomId !== "TAVERN-HUB").map((r) => r.getSummary());
+  const summaries = Array.from(rooms.values()).filter((r) => r.roomId !== "TAVERN-HUB" && r.roomId !== "OPEN-WORLD").map((r) => r.getSummary());
   const payload = {
     type: "lobby:rooms",
     rooms: summaries,
@@ -14162,7 +16005,7 @@ function broadcastToRoom(roomId, msg, options = {}) {
   }
 }
 function attachRoomPersistenceCallbacks(room) {
-  const isExpeditionRoom = room.roomId !== "TAVERN-HUB";
+  const isExpeditionRoom = room.roomId !== "TAVERN-HUB" && room.roomId !== "OPEN-WORLD";
   room.onFloorClearedCallback = async (playerIds, floor) => {
     for (const pid of playerIds) {
       const acc = accountsById.get(pid);
@@ -15165,7 +17008,7 @@ async function startServer() {
       if (msg.type === "lobby:subscribe") {
         sendJson(ws, {
           type: "lobby:rooms",
-          rooms: Array.from(rooms.values()).filter((r) => r.roomId !== "TAVERN-HUB").map((r) => r.getSummary()),
+          rooms: Array.from(rooms.values()).filter((r) => r.roomId !== "TAVERN-HUB" && r.roomId !== "OPEN-WORLD").map((r) => r.getSummary()),
           onlineCount: clients.size
         });
         return;
@@ -15188,6 +17031,7 @@ async function startServer() {
       }
       if (msg.type === "room:join") {
         client.lastSentDialogueKey = "";
+        client.clientDelta = void 0;
         const res = partyCoordinator.joinOrReconnectRoom(client, toPartyAccount(acc), String(msg.roomId || ""));
         if (res.ok) {
           syncClientNpcDialogue(client, res.room);
@@ -15196,6 +17040,7 @@ async function startServer() {
       }
       if (msg.type === "room:leave") {
         client.lastSentDialogueKey = "";
+        client.clientDelta = void 0;
         partyCoordinator.leaveRoomExplicit(client);
         sendJson(ws, { type: "room:left" });
         return;
@@ -15396,9 +17241,12 @@ async function startServer() {
       } else if (msg.type === "admin:set_level") {
         if (acc.isAdmin) {
           const level = Math.floor(Number(msg.level));
+          const targetPlayerId = msg.targetPlayerId ? String(msg.targetPlayerId) : acc.id;
           if (Number.isFinite(level) && level >= 1 && level <= MAX_LEVEL) {
-            room.setPlayerLevel(acc.id, level);
-            room.pushSystemChat(`[ADMIN] Set Level ${level} for ${acc.username}`);
+            room.setPlayerLevel(targetPlayerId, level);
+            const targetState = room.getPlayerState(targetPlayerId);
+            const targetName = targetState ? targetState.username : acc.username;
+            room.pushSystemChat(`[ADMIN] Set Level ${level} for ${targetName}`);
           }
         }
       } else if (msg.type === "admin:add_relic") {
@@ -15590,24 +17438,28 @@ async function startServer() {
       }
     });
     ws.on("close", () => {
+      client.clientDelta = void 0;
       clients.delete(client);
       partyCoordinator.handleSocketDisconnect(client);
     });
     ws.on("error", () => {
+      client.clientDelta = void 0;
       clients.delete(client);
       partyCoordinator.handleSocketDisconnect(client);
     });
   });
   const TICK_MS = SERVER_TICK_MS;
   let nextTickAt = performance.now() + TICK_MS;
+  let serverTickCounter = 0;
   const keyframeTargets = [];
   const deltaTargets = [];
   const runServerTick = () => {
+    serverTickCounter++;
     const tickStart = performance.now();
     let anyStatusChanged = false;
     for (const [roomId, room] of rooms.entries()) {
       if (room.getPlayerCount() === 0) {
-        if (roomId !== "TAVERN-HUB") {
+        if (roomId !== "TAVERN-HUB" && roomId !== "OPEN-WORLD") {
           partyCoordinator.clearRoomTimers(roomId);
           rooms.delete(roomId);
           roomDeltaStates.delete(roomId);
@@ -15634,66 +17486,129 @@ async function startServer() {
       const shouldBroadcast = clientCount > 0 && (room.status === "playing" || statusTransitioned || dirtyNonPlayingRooms.has(roomId) || anyNeedsKeyframe);
       if (shouldBroadcast && roomClientsIter) {
         const snapshot = room.buildNetworkSnapshot();
-        let deltaState = roomDeltaStates.get(roomId);
-        if (!deltaState) {
-          deltaState = { seq: 0, lastBaseline: null };
-          roomDeltaStates.set(roomId, deltaState);
-        }
-        const nextSeq = deltaState.seq + 1;
-        keyframeTargets.length = 0;
-        deltaTargets.length = 0;
-        if (!deltaState.lastBaseline) {
-          for (const c of roomClientsIter) keyframeTargets.push(c);
-        } else {
-          for (const c of roomClientsIter) {
-            if (c.needsKeyframe) keyframeTargets.push(c);
-            else deltaTargets.push(c);
-          }
-        }
-        if (keyframeTargets.length > 0) {
-          const rawKeyframe = JSON.stringify({
-            type: "room:tick",
-            snapshot,
-            seq: nextSeq
-          });
-          for (let i = 0; i < keyframeTargets.length; i++) {
-            const c = keyframeTargets[i];
-            const outcome = sendRawFrame(c, rawKeyframe, { droppable: true });
-            if (outcome === "sent") {
-              c.needsKeyframe = false;
-            } else if (outcome === "closed_overflow") {
-              roomClientIndex.removeFromRoom(c, roomId);
-              clients.delete(c);
+        if (room.roomMode === "open_world") {
+          for (const c of Array.from(roomClientsIter)) {
+            const prevState = c.clientDelta;
+            const projected = projectOpenWorldSnapshotForClient(
+              snapshot,
+              c.userId,
+              serverTickCounter,
+              prevState?.lastBaseline
+            );
+            if (c.needsKeyframe || !prevState || !prevState.lastBaseline) {
+              const nextSeq = (prevState?.seq ?? 0) + 1;
+              const rawKeyframe = JSON.stringify({
+                type: "room:tick",
+                snapshot: projected,
+                seq: nextSeq
+              });
+              const outcome = sendRawFrame(c, rawKeyframe, { droppable: true });
+              if (outcome === "sent") {
+                c.needsKeyframe = false;
+                c.clientDelta = {
+                  seq: nextSeq,
+                  lastBaseline: cloneSnapshotBaseline(projected)
+                };
+              } else if (outcome === "closed_overflow") {
+                c.clientDelta = void 0;
+                roomClientIndex.removeFromRoom(c, roomId);
+                clients.delete(c);
+              }
+            } else {
+              const nextSeq = prevState.seq + 1;
+              const delta = computeSnapshotDelta(
+                prevState.lastBaseline,
+                projected,
+                prevState.seq,
+                nextSeq
+              );
+              if (!isSnapshotDeltaEmpty(delta)) {
+                const rawDelta = JSON.stringify({
+                  type: "room:delta",
+                  delta
+                });
+                const outcome = sendRawFrame(c, rawDelta, { droppable: true });
+                if (outcome === "sent") {
+                  prevState.seq = nextSeq;
+                  prevState.lastBaseline = cloneSnapshotBaseline(projected);
+                } else if (outcome === "closed_overflow") {
+                  c.clientDelta = void 0;
+                  roomClientIndex.removeFromRoom(c, roomId);
+                  clients.delete(c);
+                }
+              }
             }
           }
-        }
-        if (deltaTargets.length > 0 && deltaState.lastBaseline) {
-          const delta = computeSnapshotDelta(
-            deltaState.lastBaseline,
-            snapshot,
-            deltaState.seq,
-            nextSeq
-          );
-          const stats = broadcastSerialized(
-            deltaTargets,
-            { type: "room:delta", delta },
-            { droppable: true }
-          );
-          if (stats.closedCount > 0) {
-            for (let i = 0; i < deltaTargets.length; i++) {
-              const c = deltaTargets[i];
-              if (c.ws.readyState !== WebSocket.OPEN) {
+          dirtyNonPlayingRooms.delete(roomId);
+        } else {
+          let deltaState = roomDeltaStates.get(roomId);
+          if (!deltaState) {
+            deltaState = { seq: 0, lastBaseline: null };
+            roomDeltaStates.set(roomId, deltaState);
+          }
+          const nextSeq = deltaState.seq + 1;
+          keyframeTargets.length = 0;
+          deltaTargets.length = 0;
+          if (!deltaState.lastBaseline) {
+            for (const c of roomClientsIter) keyframeTargets.push(c);
+          } else {
+            for (const c of roomClientsIter) {
+              if (c.needsKeyframe) keyframeTargets.push(c);
+              else deltaTargets.push(c);
+            }
+          }
+          let sentAnyFrame = false;
+          if (keyframeTargets.length > 0) {
+            sentAnyFrame = true;
+            const rawKeyframe = JSON.stringify({
+              type: "room:tick",
+              snapshot,
+              seq: nextSeq
+            });
+            for (let i = 0; i < keyframeTargets.length; i++) {
+              const c = keyframeTargets[i];
+              const outcome = sendRawFrame(c, rawKeyframe, { droppable: true });
+              if (outcome === "sent") {
+                c.needsKeyframe = false;
+              } else if (outcome === "closed_overflow") {
                 roomClientIndex.removeFromRoom(c, roomId);
                 clients.delete(c);
               }
             }
           }
-        }
-        deltaState.seq = nextSeq;
-        deltaState.lastBaseline = cloneSnapshotBaseline(snapshot);
-        dirtyNonPlayingRooms.delete(roomId);
-        for (const c of roomClientsIter) {
-          syncClientNpcDialogue(c, room);
+          if (deltaTargets.length > 0 && deltaState.lastBaseline) {
+            const delta = computeSnapshotDelta(
+              deltaState.lastBaseline,
+              snapshot,
+              deltaState.seq,
+              nextSeq
+            );
+            if (!isSnapshotDeltaEmpty(delta) || sentAnyFrame) {
+              sentAnyFrame = true;
+              const stats = broadcastSerialized(
+                deltaTargets,
+                { type: "room:delta", delta },
+                { droppable: true }
+              );
+              if (stats.closedCount > 0) {
+                for (let i = 0; i < deltaTargets.length; i++) {
+                  const c = deltaTargets[i];
+                  if (c.ws.readyState !== WebSocket.OPEN) {
+                    roomClientIndex.removeFromRoom(c, roomId);
+                    clients.delete(c);
+                  }
+                }
+              }
+            }
+          }
+          if (sentAnyFrame) {
+            deltaState.seq = nextSeq;
+            deltaState.lastBaseline = cloneSnapshotBaseline(snapshot);
+          }
+          dirtyNonPlayingRooms.delete(roomId);
+          for (const c of roomClientsIter) {
+            syncClientNpcDialogue(c, room);
+          }
         }
       }
       if (statusTransitioned) {

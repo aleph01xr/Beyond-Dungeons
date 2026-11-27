@@ -77,6 +77,22 @@ export const ExpandedMapModal: React.FC<ExpandedMapModalProps> = ({
   }, [map, canvasW, canvasH, scale, isOpenWorld]);
 
   const connectedPlayers = snapshot.players.filter((p) => p.connected);
+  let pvpLeaderId: string | null = null;
+  if (snapshot.pvpEnabled) {
+    let topKills = 0;
+    let tied = false;
+    for (const pl of connectedPlayers) {
+      const k = pl.kills || 0;
+      if (k > topKills) {
+        topKills = k;
+        pvpLeaderId = pl.id;
+        tied = false;
+      } else if (k > 0 && k === topKills) {
+        tied = true;
+      }
+    }
+    if (tied || topKills <= 0) pvpLeaderId = null;
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-1.5 sm:p-6 bg-black/85 backdrop-blur-md animate-in fade-in duration-200 select-none pb-safe pt-safe pl-safe pr-safe">
@@ -253,7 +269,7 @@ export const ExpandedMapModal: React.FC<ExpandedMapModalProps> = ({
                 <div
                   className={`absolute w-4 h-4 -ml-2 -mt-2 rounded-full border-2 flex items-center justify-center font-mono text-[8px] font-bold ${
                     snapshot.bossDefeated
-                      ? 'bg-[#10B981] border-[#6EE7B7] text-black animate-bounce'
+                      ? 'bg-[#10B981] border-[#6EE7B7] text-black shadow-[0_0_8px_rgba(16,185,129,0.75)]'
                       : snapshot.bossRoomCleared
                         ? 'bg-[#D97706] border-[#FCD34D] text-black'
                         : 'bg-[#0284C7] border-[#38BDF8] text-white'
@@ -274,6 +290,65 @@ export const ExpandedMapModal: React.FC<ExpandedMapModalProps> = ({
                 </div>
               )}
 
+              {/* Open World Active War Font Beacon */}
+              {isOpenWorld &&
+                (() => {
+                  const activeFont = snapshot.zones.find((z) => z.kind === 'overworld_font');
+                  if (!activeFont) return null;
+                  const fx = Math.floor(activeFont.x / TILE_SIZE) * scale;
+                  const fy = Math.floor(activeFont.y / TILE_SIZE) * scale;
+                  const isContested = activeFont.ownerId === 'contested';
+                  return (
+                    <div
+                      className={`absolute w-5 h-5 -ml-2.5 -mt-2.5 rotate-45 border-2 flex items-center justify-center font-mono text-[9px] font-bold shadow-lg ${
+                        isContested
+                          ? 'bg-[#EF4444] border-[#FEF08A] text-white'
+                          : 'bg-[#F59E0B] border-[#FEF08A] text-black'
+                      }`}
+                      style={{ left: fx, top: fy }}
+                      title={`War Font at ${activeFont.label || 'Borderlands'} · ${activeFont.stage ?? 0}%${isContested ? ' (CONTESTED)' : ''}`}
+                    >
+                      <span className="-rotate-45">W</span>
+                    </div>
+                  );
+                })()}
+
+              {/* Unclaimed Relics, Shrines & Unlocked Loot (Dungeon only) */}
+              {!isOpenWorld &&
+                snapshot.props &&
+                snapshot.props.map((pr) => {
+                  if (pr.opened) return null;
+                  if (pr.kind !== 'relic_chest' && pr.kind !== 'shrine' && !(pr.kind === 'chest' && !pr.locked) && !(pr.kind === 'totem' && !pr.locked)) {
+                    return null;
+                  }
+                  const px = Math.floor(pr.x / TILE_SIZE) * scale;
+                  const py = Math.floor(pr.y / TILE_SIZE) * scale;
+                  const markerStyle =
+                    pr.kind === 'relic_chest'
+                      ? 'w-2.5 h-2.5 -ml-1.25 -mt-1.25 rotate-45 bg-[#FDE047] border border-[#78350F]'
+                      : pr.kind === 'shrine'
+                        ? 'w-2.5 h-2.5 -ml-1.25 -mt-1.25 bg-[#34D399] border border-[#064E3B]'
+                        : pr.kind === 'totem'
+                          ? 'w-2 h-2 -ml-1 -mt-1 rounded-full bg-[#38BDF8] border border-[#0C4A6E]'
+                          : 'w-2 h-2 -ml-1 -mt-1 bg-[#FBBF24] border border-[#78350F]';
+                  const label =
+                    pr.kind === 'relic_chest'
+                      ? 'Unclaimed Relic Vault'
+                      : pr.kind === 'shrine'
+                        ? 'Sanctuary Shrine'
+                        : pr.kind === 'totem'
+                          ? 'Awakened Totem'
+                          : 'Unlocked Chest';
+                  return (
+                    <div
+                      key={`pr_${pr.id}`}
+                      className={`absolute ${markerStyle}`}
+                      style={{ left: px, top: py }}
+                      title={label}
+                    />
+                  );
+                })}
+
               {/* Enemy Dots */}
               {snapshot.enemies &&
                 snapshot.enemies.map((en) => {
@@ -284,7 +359,7 @@ export const ExpandedMapModal: React.FC<ExpandedMapModalProps> = ({
                     return (
                       <div
                         key={`en_${en.id}`}
-                        className="absolute w-5 h-5 -ml-2.5 -mt-2.5 rounded-full bg-[#DC2626] border-2 border-[#F87171] flex items-center justify-center text-[8px] font-mono font-bold text-white shadow-lg animate-pulse"
+                        className="absolute w-5 h-5 -ml-2.5 -mt-2.5 rounded-full bg-[#DC2626] border-2 border-[#FCA5A5] flex items-center justify-center text-[8px] font-mono font-bold text-white shadow-lg"
                         style={{ left: ex, top: ey }}
                         title={`${en.name} (Boss)`}
                       >
@@ -309,6 +384,7 @@ export const ExpandedMapModal: React.FC<ExpandedMapModalProps> = ({
                 const px = Math.floor(p.x / TILE_SIZE) * scale;
                 const py = Math.floor(p.y / TILE_SIZE) * scale;
                 const isRival = Boolean(snapshot.pvpEnabled && !isMe);
+                const isPvpLeader = p.id === pvpLeaderId;
 
                 return (
                   <div
@@ -319,16 +395,16 @@ export const ExpandedMapModal: React.FC<ExpandedMapModalProps> = ({
                     <div
                       className={`w-4 h-4 rounded-full border-2 flex items-center justify-center font-mono text-[9px] font-bold shadow-md ${
                         isMe
-                          ? 'bg-[#FACC15] border-[#854D0E] text-black animate-pulse'
+                          ? 'bg-[#FACC15] border-[#FEF08A] text-black'
                           : isRival
                             ? 'bg-[#EF4444] border-[#7F1D1D] text-white'
                             : 'bg-[#38BDF8] border-[#1E3A8A] text-black'
-                      }`}
+                      } ${isPvpLeader ? 'ring-2 ring-[#FACC15]' : ''}`}
                     >
                       {p.username.substring(0, 1).toUpperCase()}
                     </div>
                     <span className="text-[8px] font-mono bg-black/85 text-white px-1 border border-[#353442] whitespace-nowrap mt-0.5">
-                      {p.username}
+                      {isPvpLeader ? `★ ${p.username}` : p.username}
                     </span>
                   </div>
                 );
@@ -372,6 +448,10 @@ export const ExpandedMapModal: React.FC<ExpandedMapModalProps> = ({
                   <span className="w-3 h-3 bg-[#143820] border border-[#353442]" />
                   <span>Forest Ridge</span>
                 </div>
+                <div className="flex items-center gap-2">
+                  <span className="w-2.5 h-2.5 rotate-45 bg-[#F59E0B] border border-[#FEF08A]" />
+                  <span>War Font Objective</span>
+                </div>
               </>
             ) : (
               <>
@@ -394,6 +474,14 @@ export const ExpandedMapModal: React.FC<ExpandedMapModalProps> = ({
                 <div className="flex items-center gap-2">
                   <span className="w-3 h-3 rounded-full bg-[#38BDF8] border border-white" />
                   <span>Floor Portal</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="w-2.5 h-2.5 rotate-45 bg-[#FDE047] border border-[#78350F]" />
+                  <span>Unclaimed Relic</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="w-2.5 h-2.5 bg-[#34D399] border border-[#064E3B]" />
+                  <span>Shrine</span>
                 </div>
               </>
             )}

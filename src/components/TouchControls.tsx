@@ -35,8 +35,8 @@ export interface TouchSettings {
 const DEFAULT_TOUCH_SETTINGS: TouchSettings = {
   joystickSize: 'medium',
   joystickMode: 'floating',
-  buttonSize: 'compact',
-  opacity: 0.88,
+  buttonSize: 'standard',
+  opacity: 0.9,
   haptics: true,
 };
 
@@ -44,19 +44,19 @@ const JOYSTICK_CONFIGS: Record<
   JoystickSizeOption,
   { basePx: number; knobPx: number; maxRadius: number }
 > = {
-  small: { basePx: 100, knobPx: 44, maxRadius: 34 },
-  medium: { basePx: 125, knobPx: 52, maxRadius: 42 },
-  large: { basePx: 160, knobPx: 64, maxRadius: 56 },
-  huge: { basePx: 200, knobPx: 78, maxRadius: 72 },
+  small: { basePx: 108, knobPx: 48, maxRadius: 38 },
+  medium: { basePx: 136, knobPx: 58, maxRadius: 48 },
+  large: { basePx: 166, knobPx: 68, maxRadius: 58 },
+  huge: { basePx: 204, knobPx: 80, maxRadius: 74 },
 };
 
 const BUTTON_CONFIGS: Record<
   ButtonSizeOption,
   { util: number; skill: number; attack: number; icon: number }
 > = {
-  compact: { util: 36, skill: 46, attack: 64, icon: 16 },
-  standard: { util: 42, skill: 54, attack: 76, icon: 20 },
-  large: { util: 48, skill: 64, attack: 90, icon: 24 },
+  compact: { util: 44, skill: 58, attack: 78, icon: 20 },
+  standard: { util: 50, skill: 68, attack: 90, icon: 24 },
+  large: { util: 56, skill: 78, attack: 104, icon: 28 },
 };
 
 interface TouchControlsProps {
@@ -181,36 +181,68 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
   const dashSec = Math.ceil((player.dashCooldownMs || 0) / 1000);
   const isSilenced = Boolean(player.statuses && player.statuses.some((s) => s.type === 'silenced'));
 
-  // Dynamic scale calculation for compact mobile screens (100% zoom on mobile browsers)
-  const mobileViewportScale = React.useMemo(() => {
-    if (typeof window === 'undefined') return 1;
-    const minDim = Math.min(window.innerWidth, window.innerHeight);
-    if (minDim < 380) return 0.8;
-    if (minDim < 480) return 0.88;
-    if (minDim < 640) return 0.94;
-    return 1;
+  const [viewportDims, setViewportDims] = useState(() => ({
+    w: typeof window !== 'undefined' ? window.visualViewport?.width || window.innerWidth : 400,
+    h: typeof window !== 'undefined' ? window.visualViewport?.height || window.innerHeight : 800,
+  }));
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const updateDims = () => {
+      setViewportDims({
+        w: Math.round(window.visualViewport?.width || window.innerWidth),
+        h: Math.round(window.visualViewport?.height || window.innerHeight),
+      });
+    };
+    window.addEventListener('resize', updateDims);
+    window.addEventListener('orientationchange', updateDims);
+    window.visualViewport?.addEventListener('resize', updateDims);
+    return () => {
+      window.removeEventListener('resize', updateDims);
+      window.removeEventListener('orientationchange', updateDims);
+      window.visualViewport?.removeEventListener('resize', updateDims);
+    };
   }, []);
+
+  const isLandscapeMobile = viewportDims.w >= 540 && viewportDims.h < 520;
+
+  // Gentle scaling only on ultra-narrow (<360px) or short landscape (<400px) screens while enforcing >=44px touch targets
+  const mobileViewportScale = React.useMemo(() => {
+    const minDim = Math.min(viewportDims.w, viewportDims.h);
+    if (minDim < 340) return 0.88;
+    if (isLandscapeMobile && viewportDims.h < 400) return 0.88;
+    if (minDim < 380) return 0.93;
+    return 1;
+  }, [viewportDims, isLandscapeMobile]);
 
   const baseJoySpec = JOYSTICK_CONFIGS[settings.joystickSize] || JOYSTICK_CONFIGS.medium;
   const joySpec = React.useMemo(() => {
     if (mobileViewportScale === 1) return baseJoySpec;
     return {
-      basePx: Math.round(baseJoySpec.basePx * mobileViewportScale),
-      knobPx: Math.round(baseJoySpec.knobPx * mobileViewportScale),
-      maxRadius: Math.round(baseJoySpec.maxRadius * mobileViewportScale),
+      basePx: Math.max(96, Math.round(baseJoySpec.basePx * mobileViewportScale)),
+      knobPx: Math.max(44, Math.round(baseJoySpec.knobPx * mobileViewportScale)),
+      maxRadius: Math.max(34, Math.round(baseJoySpec.maxRadius * mobileViewportScale)),
     };
   }, [baseJoySpec, mobileViewportScale]);
 
-  const baseBtnSpec = BUTTON_CONFIGS[settings.buttonSize] || BUTTON_CONFIGS.compact;
+  const baseBtnSpec = BUTTON_CONFIGS[settings.buttonSize] || BUTTON_CONFIGS.standard;
   const btnSpec = React.useMemo(() => {
     if (mobileViewportScale === 1) return baseBtnSpec;
     return {
-      util: Math.round(baseBtnSpec.util * mobileViewportScale),
-      skill: Math.round(baseBtnSpec.skill * mobileViewportScale),
-      attack: Math.round(baseBtnSpec.attack * mobileViewportScale),
-      icon: Math.round(baseBtnSpec.icon * mobileViewportScale),
+      util: Math.max(44, Math.round(baseBtnSpec.util * mobileViewportScale)),
+      skill: Math.max(56, Math.round(baseBtnSpec.skill * mobileViewportScale)),
+      attack: Math.max(76, Math.round(baseBtnSpec.attack * mobileViewportScale)),
+      icon: Math.max(18, Math.round(baseBtnSpec.icon * mobileViewportScale)),
     };
   }, [baseBtnSpec, mobileViewportScale]);
+
+  const arcDims = React.useMemo(() => {
+    const maxPortraitW = Math.max(184, Math.round(viewportDims.w * 0.56));
+    const desiredW = Math.round(btnSpec.attack * 2.45);
+    const width = isLandscapeMobile ? desiredW : Math.min(maxPortraitW, desiredW);
+    const height = Math.round(btnSpec.attack * 2.02);
+    return { width, height };
+  }, [btnSpec.attack, isLandscapeMobile, viewportDims.w]);
 
   const triggerHaptic = (ms = 12) => {
     if (settings.haptics && typeof navigator !== 'undefined' && navigator.vibrate) {
@@ -724,13 +756,17 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
       style={{ opacity: settings.opacity }}
       className="fixed inset-0 pointer-events-none select-none z-20 touch-none"
     >
-      {/* LEFT HALF SCREEN: Joystick Touch Catch Area */}
+      {/* LEFT JOYSTICK CATCH AREA (Bounded cleanly so right combat cluster never overlaps) */}
       <div
         onTouchStart={handleLeftZoneTouchStart}
         onTouchMove={handleLeftZoneTouchMove}
         onTouchEnd={handleLeftZoneTouchEnd}
         onTouchCancel={handleLeftZoneTouchEnd}
-        className="pointer-events-auto absolute left-0 bottom-0 top-12 sm:top-16 w-[50vw] touch-none flex items-end p-2.5 sm:p-5 pl-safe pb-safe"
+        className={`pointer-events-auto absolute left-0 bottom-0 touch-none flex items-end p-2.5 sm:p-5 pl-safe pb-safe ${
+          isLandscapeMobile
+            ? 'top-14 w-[35vw] max-w-[300px]'
+            : 'top-36 w-[40vw] max-w-[240px]'
+        }`}
       >
         {/* Floating Joystick Base */}
         {settings.joystickMode === 'floating' && floatingOrigin && isStickActive && (
@@ -792,34 +828,31 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
         )}
 
         {settings.joystickMode === 'floating' && !isStickActive && (
-          <div className="flex items-center gap-1.5 text-[11px] font-mono text-[#9D9AAC]/75 bg-[#161622]/50 px-2.5 py-1 border border-[#3C3A4D] pointer-events-none">
+          <div className="flex items-center gap-1.5 text-xs font-mono text-[#D1CFDC]/85 bg-[#161622]/65 px-3 py-1.5 border border-[#3C3A4D] pointer-events-none">
             <span>Touch to Move</span>
           </div>
         )}
       </div>
 
-      {/* RIGHT ACTION CLUSTER */}
-      <div className="pointer-events-auto absolute right-1.5 sm:right-5 bottom-1.5 sm:bottom-5 pr-safe pb-safe flex flex-col items-end gap-1.5 sm:gap-2.5">
-        {/* Progression Status Bar (Mobile) */}
-        <div className="flex flex-col items-end gap-1 mb-1 pr-1">
-          <div className="text-[9px] font-mono font-bold text-[#FCD34D] bg-[#181822]/60 px-1.5 py-0.5 border border-[#3C3A4D]">
-            {player.level >= MAX_LEVEL ? 'MAX LEVEL' : `LV.${player.level}`}
+      {/* LANDSCAPE BOTTOM-CENTER MICRO UTILITIES (Keeps right combat cluster compact & below minimap) */}
+      {isLandscapeMobile && (
+        <div className="pointer-events-auto fixed bottom-2.5 left-1/2 -translate-x-1/2 pb-safe flex items-center gap-3 z-20">
+          <div className="flex flex-col items-center gap-0.5 mr-1">
+            <div className="text-[10px] font-mono font-bold text-[#FCD34D] bg-[#181822]/80 px-2 py-0.5 border border-[#3C3A4D]">
+              {player.level >= MAX_LEVEL ? 'MAX' : `LV.${player.level}`}
+            </div>
+            <div className="w-16 h-1 bg-[#12111A]/85 border border-[#3C3A52] relative overflow-hidden">
+              {player.level >= MAX_LEVEL ? (
+                <div className="absolute inset-0 bg-[#FCD34D]" />
+              ) : (
+                <div
+                  className="h-full bg-gradient-to-r from-[#D9AA52] to-[#FDE68A]"
+                  style={{ width: `${Math.min(100, (player.xp / Math.max(1, player.nextXp)) * 100)}%` }}
+                />
+              )}
+            </div>
           </div>
-          <div className="w-20 h-1.5 bg-[#12111A]/80 border border-[#3C3A52] relative overflow-hidden">
-            {player.level >= MAX_LEVEL ? (
-              <div className="absolute inset-0 bg-[#FCD34D]" />
-            ) : (
-              <div 
-                className="h-full bg-gradient-to-r from-[#D9AA52] to-[#FDE68A]" 
-                style={{ width: `${Math.min(100, (player.xp / Math.max(1, player.nextXp)) * 100)}%` }} 
-              />
-            )}
-          </div>
-        </div>
 
-        {/* Upper Utility Row */}
-        <div className="flex items-center gap-2">
-          {/* Settings Gear */}
           <button
             type="button"
             onTouchStart={(e) => {
@@ -833,8 +866,8 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
               sfx.playUiClick();
               onOpenSettings();
             }}
-            style={{ width: `${btnSpec.util}px`, height: `${btnSpec.util}px` }}
-            className="rounded-full bg-[#242332]/90 border border-[#525066] text-white flex items-center justify-center active:scale-95 transition-transform shadow-md cursor-pointer"
+            style={{ width: `${Math.max(44, btnSpec.util - 4)}px`, height: `${Math.max(44, btnSpec.util - 4)}px` }}
+            className="rounded-full bg-[#242332]/92 border-2 border-[#525066] text-white flex items-center justify-center active:scale-95 transition-transform shadow-md cursor-pointer"
             aria-label="Touch Controls Settings"
             title="Touch Controls Settings"
           >
@@ -844,7 +877,6 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
             </svg>
           </button>
 
-          {/* Ping */}
           <button
             type="button"
             onTouchStart={(e) => {
@@ -853,95 +885,191 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
               triggerHaptic(14);
               onSendPing('Rally Here', player.x, player.y - 18);
             }}
-            style={{ width: `${btnSpec.util}px`, height: `${btnSpec.util}px` }}
-            className="rounded-full bg-[#242332]/90 border border-[#525066] text-white flex items-center justify-center active:scale-95 transition-transform shadow-md cursor-pointer"
+            style={{ width: `${Math.max(44, btnSpec.util - 4)}px`, height: `${Math.max(44, btnSpec.util - 4)}px` }}
+            className="rounded-full bg-[#242332]/92 border-2 border-[#525066] text-white flex items-center justify-center active:scale-95 transition-transform shadow-md cursor-pointer"
             aria-label="Rally Ping"
           >
             <svg width={btnSpec.icon} height={btnSpec.icon} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
               <path d="M12 2v20M2 12h20" />
             </svg>
           </button>
-
-          {/* Potion */}
-          <button
-            type="button"
-            onTouchStart={(e) => {
-              e.stopPropagation();
-              if (player.potions > 0) {
-                sfx.playHeal();
-                triggerHaptic(20);
-                onTriggerAction('potion', player.aimAngle);
-              }
-            }}
-            style={{ width: `${btnSpec.util + 4}px`, height: `${btnSpec.util + 4}px` }}
-            className={`rounded-full border-2 flex flex-col items-center justify-center active:scale-95 transition-transform shadow-md cursor-pointer ${
-              player.potions > 0
-                ? 'bg-[#3D1A22]/95 border-[#E11D48] text-[#FDA4AF]'
-                : 'bg-[#1E1E28]/85 border-[#38364C] text-[#6E6C7D]'
-            }`}
-            aria-label="Healing Flask"
-          >
-            <span className="text-[11px] font-mono font-bold leading-none">
-              {player.potions}
-            </span>
-            <span className="text-[8px] font-mono leading-none mt-0.5">HEAL</span>
-          </button>
-
-          {/* Interact */}
-          <button
-            type="button"
-            onTouchStart={(e) => {
-              e.stopPropagation();
-              sfx.playUiClick();
-              triggerHaptic(16);
-              onTriggerAction('interact', player.aimAngle);
-            }}
-            style={{ width: `${btnSpec.util + 4}px`, height: `${btnSpec.util + 4}px` }}
-            className={`rounded-full border-2 flex items-center justify-center font-display text-xs font-bold active:scale-95 transition-all shadow-md cursor-pointer ${
-              nearInteractable
-                ? 'bg-[#1E3A8A]/95 border-[#60A5FA] text-white animate-pulse'
-                : 'bg-[#222332]/85 border-[#47455E] text-[#D1CFDC]'
-            }`}
-            aria-label="Interact"
-          >
-            [E]
-          </button>
-
-          {/* Dash Button [C] - Hold & Drag to Aim */}
-          <button
-            type="button"
-            onTouchStart={(e) => handleAbilityTouchStart('dash', e)}
-            onTouchMove={handleAbilityTouchMove}
-            onTouchEnd={(e) => handleAbilityTouchEnd(e, false)}
-            onTouchCancel={(e) => handleAbilityTouchEnd(e, true)}
-            style={{ width: `${btnSpec.util + 8}px`, height: `${btnSpec.util + 8}px` }}
-            className={`rounded-full border-2 flex flex-col items-center justify-center transition-transform shadow-md cursor-pointer ${
-              skillWheelUi?.action === 'dash'
-                ? 'scale-110 bg-[#422006]/95 border-[#FEF08A] text-[#FEF08A] ring-2 ring-[#F59E0B]/70'
-                : dashSec > 0
-                ? 'bg-[#1E1E28]/85 border-[#38364C] text-[#6E6C7D]'
-                : 'bg-[#2A2314]/95 border-[#F59E0B] text-[#FDE68A] active:scale-95'
-            }`}
-            aria-label="Dash Evasion"
-          >
-            <span className="text-[10px] font-mono font-bold leading-none">
-              {dashSec > 0 ? `${dashSec}s` : 'DASH'}
-            </span>
-            <span className="text-[7.5px] font-mono leading-none mt-0.5 opacity-80">
-              [C]
-            </span>
-          </button>
         </div>
+      )}
 
-        {/* Lower Combat Cluster */}
+      {/* RIGHT ACTION CLUSTER (Compact horizontal width, spacious radial gaps) */}
+      <div
+        className={`pointer-events-auto absolute right-2.5 sm:right-5 bottom-2.5 sm:bottom-5 pr-safe pb-safe flex ${
+          isLandscapeMobile ? 'flex-row items-end gap-4' : 'flex-col items-end gap-3'
+        }`}
+      >
+        {/* Portrait Top Utility Row (Split cleanly into 2 spacious rows instead of 1 jammed 5-button strip) */}
+        {!isLandscapeMobile && (
+          <div className="flex flex-col items-end gap-2.5">
+            {/* Micro Utility + Level Row */}
+            <div className="flex items-center gap-3">
+              <div className="flex flex-col items-end gap-1 mr-0.5">
+                <div className="text-[10px] font-mono font-bold text-[#FCD34D] bg-[#181822]/75 px-2 py-0.5 border border-[#3C3A4D]">
+                  {player.level >= MAX_LEVEL ? 'MAX LEVEL' : `LV.${player.level}`}
+                </div>
+                <div className="w-20 h-1.5 bg-[#12111A]/85 border border-[#3C3A52] relative overflow-hidden">
+                  {player.level >= MAX_LEVEL ? (
+                    <div className="absolute inset-0 bg-[#FCD34D]" />
+                  ) : (
+                    <div
+                      className="h-full bg-gradient-to-r from-[#D9AA52] to-[#FDE68A]"
+                      style={{ width: `${Math.min(100, (player.xp / Math.max(1, player.nextXp)) * 100)}%` }}
+                    />
+                  )}
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onTouchStart={(e) => {
+                  e.stopPropagation();
+                  sfx.playUiClick();
+                  triggerHaptic(12);
+                  onOpenSettings();
+                }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  sfx.playUiClick();
+                  onOpenSettings();
+                }}
+                style={{ width: `${Math.max(44, btnSpec.util - 4)}px`, height: `${Math.max(44, btnSpec.util - 4)}px` }}
+                className="rounded-full bg-[#242332]/92 border-2 border-[#525066] text-white flex items-center justify-center active:scale-95 transition-transform shadow-md cursor-pointer"
+                aria-label="Touch Controls Settings"
+                title="Touch Controls Settings"
+              >
+                <svg width={btnSpec.icon} height={btnSpec.icon} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+                  <circle cx="12" cy="12" r="3" />
+                  <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z" />
+                </svg>
+              </button>
+
+              <button
+                type="button"
+                onTouchStart={(e) => {
+                  e.stopPropagation();
+                  sfx.playUiClick();
+                  triggerHaptic(14);
+                  onSendPing('Rally Here', player.x, player.y - 18);
+                }}
+                style={{ width: `${Math.max(44, btnSpec.util - 4)}px`, height: `${Math.max(44, btnSpec.util - 4)}px` }}
+                className="rounded-full bg-[#242332]/92 border-2 border-[#525066] text-white flex items-center justify-center active:scale-95 transition-transform shadow-md cursor-pointer"
+                aria-label="Rally Ping"
+              >
+                <svg width={btnSpec.icon} height={btnSpec.icon} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <path d="M12 2v20M2 12h20" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Flask + Interact Row */}
+            <div className="flex items-center gap-3.5">
+              <button
+                type="button"
+                onTouchStart={(e) => {
+                  e.stopPropagation();
+                  if (player.potions > 0) {
+                    sfx.playHeal();
+                    triggerHaptic(20);
+                    onTriggerAction('potion', player.aimAngle);
+                  }
+                }}
+                style={{ width: `${btnSpec.util + 4}px`, height: `${btnSpec.util + 4}px` }}
+                className={`rounded-full border-2 flex flex-col items-center justify-center active:scale-95 transition-transform shadow-md cursor-pointer ${
+                  player.potions > 0
+                    ? 'bg-[#3D1A22]/95 border-[#E11D48] text-[#FDA4AF]'
+                    : 'bg-[#1E1E28]/85 border-[#38364C] text-[#6E6C7D]'
+                }`}
+                aria-label="Healing Flask"
+              >
+                <span className="text-[13px] font-mono font-bold leading-none tabular-nums">
+                  {player.potions}
+                </span>
+                <span className="text-[9.5px] font-mono font-bold leading-none mt-0.5">HEAL</span>
+              </button>
+
+              <button
+                type="button"
+                onTouchStart={(e) => {
+                  e.stopPropagation();
+                  sfx.playUiClick();
+                  triggerHaptic(16);
+                  onTriggerAction('interact', player.aimAngle);
+                }}
+                style={{ width: `${btnSpec.util + 4}px`, height: `${btnSpec.util + 4}px` }}
+                className={`rounded-full border-2 flex flex-col items-center justify-center font-display text-xs font-bold active:scale-95 transition-all shadow-md cursor-pointer ${
+                  nearInteractable
+                    ? 'bg-[#1E3A8A]/95 border-[#60A5FA] text-white animate-pulse'
+                    : 'bg-[#222332]/90 border-[#47455E] text-[#D1CFDC]'
+                }`}
+                aria-label="Interact"
+              >
+                <span className="text-[12px] font-mono font-bold leading-none">USE</span>
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Landscape Wing: Flask + Interact stacked vertically beside Combat Arc */}
+        {isLandscapeMobile && (
+          <div className="flex flex-col items-center gap-3.5 pb-1">
+            <button
+              type="button"
+              onTouchStart={(e) => {
+                e.stopPropagation();
+                if (player.potions > 0) {
+                  sfx.playHeal();
+                  triggerHaptic(20);
+                  onTriggerAction('potion', player.aimAngle);
+                }
+              }}
+              style={{ width: `${btnSpec.util + 4}px`, height: `${btnSpec.util + 4}px` }}
+              className={`rounded-full border-2 flex flex-col items-center justify-center active:scale-95 transition-transform shadow-md cursor-pointer ${
+                player.potions > 0
+                  ? 'bg-[#3D1A22]/95 border-[#E11D48] text-[#FDA4AF]'
+                  : 'bg-[#1E1E28]/85 border-[#38364C] text-[#6E6C7D]'
+              }`}
+              aria-label="Healing Flask"
+            >
+              <span className="text-[13px] font-mono font-bold leading-none tabular-nums">
+                {player.potions}
+              </span>
+              <span className="text-[9.5px] font-mono font-bold leading-none mt-0.5">HEAL</span>
+            </button>
+
+            <button
+              type="button"
+              onTouchStart={(e) => {
+                e.stopPropagation();
+                sfx.playUiClick();
+                triggerHaptic(16);
+                onTriggerAction('interact', player.aimAngle);
+              }}
+              style={{ width: `${btnSpec.util + 4}px`, height: `${btnSpec.util + 4}px` }}
+              className={`rounded-full border-2 flex flex-col items-center justify-center font-display text-xs font-bold active:scale-95 transition-all shadow-md cursor-pointer ${
+                nearInteractable
+                  ? 'bg-[#1E3A8A]/95 border-[#60A5FA] text-white animate-pulse'
+                  : 'bg-[#222332]/90 border-[#47455E] text-[#D1CFDC]'
+              }`}
+              aria-label="Interact"
+            >
+              <span className="text-[12px] font-mono font-bold leading-none">USE</span>
+            </button>
+          </div>
+        )}
+
+        {/* Combat Arc: Attack + Tactical + Ult + Dash with generous radial gaps */}
         <div
           style={{
-            width: `${btnSpec.attack * 2.2}px`,
-            height: `${btnSpec.attack * 1.6}px`,
+            width: `${arcDims.width}px`,
+            height: `${arcDims.height}px`,
           }}
           className="relative flex items-end justify-end"
         >
-          {/* Tactical Skill [Q] - Hold & Drag to Aim */}
+          {/* Skill 1: Tactical - Hold & Drag to Aim */}
           <button
             type="button"
             onTouchStart={(e) => handleAbilityTouchStart('tactical', e)}
@@ -951,12 +1079,14 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
             style={{
               width: `${btnSpec.skill}px`,
               height: `${btnSpec.skill}px`,
+              bottom: '4px',
+              left: '0px',
               borderColor:
                 skillWheelUi?.action === 'tactical' || isSilenced || tacSec > 0
                   ? undefined
                   : activeTactical.accentColor,
             }}
-            className={`absolute top-0 left-0 rounded-full border-2 flex flex-col items-center justify-center transition-transform shadow-lg cursor-pointer ${
+            className={`absolute rounded-full border-2 flex flex-col items-center justify-center transition-transform shadow-lg cursor-pointer ${
               skillWheelUi?.action === 'tactical'
                 ? 'scale-110 bg-[#1E1B4B]/95 border-[#38BDF8] text-white ring-2 ring-[#38BDF8]/70'
                 : isSilenced
@@ -968,13 +1098,13 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
             aria-label={tacticalLabel}
           >
             {isSilenced || isChanneling || tacSec > 0 ? (
-              <span className="text-xs font-mono font-bold leading-none tabular-nums">
+              <span className="text-sm font-mono font-bold leading-none tabular-nums">
                 {isSilenced ? 'SIL' : isChanneling ? 'CHAN' : `${tacSec}s`}
               </span>
             ) : (
-              <TacticalSkillIcon tacticalId={activeTactical.id} color={activeTactical.accentColor} size={15} />
+              <TacticalSkillIcon tacticalId={activeTactical.id} color={activeTactical.accentColor} size={Math.round(btnSpec.icon * 0.9)} />
             )}
-            <span className="text-[7.5px] font-display truncate max-w-[42px] mt-0.5">
+            <span className="text-[10px] font-display truncate max-w-[54px] mt-0.5 leading-tight">
               {isSilenced
                 ? 'Sealed'
                 : isChanneling
@@ -985,7 +1115,7 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
             </span>
           </button>
 
-          {/* Ultimate Ability [R] - Hold & Drag to Aim */}
+          {/* Skill 2: Ultimate - Hold & Drag to Aim */}
           <button
             type="button"
             onTouchStart={(e) => handleAbilityTouchStart('ult', e)}
@@ -995,9 +1125,10 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
             style={{
               width: `${btnSpec.skill}px`,
               height: `${btnSpec.skill}px`,
-              right: `${btnSpec.attack * 0.9}px`,
+              top: `${Math.round(arcDims.height * 0.08)}px`,
+              left: `${Math.round(arcDims.width * 0.08)}px`,
             }}
-            className={`absolute top-0 rounded-full border-2 flex flex-col items-center justify-center transition-transform shadow-lg cursor-pointer ${
+            className={`absolute rounded-full border-2 flex flex-col items-center justify-center transition-transform shadow-lg cursor-pointer ${
               skillWheelUi?.action === 'ult'
                 ? 'scale-110 bg-[#451A03]/95 border-[#FEF08A] text-white ring-2 ring-[#F59E0B]/80'
                 : isSilenced
@@ -1008,11 +1139,41 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
             }`}
             aria-label={heroDef.ultName}
           >
-            <span className="text-xs font-mono font-bold leading-none">
-              {isSilenced ? 'SIL' : ultSec > 0 ? `${ultSec}s` : 'R'}
+            <span className="text-sm font-mono font-bold leading-none tabular-nums">
+              {isSilenced ? 'SIL' : ultSec > 0 ? `${ultSec}s` : 'ULT'}
             </span>
-            <span className="text-[7.5px] font-display truncate max-w-[42px] mt-0.5">
-              {isSilenced ? 'Sealed' : ultSec > 0 ? 'Wait' : 'ULT'}
+            <span className="text-[9.5px] font-display truncate max-w-[54px] mt-0.5 leading-tight">
+              {isSilenced ? 'Sealed' : ultSec > 0 ? 'Wait' : heroDef.ultName.split(' ')[0]}
+            </span>
+          </button>
+
+          {/* Dash Button (Anchored neatly above Attack inside the radial arc) */}
+          <button
+            type="button"
+            onTouchStart={(e) => handleAbilityTouchStart('dash', e)}
+            onTouchMove={handleAbilityTouchMove}
+            onTouchEnd={(e) => handleAbilityTouchEnd(e, false)}
+            onTouchCancel={(e) => handleAbilityTouchEnd(e, true)}
+            style={{
+              width: `${btnSpec.util + 6}px`,
+              height: `${btnSpec.util + 6}px`,
+              top: '0px',
+              right: '4px',
+            }}
+            className={`absolute rounded-full border-2 flex flex-col items-center justify-center transition-transform shadow-md cursor-pointer ${
+              skillWheelUi?.action === 'dash'
+                ? 'scale-110 bg-[#422006]/95 border-[#FEF08A] text-[#FEF08A] ring-2 ring-[#F59E0B]/70'
+                : dashSec > 0
+                ? 'bg-[#1E1E28]/85 border-[#38364C] text-[#6E6C7D]'
+                : 'bg-[#2A2314]/95 border-[#F59E0B] text-[#FDE68A] active:scale-95'
+            }`}
+            aria-label="Dash Evasion"
+          >
+            <span className="text-[11px] font-mono font-bold leading-none tabular-nums">
+              {dashSec > 0 ? `${dashSec}s` : 'DASH'}
+            </span>
+            <span className="text-[8.5px] font-mono leading-none mt-0.5 opacity-85">
+              EVADE
             </span>
           </button>
 
@@ -1034,8 +1195,8 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
             aria-label="Attack"
           >
             <svg
-              width={btnSpec.attack * 0.42}
-              height={btnSpec.attack * 0.42}
+              width={btnSpec.attack * 0.44}
+              height={btnSpec.attack * 0.44}
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
@@ -1058,7 +1219,7 @@ export const TouchControls: React.FC<TouchControlsProps> = ({
           {/* Cancel Cast Drop Zone */}
           <div
             ref={cancelZoneRef}
-            className={`fixed right-36 sm:right-52 bottom-44 sm:bottom-52 z-30 w-16 h-16 rounded-full border-2 flex flex-col items-center justify-center pointer-events-none transition-all shadow-2xl ${
+            className={`fixed right-44 sm:right-56 bottom-48 sm:bottom-56 z-30 w-18 h-18 rounded-full border-2 flex flex-col items-center justify-center pointer-events-none transition-all shadow-2xl ${
               skillWheelUi.cancelled
                 ? 'scale-115 bg-[#991B1B]/95 border-[#FECACA] text-white ring-4 ring-[#EF4444]/60'
                 : 'bg-[#1E1418]/90 border-[#EF4444]/80 text-[#FCA5A5]'

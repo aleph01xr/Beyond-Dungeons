@@ -1066,15 +1066,20 @@ export function drawNpc(
   ctx.restore();
 
   // Distinctive Name Badge & Interaction Prompt (never mirrored)
-  const bob = Math.sin(now * 0.0035 + x) * 1.5;
-  ctx.font = '700 10.5px "Plus Jakarta Sans", sans-serif';
-  ctx.fillStyle = isSpeaking ? '#FCD34D' : '#FDE68A';
+  const bob = Math.round(Math.sin(now * 0.0035 + x) * 1.5);
+  ctx.font = '700 11px "Pixelify Sans", "JetBrains Mono", monospace';
   ctx.textAlign = 'center';
+  ctx.fillStyle = '#0B0A10';
+  ctx.fillText(npc.name, x + 1, y - 23 + bob);
+  ctx.fillStyle = isSpeaking ? '#FCD34D' : '#FDE68A';
   ctx.fillText(npc.name, x, y - 24 + bob);
 
+  const promptText = isSpeaking ? '• Speaking •' : '[E] Talk';
+  ctx.font = '700 9px "Pixelify Sans", "JetBrains Mono", monospace';
+  ctx.fillStyle = '#0B0A10';
+  ctx.fillText(promptText, x + 1, y - 33 + bob);
   ctx.fillStyle = isSpeaking ? '#38BDF8' : '#94A3B8';
-  ctx.font = '600 9px "JetBrains Mono", monospace';
-  ctx.fillText(isSpeaking ? '• Speaking •' : '[E] Talk', x, y - 34 + bob);
+  ctx.fillText(promptText, x, y - 34 + bob);
 }
 
 /**

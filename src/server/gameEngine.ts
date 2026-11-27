@@ -163,6 +163,9 @@ interface EnemyRuntimeMeta {
   bossRecentDmgTaken: number;
   bossRecentDmgAtMs: number;
   galeburstByOwner?: Map<string, number>;
+  mobStrafeDir: number;
+  mobStrafeFlipAtMs: number;
+  mobShotCounter: number;
 }
 
 const MAX_FLOORS_FOR_VICTORY = 10;
@@ -220,6 +223,13 @@ export class GameRoom {
     { carryMsRemaining: number | null; draggedEnemyIds: Set<string> }
   >();
   private pvpGaleburstStacks = new Map<string, Map<string, number>>();
+  private pvpStreaks = new Map<string, number>();
+  private spikeTrapCooldowns = new Map<string, number>();
+  private overworldFontCooldownMs = 1500;
+  private overworldFontRegionCursor = 0;
+  private overworldFontTypeCursor = 0;
+  private overworldFontChargeAcc = 0;
+  private overworldFontPulseAccumMs = 0;
   public onFloorClearedCallback?: (playerIds: string[], floor: number) => void;
   public onKillCallback?: (playerId: string, meta?: { isBoss?: boolean }) => void;
   public onReviveCallback?: (playerId: string) => void;
@@ -699,9 +709,13 @@ export class GameRoom {
     return Math.round(80 + (lvl - 1) * 60 + Math.pow(lvl - 1, 1.75) * 12);
   }
 
-  public computeEnemyDamage(baseHit: number, enemy?: EnemyState | null): number {
+  public computeEnemyDamage(
+    baseHit: number,
+    enemy?: EnemyState | null,
+    opts?: { skipPoison?: boolean }
+  ): number {
     const diffMult = this.difficulty === 'Abyssal' ? 1.40 : this.difficulty === 'Heroic' ? 1.18 : 1.0;
-    const floorBonus = (this.floor - 1) * 2;
+    const floorBonus = (this.floor - 1) * 2.2;
     const partyScale = 1 + Math.max(0, this.players.size - 1) * 0.10;
     let dmg = (baseHit + floorBonus) * diffMult * partyScale;
     if (enemy && enemy.kind === 'boss' && this.floor > 0) {
@@ -709,8 +723,10 @@ export class GameRoom {
       if (wards > 0) {
         dmg *= 1 + Math.min(0.28, wards * 0.07);
       }
+    } else if (enemy && enemy.kind !== 'boss' && enemy.elite) {
+      dmg *= 1.22;
     }
-    if (enemy && (enemy.poisonedMs || 0) > 0) {
+    if (!opts?.skipPoison && enemy && (enemy.poisonedMs || 0) > 0) {
       dmg *= 0.70;
     }
     return Math.max(1, Math.round(dmg));
@@ -788,6 +804,11 @@ export class GameRoom {
     this.temporalCreditedProjIds.clear();
     this.triggeredOnceProjIds.clear();
     this.pvpGaleburstStacks.clear();
+    this.pvpStreaks.clear();
+    this.spikeTrapCooldowns.clear();
+    this.overworldFontCooldownMs = 1500;
+    this.overworldFontChargeAcc = 0;
+    this.overworldFontPulseAccumMs = 0;
     if (this.isOpenWorld) {
       const ow = generateOpenWorldMap(this.baseSeed);
       this.map = ow.map;
@@ -1012,10 +1033,143 @@ export class GameRoom {
         bossStrafeFlipAtMs: 0,
         bossRecentDmgTaken: 0,
         bossRecentDmgAtMs: 0,
+        mobStrafeDir: Math.random() < 0.5 ? 1 : -1,
+        mobStrafeFlipAtMs: 0,
+        mobShotCounter: 0,
       };
       this.enemyMeta.set(enemy.id, meta);
     }
     return meta;
+  }
+
+  private aimAngleWithLead(
+    enemy: EnemyState,
+    target: PlayerState,
+    projSpeed: number,
+    leadFactor = 0.45
+  ): number {
+    const dx = target.x - enemy.x;
+    const dy = target.y - enemy.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist <= 1 || projSpeed <= 0) return Math.atan2(dy, dx);
+    const travelSec = Math.min(0.85, dist / projSpeed) * leadFactor;
+    const predX = target.x + (target.vx || 0) * travelSec;
+    const predY = target.y + (target.vy || 0) * travelSec;
+    return Math.atan2(predY - enemy.y, predX - enemy.x);
+  }
+
+  private startMobCharge(
+    enemy: EnemyState,
+    angle: number,
+    windupMs: number,
+    chargeDurationMs: number
+  ): void {
+    const meta = this.getEnemyMeta(enemy);
+    meta.chargeHitPlayerIds.clear();
+    enemy.charging = true;
+    enemy.chargeAngle = angle;
+    enemy.chargeWindupMs = windupMs;
+    enemy.chargeTimerMs = chargeDurationMs;
+    enemy.state = 'windup';
+    enemy.vx = 0;
+    enemy.vy = 0;
+  }
+
+  private stepMobCharge(
+    enemy: EnemyState,
+    dashSpeed: number,
+    impactRadiusBonus: number,
+    baseHit: number,
+    damageCat: DamageCategory,
+    dtMs: number,
+    dtSec: number,
+    onHitPlayer?: (p: PlayerState) => void,
+    onComplete?: () => void
+  ): boolean {
+    if (!enemy.charging) return false;
+    if ((enemy.chargeWindupMs || 0) > 0) {
+      enemy.chargeWindupMs = Math.max(0, (enemy.chargeWindupMs || 0) - dtMs);
+      enemy.state = 'windup';
+      enemy.vx = 0;
+      enemy.vy = 0;
+      return true;
+    }
+
+    const cAng = enemy.chargeAngle ?? 0;
+    enemy.state = 'charge';
+    enemy.vx = Math.cos(cAng) * dashSpeed;
+    enemy.vy = Math.sin(cAng) * dashSpeed;
+    const prevX = enemy.x;
+    const prevY = enemy.y;
+    this.moveWithCollision(enemy, enemy.vx * dtSec, enemy.vy * dtSec, enemy.radius - 2);
+    const moved = Math.hypot(enemy.x - prevX, enemy.y - prevY);
+
+    const meta = this.getEnemyMeta(enemy);
+    const hitR = enemy.radius + impactRadiusBonus;
+    const hitRSq = hitR * hitR;
+    for (const pr of this.players.values()) {
+      const p = pr.state;
+      if (!p.connected || p.downed || meta.chargeHitPlayerIds.has(p.id)) continue;
+      const dx = p.x - enemy.x;
+      const dy = p.y - enemy.y;
+      if (dx * dx + dy * dy <= hitRSq) {
+        meta.chargeHitPlayerIds.add(p.id);
+        this.damagePlayer(p, this.computeEnemyDamage(baseHit, enemy), damageCat);
+        if (onHitPlayer) onHitPlayer(p);
+      }
+    }
+
+    enemy.chargeTimerMs = Math.max(0, (enemy.chargeTimerMs || 0) - dtMs);
+    if (enemy.chargeTimerMs <= 0 || moved < 0.25) {
+      this.clearEnemyChargeState(enemy);
+      enemy.state = 'recover';
+      if (onComplete) onComplete();
+    }
+    return true;
+  }
+
+  private moveSkirmishRange(
+    enemy: EnemyState,
+    meta: EnemyRuntimeMeta,
+    nearestDist: number,
+    directAngle: number,
+    moveAngle: number,
+    spd: number,
+    minDist: number,
+    maxDist: number,
+    strafeWeight: number,
+    dtSec: number
+  ): void {
+    if (this.simTimeMs >= meta.mobStrafeFlipAtMs) {
+      meta.mobStrafeDir = -meta.mobStrafeDir;
+      meta.mobStrafeFlipAtMs = this.simTimeMs + 1400 + ((enemy.id.charCodeAt(0) * 137) % 900);
+    }
+    const prevX = enemy.x;
+    const prevY = enemy.y;
+    const strafeAng = directAngle + (Math.PI / 2) * meta.mobStrafeDir;
+
+    if (nearestDist < minDist) {
+      const rx = (-Math.cos(directAngle) * 0.8 + Math.cos(strafeAng) * 0.45) * spd * dtSec;
+      const ry = (-Math.sin(directAngle) * 0.8 + Math.sin(strafeAng) * 0.45) * spd * dtSec;
+      this.moveWithCollision(enemy, rx, ry, enemy.radius - 2);
+    } else if (nearestDist > maxDist) {
+      const ax = (Math.cos(moveAngle) * 0.85 + Math.cos(strafeAng) * 0.35) * spd * dtSec;
+      const ay = (Math.sin(moveAngle) * 0.85 + Math.sin(strafeAng) * 0.35) * spd * dtSec;
+      this.moveWithCollision(enemy, ax, ay, enemy.radius - 2);
+    } else if (strafeWeight > 0) {
+      const sx = Math.cos(strafeAng) * spd * strafeWeight * dtSec;
+      const sy = Math.sin(strafeAng) * spd * strafeWeight * dtSec;
+      this.moveWithCollision(enemy, sx, sy, enemy.radius - 2);
+      if (Math.hypot(enemy.x - prevX, enemy.y - prevY) < 0.2) {
+        meta.mobStrafeDir = -meta.mobStrafeDir;
+      }
+    }
+
+    if (dtSec > 0) {
+      const distMoved = Math.hypot(enemy.x - prevX, enemy.y - prevY);
+      enemy.vx = distMoved > 0.05 ? (enemy.x - prevX) / dtSec : 0;
+      enemy.vy = distMoved > 0.05 ? (enemy.y - prevY) / dtSec : 0;
+    }
   }
 
   private clearEnemyChargeState(enemy: EnemyState): void {
@@ -1486,6 +1640,8 @@ export class GameRoom {
     this.npcs = [];
     this.trainingDummies = [];
     this.pendingEvents = [];
+    this.pvpStreaks.clear();
+    this.spikeTrapCooldowns.clear();
     this.floor = 1;
     this.status = 'waiting';
     this.startedAt = Date.now();
@@ -3504,6 +3660,7 @@ export class GameRoom {
         }
       }
     }
+    this.detonateKegsInRadius(proj.x, proj.y, radius + 16, attacker);
 
     // Leave a lingering burning ground zone at explosion center
     const burnRadius = fbSpec.burnRadius ?? Math.round(radius * 0.85);
@@ -3792,6 +3949,7 @@ export class GameRoom {
           }
         }
 
+        if (prop.kind === 'spike_trap') continue;
         const isToggleableChest = prop.kind === 'chest' || prop.kind === 'relic_chest';
         if (prop.opened && !isToggleableChest) continue;
         const dist = Math.hypot(prop.x - p.x, prop.y - p.y);
@@ -3812,6 +3970,10 @@ export class GameRoom {
           }
           if (isToggleableChest) {
             this.openChest(p.id, prop);
+            return {};
+          }
+          if (prop.kind === 'keg') {
+            this.detonateCinderKeg(prop, p);
             return {};
           }
           prop.opened = true;
@@ -4092,6 +4254,7 @@ export class GameRoom {
             this.damageDummy(dummy, burstDmg, p, hasCrit, false, 'divine');
           }
         }
+        this.detonateKegsInRadius(targetPos.x, targetPos.y, burstRadius + 14, p);
         this.emitEvent('status', targetPos.x, targetPos.y - 24, 'SERAPHIC JUDGMENT!', '#FDE047');
       } else if (p.heroClass === 'vanguard') {
         const dmgMult = this.computeDamageMult(p, 'physical');
@@ -4148,6 +4311,7 @@ export class GameRoom {
             this.damageDummy(dummy, Math.round(32 * dmgMult), p, false, false, 'physical');
           }
         }
+        this.detonateKegsInRadius(p.x, p.y, 92, p);
       } else if (p.heroClass === 'ranger') {
         const dmgMult = this.computeDamageMult(p, 'physical');
         const baseDmg = Math.round(18 * dmgMult);
@@ -4242,6 +4406,7 @@ export class GameRoom {
             this.damageDummy(dummy, Math.round(28 * dmgMult), p, false, false, 'divine');
           }
         }
+        this.detonateKegsInRadius(p.x, p.y, 145, p);
       }
       return {};
     }
@@ -4492,6 +4657,7 @@ export class GameRoom {
             this.onTacticalHitConfirmed(attacker);
           }
         }
+        this.detonateKegsInRadius(z.x, z.y, z.radius + 14, attacker);
         this.emitEvent('status', z.x, z.y - 20, 'METEOR IMPACT!', '#E879F9');
         this.zones.splice(i, 1);
         continue;
@@ -4532,6 +4698,7 @@ export class GameRoom {
               this.damageDummy(dummy, burnDmg, attacker, false, false, 'fire');
             }
           }
+          this.detonateKegsInRadius(z.x, z.y, z.radius + 10, attacker);
         }
         if (z.ttlMs <= 0) {
           this.zones.splice(i, 1);
@@ -4562,10 +4729,12 @@ export class GameRoom {
       }
 
       if (z.kind === 'lament_mark' && z.ttlMs <= 0) {
+        const dmg = z.damage ?? 28 + this.floor * 4;
+        const charmDur = z.damage !== undefined ? 1700 : 3000;
         for (const pr of this.players.values()) {
           if (!pr.state.downed && Math.hypot(pr.state.x - z.x, pr.state.y - z.y) <= z.radius) {
-            this.damagePlayer(pr.state, 28 + this.floor * 4, 'divine');
-            this.applyPlayerStatus(pr.state, 'charmed', 3000);
+            this.damagePlayer(pr.state, dmg, 'divine');
+            this.applyPlayerStatus(pr.state, z.damage !== undefined ? 'disoriented' : 'charmed', charmDur);
           }
         }
         this.zones.splice(i, 1);
@@ -4633,13 +4802,56 @@ export class GameRoom {
       }
 
       if (z.kind === 'silence_seal' && z.ttlMs <= 0) {
+        const dmg = z.damage ?? 28 + this.floor * 4;
+        const silenceDur = z.damage !== undefined ? 2000 : 4500;
         for (const pr of this.players.values()) {
           if (!pr.state.downed && Math.hypot(pr.state.x - z.x, pr.state.y - z.y) <= z.radius) {
-            this.damagePlayer(pr.state, 28 + this.floor * 4, 'arcane');
-            this.applyPlayerStatus(pr.state, 'silenced', 4500);
+            this.damagePlayer(pr.state, dmg, 'arcane');
+            this.applyPlayerStatus(pr.state, 'silenced', silenceDur);
           }
         }
         this.zones.splice(i, 1);
+        continue;
+      }
+
+      if (z.kind === 'void_sigil' && z.ttlMs <= 0) {
+        const dmg = z.damage ?? this.computeEnemyDamage(18);
+        for (const pr of this.players.values()) {
+          if (!pr.state.downed && Math.hypot(pr.state.x - z.x, pr.state.y - z.y) <= z.radius) {
+            this.damagePlayer(pr.state, dmg, 'arcane');
+            this.applyPlayerStatus(pr.state, 'voidmarked', 2400);
+          }
+        }
+        this.zones.splice(i, 1);
+        continue;
+      }
+
+      if (z.kind === 'seismic_ring' && z.ttlMs <= 0) {
+        const dmg = z.damage ?? this.computeEnemyDamage(24);
+        for (const pr of this.players.values()) {
+          if (!pr.state.downed && Math.hypot(pr.state.x - z.x, pr.state.y - z.y) <= z.radius) {
+            this.damagePlayer(pr.state, dmg, 'physical');
+            this.applyStatusEffect(pr.state, 'stun', 700);
+            this.emitEvent('status', pr.state.x, pr.state.y - 16, 'TREMOR STUN!', '#F59E0B');
+          }
+        }
+        this.zones.splice(i, 1);
+        continue;
+      }
+
+      if (z.kind === 'acid_pool') {
+        const tickDmg = z.damage ?? Math.max(4, Math.round(5 + this.floor * 1.4));
+        for (const pr of this.players.values()) {
+          if (!pr.state.downed && Math.hypot(pr.state.x - z.x, pr.state.y - z.y) <= z.radius) {
+            pr.state.slowedMs = Math.max(pr.state.slowedMs || 0, 500);
+            if (pulseZonesNow) {
+              this.damagePlayer(pr.state, tickDmg, 'poison');
+            }
+          }
+        }
+        if (z.ttlMs <= 0) {
+          this.zones.splice(i, 1);
+        }
         continue;
       }
 
@@ -4830,12 +5042,13 @@ export class GameRoom {
       }
 
       if (z.kind === 'starlight_beam' && z.ttlMs <= 0) {
+        const dmg = z.damage ?? 30 + this.floor * 4;
         for (const pr of this.players.values()) {
           if (
             !pr.state.downed &&
             Math.hypot(pr.state.x - z.x, pr.state.y - z.y) <= z.radius
           ) {
-            this.damagePlayer(pr.state, 30 + this.floor * 4, 'elemental');
+            this.damagePlayer(pr.state, dmg, 'elemental');
             this.emitEvent('status', pr.state.x, pr.state.y - 14, ' STARBEAM!', '#38BDF8');
           }
         }
@@ -5131,6 +5344,10 @@ export class GameRoom {
       }
 
       if (z.ttlMs <= 0) {
+        if (z.kind === 'overworld_font') {
+          this.overworldFontChargeAcc = 0;
+          this.overworldFontCooldownMs = 4500;
+        }
         this.weaponZoneTickAccum.delete(z.id);
         this.zones.splice(i, 1);
         continue;
@@ -5402,7 +5619,7 @@ export class GameRoom {
       }
 
       const def = HERO_CLASSES[p.heroClass];
-      const moveSpeed = computePlayerMoveSpeed(p);
+      const moveSpeed = computePlayerMoveSpeed(p, this.map);
       const isDisoriented = p.statuses.some((s) => s.type === 'disoriented');
       const { mx, my } = normalizePlayerInputDirection(pr.input, isDisoriented, Date.now());
 
@@ -5734,8 +5951,8 @@ export class GameRoom {
           const pState = pInfo.state;
           const inSameRoom = enemyRoomId !== undefined && pInfo.roomId === enemyRoomId;
 
-          let maxDetectDist = isBoss ? 380 : inSameRoom ? (isRanged ? 220 : 190) : (isRanged ? 175 : 145);
-          if (isAlerted) maxDetectDist += 45;
+          let maxDetectDist = isBoss ? 380 : inSameRoom ? (isRanged ? 265 : 240) : 140;
+          if (isAlerted) maxDetectDist += 65;
 
           const dxP = pState.x - enemy.x;
           const dyP = pState.y - enemy.y;
@@ -5771,6 +5988,9 @@ export class GameRoom {
 
       enemy.state = 'chase';
       const slowFactor = enemy.slowedMs > 0 ? 0.55 : 1.0;
+      const eliteSpeedMult = enemy.kind !== 'boss' && enemy.elite ? 1.12 : 1.0;
+      const eliteCdMult = enemy.kind !== 'boss' && enemy.elite ? 0.85 : 1.0;
+      const mobMoveMult = slowFactor * eliteSpeedMult;
       const dx = nearest.x - enemy.x;
       const dy = nearest.y - enemy.y;
       const directAngle = Math.atan2(dy, dx);
@@ -5814,15 +6034,118 @@ export class GameRoom {
         }
       }
 
-      enemy.windupMs -= dtMs;
-      const moveStartX = enemy.x;
-      const moveStartY = enemy.y;
+      enemy.windupMs = Math.max(0, enemy.windupMs - dtMs);
+      if (enemy.kind !== 'boss') {
+        enemy.abilityCdMs = Math.max(0, (enemy.abilityCdMs ?? 0) - dtMs);
+      }
 
-      if (enemy.kind === 'slime' || enemy.kind === 'goblin' || enemy.kind === 'knight') {
-        const baseSpd =
-          enemy.kind === 'goblin' ? 128 : enemy.kind === 'knight' ? 96 : 86;
-        const spd = baseSpd * slowFactor;
-        if (nearestDist > enemy.radius + 14) {
+      if (enemy.kind === 'slime') {
+        // Mire Slime: Acidic Pounce lunge + caustic pool hazard + toxic slow
+        const inCharge = this.stepMobCharge(
+          enemy,
+          265 * mobMoveMult,
+          16,
+          14,
+          'poison',
+          dtMs,
+          dtSec,
+          (p) => {
+            p.slowedMs = Math.max(p.slowedMs || 0, 1400);
+          },
+          () => {
+            if (!this.isTavern && !this.isOpenWorld) {
+              this.zones.push({
+                id: this.nextId('zone'),
+                kind: 'acid_pool',
+                x: enemy.x,
+                y: enemy.y,
+                radius: enemy.elite ? 38 : 30,
+                ttlMs: 3000,
+                maxTtlMs: 3000,
+                ownerId: enemy.id,
+                damage: this.computeEnemyDamage(6, enemy),
+              });
+            }
+          }
+        );
+        if (!inCharge) {
+          if (
+            enemy.windupMs <= 0 &&
+            (enemy.abilityCdMs ?? 0) <= 0 &&
+            nearestDist >= 52 &&
+            nearestDist <= 155 &&
+            this.hasLineOfSight(enemy.x, enemy.y, nearest.x, nearest.y)
+          ) {
+            this.startMobCharge(enemy, directAngle, 320, 250);
+            enemy.abilityCdMs = Math.round(3200 * eliteCdMult);
+          } else {
+            const spd = 96 * mobMoveMult;
+            if (nearestDist > enemy.radius + 13) {
+              enemy.vx = Math.cos(moveAngle) * spd;
+              enemy.vy = Math.sin(moveAngle) * spd;
+              this.moveWithCollision(enemy, enemy.vx * dtSec, enemy.vy * dtSec, enemy.radius - 2);
+            } else {
+              enemy.vx = 0;
+              enemy.vy = 0;
+            }
+            if (nearestDist <= enemy.radius + 22 && enemy.windupMs <= 0) {
+              this.damagePlayer(nearest, this.computeEnemyDamage(13, enemy), 'poison');
+              nearest.slowedMs = Math.max(nearest.slowedMs || 0, 1000);
+              enemy.windupMs = Math.round(920 * eliteCdMult);
+            }
+          }
+        }
+      } else if (enemy.kind === 'goblin') {
+        // Grimalkin Raider: Agile flanker with curved approach and telegraphed dagger lunge
+        const inCharge = this.stepMobCharge(
+          enemy,
+          310 * mobMoveMult,
+          17,
+          17,
+          'physical',
+          dtMs,
+          dtSec,
+          (p) => {
+            this.applyPlayerStatus(p, 'guard_broken', 1800);
+          }
+        );
+        if (!inCharge) {
+          if (
+            enemy.windupMs <= 0 &&
+            (enemy.abilityCdMs ?? 0) <= 0 &&
+            nearestDist >= 56 &&
+            nearestDist <= 150 &&
+            this.hasLineOfSight(enemy.x, enemy.y, nearest.x, nearest.y)
+          ) {
+            this.startMobCharge(enemy, directAngle, 250, 210);
+            enemy.abilityCdMs = Math.round(2900 * eliteCdMult);
+          } else {
+            const spd = 142 * mobMoveMult;
+            const flankBias = enemy.windupMs <= 0 && nearestDist > 68 ? meta.mobStrafeDir * 0.36 : 0;
+            const flankAngle = moveAngle + flankBias;
+            if (nearestDist > enemy.radius + 13) {
+              enemy.vx = Math.cos(flankAngle) * spd;
+              enemy.vy = Math.sin(flankAngle) * spd;
+              this.moveWithCollision(enemy, enemy.vx * dtSec, enemy.vy * dtSec, enemy.radius - 2);
+            } else {
+              enemy.vx = 0;
+              enemy.vy = 0;
+            }
+            if (nearestDist <= enemy.radius + 22 && enemy.windupMs <= 0) {
+              this.damagePlayer(nearest, this.computeEnemyDamage(15, enemy), 'physical');
+              enemy.windupMs = Math.round(720 * eliteCdMult);
+            }
+          }
+        }
+      } else if (enemy.kind === 'knight') {
+        // Dread Halberdier: Raises bastion Shield Wall while advancing, unleashes Halberd Cleave + Crescent Shockwave
+        if ((enemy.abilityCdMs ?? 0) <= 0 && nearestDist <= 175 && (enemy.shieldWallMs || 0) <= 0) {
+          enemy.shieldWallMs = 1500;
+          enemy.abilityCdMs = Math.round(4500 * eliteCdMult);
+          this.emitThrottledEntityStatus(enemy.id, enemy.x, enemy.y - enemy.radius - 12, 'SHIELD WALL', '#94A3B8', 2500);
+        }
+        const spd = (enemy.shieldWallMs || 0) > 0 ? 112 * mobMoveMult : 104 * mobMoveMult;
+        if (nearestDist > enemy.radius + 15) {
           enemy.vx = Math.cos(moveAngle) * spd;
           enemy.vy = Math.sin(moveAngle) * spd;
           this.moveWithCollision(enemy, enemy.vx * dtSec, enemy.vy * dtSec, enemy.radius - 2);
@@ -5830,196 +6153,250 @@ export class GameRoom {
           enemy.vx = 0;
           enemy.vy = 0;
         }
-        if (nearestDist <= enemy.radius + 22 && enemy.windupMs <= 0) {
-          const baseHit = enemy.kind === 'knight' ? 19 : enemy.kind === 'goblin' ? 13 : 11;
-          this.damagePlayer(nearest, this.computeEnemyDamage(baseHit, enemy));
-          enemy.windupMs = enemy.kind === 'goblin' ? 850 : 1100;
+        if (nearestDist <= enemy.radius + 26 && enemy.windupMs <= 0) {
+          this.damagePlayer(nearest, this.computeEnemyDamage(22, enemy), 'physical');
+          this.applyPlayerStatus(nearest, 'guard_broken', 1800);
+          // Crescent halberd shockwave slash
+          this.spawnProjectile({
+            ownerType: 'enemy',
+            ownerId: enemy.id,
+            style: 'slash',
+            x: enemy.x,
+            y: enemy.y,
+            vx: Math.cos(angle) * 215,
+            vy: Math.sin(angle) * 215,
+            angle,
+            radius: 8,
+            damage: this.computeEnemyDamage(16, enemy, { skipPoison: true }),
+            pierce: 1,
+            ttlMs: 580,
+          });
+          enemy.windupMs = Math.round(920 * eliteCdMult);
         }
       } else if (enemy.kind === 'shadow_stalker') {
-        // Fast, elusive void ambusher that dashes toward players
-        const spd = 138 * slowFactor;
-        if (nearestDist > enemy.radius + 14) {
-          enemy.vx = Math.cos(moveAngle) * spd;
-          enemy.vy = Math.sin(moveAngle) * spd;
-          this.moveWithCollision(enemy, enemy.vx * dtSec, enemy.vy * dtSec, enemy.radius - 2);
-        } else {
-          enemy.vx = 0;
-          enemy.vy = 0;
-        }
-        if (nearestDist <= enemy.radius + 24 && enemy.windupMs <= 0) {
-          const baseHit = 22;
-          this.damagePlayer(nearest, this.computeEnemyDamage(baseHit, enemy), 'physical');
-          // Inflict brief slow on hit
-          nearest.hasteMs = Math.min(nearest.hasteMs, 0);
-          enemy.windupMs = 800;
+        // Abyssal Stalker: True shadow-step ambush dash + voidmark pressure
+        const inCharge = this.stepMobCharge(
+          enemy,
+          365 * mobMoveMult,
+          18,
+          24,
+          'physical',
+          dtMs,
+          dtSec,
+          (p) => {
+            p.slowedMs = Math.max(p.slowedMs || 0, 1600);
+            this.applyPlayerStatus(p, 'voidmarked', 2400);
+          }
+        );
+        if (!inCharge) {
+          if (
+            enemy.windupMs <= 0 &&
+            (enemy.abilityCdMs ?? 0) <= 0 &&
+            nearestDist >= 58 &&
+            nearestDist <= 190 &&
+            this.hasLineOfSight(enemy.x, enemy.y, nearest.x, nearest.y)
+          ) {
+            this.startMobCharge(enemy, directAngle, 260, 230);
+            enemy.abilityCdMs = Math.round(3300 * eliteCdMult);
+            this.emitThrottledEntityStatus(enemy.id, enemy.x, enemy.y - enemy.radius - 12, 'SHADOW LUNGE!', '#C084FC', 1800);
+          } else {
+            const spd = 152 * mobMoveMult;
+            if (nearestDist > enemy.radius + 14) {
+              enemy.vx = Math.cos(moveAngle) * spd;
+              enemy.vy = Math.sin(moveAngle) * spd;
+              this.moveWithCollision(enemy, enemy.vx * dtSec, enemy.vy * dtSec, enemy.radius - 2);
+            } else {
+              enemy.vx = 0;
+              enemy.vy = 0;
+            }
+            if (nearestDist <= enemy.radius + 24 && enemy.windupMs <= 0) {
+              this.damagePlayer(nearest, this.computeEnemyDamage(23, enemy), 'physical');
+              nearest.hasteMs = Math.min(nearest.hasteMs, 0);
+              nearest.slowedMs = Math.max(nearest.slowedMs || 0, 1200);
+              enemy.windupMs = Math.round(720 * eliteCdMult);
+            }
+          }
         }
       } else if (enemy.kind === 'astral_sentinel') {
-        // Heavy armored celestial construct that fires crystal starlight projectiles
-        const spd = 72 * slowFactor;
-        if (nearestDist < 140) {
-          this.moveWithCollision(
-            enemy,
-            -Math.cos(directAngle) * spd * dtSec,
-            -Math.sin(directAngle) * spd * dtSec,
-            enemy.radius - 2
-          );
-        } else if (nearestDist > 240) {
-          this.moveWithCollision(
-            enemy,
-            Math.cos(moveAngle) * spd * dtSec,
-            Math.sin(moveAngle) * spd * dtSec,
-            enemy.radius - 2
-          );
-        }
-        if (dtSec > 0) {
-          const distMoved = Math.hypot(enemy.x - moveStartX, enemy.y - moveStartY);
-          enemy.vx = distMoved > 0.05 ? (enemy.x - moveStartX) / dtSec : 0;
-          enemy.vy = distMoved > 0.05 ? (enemy.y - moveStartY) / dtSec : 0;
-        }
+        // Celestial Sentinel: Strafing crystal construct firing 3-prism fans + periodic Starbeam lock-on
+        const spd = 86 * mobMoveMult;
+        this.moveSkirmishRange(enemy, meta, nearestDist, directAngle, moveAngle, spd, 130, 235, 0.72, dtSec);
 
         if (enemy.windupMs <= 0) {
           if (enemy.silencedMs > 0) {
             this.emitEvent('status', enemy.x, enemy.y - enemy.radius - 12, '[SILENCED]', '#C084FC');
-            enemy.windupMs = 1200;
+            enemy.windupMs = 1100;
           } else {
-            // Double starlight arc volley
-            for (let k = -0.18; k <= 0.18; k += 0.36) {
-              const a = angle + k;
+            const leadAngle = this.aimAngleWithLead(enemy, nearest, 255, 0.45);
+            const projDmg = this.computeEnemyDamage(19, enemy, { skipPoison: true });
+            for (let k = -1; k <= 1; k++) {
+              const a = leadAngle + k * 0.20;
               this.spawnProjectile({
                 ownerType: 'enemy',
                 ownerId: enemy.id,
                 style: 'arcane',
                 x: enemy.x,
                 y: enemy.y,
-                vx: Math.cos(a) * 230,
-                vy: Math.sin(a) * 230,
+                vx: Math.cos(a) * 255,
+                vy: Math.sin(a) * 255,
                 angle: a,
                 radius: 6,
-                damage: 18 + this.floor * 2,
+                damage: projDmg,
                 pierce: 1,
-                ttlMs: 2000,
+                ttlMs: 1950,
               });
             }
-            enemy.windupMs = 1850;
+            if ((enemy.abilityCdMs ?? 0) <= 0 && !this.isTavern && !this.isOpenWorld) {
+              this.zones.push({
+                id: this.nextId('zone'),
+                kind: 'starlight_beam',
+                x: nearest.x,
+                y: nearest.y,
+                radius: 42,
+                ttlMs: 1100,
+                maxTtlMs: 1100,
+                ownerId: enemy.id,
+                damage: this.computeEnemyDamage(22, enemy),
+              });
+              enemy.abilityCdMs = Math.round(4200 * eliteCdMult);
+            }
+            enemy.windupMs = Math.round(1500 * eliteCdMult);
           }
         }
-      } else if (enemy.kind === 'skeleton' || enemy.kind === 'cultist') {
-        const spd = 82 * slowFactor;
-        if (nearestDist < 120) {
-          this.moveWithCollision(
-            enemy,
-            -Math.cos(directAngle) * spd * dtSec,
-            -Math.sin(directAngle) * spd * dtSec,
-            enemy.radius - 2
-          );
-        } else if (nearestDist > 215) {
-          this.moveWithCollision(
-            enemy,
-            Math.cos(moveAngle) * spd * dtSec,
-            Math.sin(moveAngle) * spd * dtSec,
-            enemy.radius - 2
-          );
-        }
-        if (dtSec > 0) {
-          const distMoved = Math.hypot(enemy.x - moveStartX, enemy.y - moveStartY);
-          enemy.vx = distMoved > 0.05 ? (enemy.x - moveStartX) / dtSec : 0;
-          enemy.vy = distMoved > 0.05 ? (enemy.y - moveStartY) / dtSec : 0;
-        }
+      } else if (enemy.kind === 'skeleton') {
+        // Bone Marksman: Kiting archer with predictive aim and every-3rd-shot triple bone fan
+        const spd = 96 * mobMoveMult;
+        this.moveSkirmishRange(enemy, meta, nearestDist, directAngle, moveAngle, spd, 118, 215, 0.30, dtSec);
 
         if (enemy.windupMs <= 0) {
           if (enemy.silencedMs > 0) {
             this.emitEvent('status', enemy.x, enemy.y - enemy.radius - 12, '[SILENCED]', '#C084FC');
-            enemy.windupMs = 1200;
-          } else if (enemy.kind === 'skeleton') {
-            this.spawnProjectile({
-              ownerType: 'enemy',
-              ownerId: enemy.id,
-              style: 'bone',
-              x: enemy.x,
-              y: enemy.y,
-              vx: Math.cos(angle) * 245,
-              vy: Math.sin(angle) * 245,
-              angle,
-              radius: 5,
-              damage: 13 + this.floor * 2,
-              pierce: 1,
-              ttlMs: 1700,
-            });
-            enemy.windupMs = 1550;
+            enemy.windupMs = 1050;
           } else {
+            meta.mobShotCounter = (meta.mobShotCounter + 1) % 3;
+            const projSpd = 275;
+            const leadAngle = this.aimAngleWithLead(enemy, nearest, projSpd, 0.45);
+            const projDmg = this.computeEnemyDamage(15, enemy, { skipPoison: true });
+            const isFanVolley = meta.mobShotCounter === 0;
+            const offsets = isFanVolley ? [-0.19, 0, 0.19] : [0];
+            for (const off of offsets) {
+              const a = leadAngle + off;
+              this.spawnProjectile({
+                ownerType: 'enemy',
+                ownerId: enemy.id,
+                style: 'bone',
+                x: enemy.x,
+                y: enemy.y,
+                vx: Math.cos(a) * projSpd,
+                vy: Math.sin(a) * projSpd,
+                angle: a,
+                radius: 5,
+                damage: isFanVolley ? Math.max(1, Math.round(projDmg * 0.85)) : projDmg,
+                pierce: 1,
+                ttlMs: 1750,
+              });
+            }
+            enemy.windupMs = Math.round((isFanVolley ? 1550 : 1220) * eliteCdMult);
+          }
+        }
+      } else if (enemy.kind === 'cultist') {
+        // Void Acolyte: Strafes at range, fires 3-orb void fans, and casts telegraphed Void Sigils
+        const spd = 92 * mobMoveMult;
+        this.moveSkirmishRange(enemy, meta, nearestDist, directAngle, moveAngle, spd, 125, 220, 0.65, dtSec);
+
+        if (enemy.windupMs <= 0) {
+          if (enemy.silencedMs > 0) {
+            this.emitEvent('status', enemy.x, enemy.y - enemy.radius - 12, '[SILENCED]', '#C084FC');
+            enemy.windupMs = 1100;
+          } else {
+            const projSpd = 225;
+            const leadAngle = this.aimAngleWithLead(enemy, nearest, projSpd, 0.38);
+            const projDmg = this.computeEnemyDamage(16, enemy, { skipPoison: true });
             for (let k = -1; k <= 1; k++) {
-              const a = angle + k * 0.25;
+              const a = leadAngle + k * 0.23;
               this.spawnProjectile({
                 ownerType: 'enemy',
                 ownerId: enemy.id,
                 style: 'voidorb',
                 x: enemy.x,
                 y: enemy.y,
-                vx: Math.cos(a) * 195,
-                vy: Math.sin(a) * 195,
+                vx: Math.cos(a) * projSpd,
+                vy: Math.sin(a) * projSpd,
                 angle: a,
                 radius: 6,
-                damage: 14 + this.floor * 2,
+                damage: projDmg,
                 pierce: 1,
                 ttlMs: 1900,
               });
             }
-            enemy.windupMs = 2100;
+            if ((enemy.abilityCdMs ?? 0) <= 0 && !this.isTavern && !this.isOpenWorld) {
+              this.zones.push({
+                id: this.nextId('zone'),
+                kind: 'void_sigil',
+                x: nearest.x,
+                y: nearest.y,
+                radius: 42,
+                ttlMs: 1100,
+                maxTtlMs: 1100,
+                ownerId: enemy.id,
+                damage: this.computeEnemyDamage(18, enemy),
+              });
+              enemy.abilityCdMs = Math.round(4300 * eliteCdMult);
+            }
+            enemy.windupMs = Math.round(1650 * eliteCdMult);
           }
         }
       } else if (enemy.kind === 'hymn_phantom') {
-        // Spectral choir entity: floats smoothly at mid-range, looses oscillating Choral Wail sound waves
-        const spd = 92 * slowFactor;
-        if (nearestDist < 130) {
-          this.moveWithCollision(
-            enemy,
-            -Math.cos(directAngle) * spd * dtSec,
-            -Math.sin(directAngle) * spd * dtSec,
-            enemy.radius - 2
-          );
-        } else if (nearestDist > 220) {
-          this.moveWithCollision(
-            enemy,
-            Math.cos(moveAngle) * spd * dtSec,
-            Math.sin(moveAngle) * spd * dtSec,
-            enemy.radius - 2
-          );
-        }
-        if (dtSec > 0) {
-          const distMoved = Math.hypot(enemy.x - moveStartX, enemy.y - moveStartY);
-          enemy.vx = distMoved > 0.05 ? (enemy.x - moveStartX) / dtSec : 0;
-          enemy.vy = distMoved > 0.05 ? (enemy.y - moveStartY) / dtSec : 0;
-        }
+        // Hymn Phantom: Glides smoothly at mid-range, looses 3-note Choral Wail + periodic Lament Ring
+        const spd = 104 * mobMoveMult;
+        this.moveSkirmishRange(enemy, meta, nearestDist, directAngle, moveAngle, spd, 125, 225, 0.78, dtSec);
 
         if (enemy.windupMs <= 0) {
           if (enemy.silencedMs > 0) {
             this.emitEvent('status', enemy.x, enemy.y - enemy.radius - 12, '[SILENCED]', '#C084FC');
-            enemy.windupMs = 1200;
+            enemy.windupMs = 1100;
           } else {
-            for (let k = -1; k <= 1; k += 2) {
-              const a = angle + k * 0.18;
+            const projSpd = 245;
+            const leadAngle = this.aimAngleWithLead(enemy, nearest, projSpd, 0.42);
+            const projDmg = this.computeEnemyDamage(18, enemy, { skipPoison: true });
+            for (let k = -1; k <= 1; k++) {
+              const a = leadAngle + k * 0.17;
               this.spawnProjectile({
                 ownerType: 'enemy',
                 ownerId: enemy.id,
                 style: 'arcane',
                 x: enemy.x,
                 y: enemy.y,
-                vx: Math.cos(a) * 220,
-                vy: Math.sin(a) * 220,
+                vx: Math.cos(a) * projSpd,
+                vy: Math.sin(a) * projSpd,
                 angle: a,
                 radius: 6,
-                damage: 18 + this.floor * 2,
+                damage: projDmg,
                 pierce: 1,
-                ttlMs: 2000,
+                ttlMs: 1950,
               });
             }
-            this.emitEvent('status', enemy.x, enemy.y - enemy.radius - 12, 'CHORAL WAIL', '#C084FC');
-            enemy.windupMs = 1750;
+            if ((enemy.abilityCdMs ?? 0) <= 0 && !this.isTavern && !this.isOpenWorld) {
+              this.zones.push({
+                id: this.nextId('zone'),
+                kind: 'lament_mark',
+                x: nearest.x,
+                y: nearest.y,
+                radius: 42,
+                ttlMs: 1150,
+                maxTtlMs: 1150,
+                ownerId: enemy.id,
+                damage: this.computeEnemyDamage(20, enemy),
+              });
+              enemy.abilityCdMs = Math.round(4600 * eliteCdMult);
+            }
+            this.emitThrottledEntityStatus(enemy.id, enemy.x, enemy.y - enemy.radius - 12, 'CHORAL WAIL', '#C084FC', 2500);
+            enemy.windupMs = Math.round(1480 * eliteCdMult);
           }
         }
       } else if (enemy.kind === 'relic_golem') {
-        // Heavy ancient construct: relentless stomp, devastating seismic ground slam
-        const spd = 74 * slowFactor;
+        // Relic Golem: Heavy juggernaut with Seismic Slam tremor rings + 8-way rock shrapnel
+        const spd = 84 * mobMoveMult;
         if (nearestDist > enemy.radius + 14) {
           enemy.vx = Math.cos(moveAngle) * spd;
           enemy.vy = Math.sin(moveAngle) * spd;
@@ -6028,161 +6405,223 @@ export class GameRoom {
           enemy.vx = 0;
           enemy.vy = 0;
         }
+        if ((enemy.abilityCdMs ?? 0) <= 0 && nearestDist <= 95 && !this.isTavern && !this.isOpenWorld) {
+          this.zones.push({
+            id: this.nextId('zone'),
+            kind: 'seismic_ring',
+            x: enemy.x,
+            y: enemy.y,
+            radius: 64,
+            ttlMs: 920,
+            maxTtlMs: 920,
+            ownerId: enemy.id,
+            damage: this.computeEnemyDamage(24, enemy),
+          });
+          enemy.abilityCdMs = Math.round(4100 * eliteCdMult);
+          this.emitThrottledEntityStatus(enemy.id, enemy.x, enemy.y - enemy.radius - 12, 'QUAKE!', '#F59E0B', 2200);
+        }
         if (nearestDist <= enemy.radius + 28 && enemy.windupMs <= 0) {
-          const baseHit = 26;
-          this.damagePlayer(nearest, this.computeEnemyDamage(baseHit, enemy), 'physical');
+          this.damagePlayer(nearest, this.computeEnemyDamage(27, enemy), 'physical');
           this.emitEvent('status', nearest.x, nearest.y - 14, 'SEISMIC SLAM!', '#F59E0B');
-          // Radial ground tremor sparks
-          for (let k = 0; k < 6; k++) {
-            const sa = (k * Math.PI * 2) / 6;
+          const shardDmg = this.computeEnemyDamage(15, enemy, { skipPoison: true });
+          for (let k = 0; k < 8; k++) {
+            const sa = (k * Math.PI * 2) / 8;
             this.spawnProjectile({
               ownerType: 'enemy',
               ownerId: enemy.id,
               style: 'slash',
               x: enemy.x,
               y: enemy.y,
-              vx: Math.cos(sa) * 160,
-              vy: Math.sin(sa) * 160,
+              vx: Math.cos(sa) * 185,
+              vy: Math.sin(sa) * 185,
               angle: sa,
               radius: 6,
-              damage: 14 + this.floor,
+              damage: shardDmg,
               pierce: 1,
-              ttlMs: 800,
+              ttlMs: 850,
             });
           }
-          enemy.windupMs = 1800;
+          enemy.windupMs = Math.round(1450 * eliteCdMult);
         }
       } else if (enemy.kind === 'veiled_heretic') {
-        // Corrupted scripture priest: kites at range, casts 3-way corrupted scripture sigil fan
-        const spd = 84 * slowFactor;
-        if (nearestDist < 140) {
-          this.moveWithCollision(
-            enemy,
-            -Math.cos(directAngle) * spd * dtSec,
-            -Math.sin(directAngle) * spd * dtSec,
-            enemy.radius - 2
-          );
-        } else if (nearestDist > 230) {
-          this.moveWithCollision(
-            enemy,
-            Math.cos(moveAngle) * spd * dtSec,
-            Math.sin(moveAngle) * spd * dtSec,
-            enemy.radius - 2
-          );
-        }
-        if (dtSec > 0) {
-          const distMoved = Math.hypot(enemy.x - moveStartX, enemy.y - moveStartY);
-          enemy.vx = distMoved > 0.05 ? (enemy.x - moveStartX) / dtSec : 0;
-          enemy.vy = distMoved > 0.05 ? (enemy.y - moveStartY) / dtSec : 0;
-        }
+        // Veiled Heretic: Kiting hex-caster with 3-bolt void fan + Silence Seal hazard
+        const spd = 94 * mobMoveMult;
+        this.moveSkirmishRange(enemy, meta, nearestDist, directAngle, moveAngle, spd, 132, 230, 0.72, dtSec);
 
         if (enemy.windupMs <= 0) {
           if (enemy.silencedMs > 0) {
             this.emitEvent('status', enemy.x, enemy.y - enemy.radius - 12, '[SILENCED]', '#C084FC');
-            enemy.windupMs = 1200;
+            enemy.windupMs = 1100;
           } else {
+            const projSpd = 240;
+            const leadAngle = this.aimAngleWithLead(enemy, nearest, projSpd, 0.45);
+            const projDmg = this.computeEnemyDamage(20, enemy, { skipPoison: true });
             for (let k = -1; k <= 1; k++) {
-              const a = angle + k * 0.22;
+              const a = leadAngle + k * 0.21;
               this.spawnProjectile({
                 ownerType: 'enemy',
                 ownerId: enemy.id,
                 style: 'voidorb',
                 x: enemy.x,
                 y: enemy.y,
-                vx: Math.cos(a) * 215,
-                vy: Math.sin(a) * 215,
+                vx: Math.cos(a) * projSpd,
+                vy: Math.sin(a) * projSpd,
                 angle: a,
                 radius: 7,
-                damage: 19 + this.floor * 2,
+                damage: projDmg,
                 pierce: 1,
                 ttlMs: 1900,
               });
             }
-            this.emitEvent('status', enemy.x, enemy.y - enemy.radius - 12, 'CORRUPTED SCRIPTURE', '#A855F7');
-            enemy.windupMs = 1950;
+            if ((enemy.abilityCdMs ?? 0) <= 0 && !this.isTavern && !this.isOpenWorld) {
+              this.zones.push({
+                id: this.nextId('zone'),
+                kind: 'silence_seal',
+                x: nearest.x,
+                y: nearest.y,
+                radius: 44,
+                ttlMs: 1150,
+                maxTtlMs: 1150,
+                ownerId: enemy.id,
+                damage: this.computeEnemyDamage(20, enemy),
+              });
+              enemy.abilityCdMs = Math.round(4500 * eliteCdMult);
+            }
+            this.emitThrottledEntityStatus(enemy.id, enemy.x, enemy.y - enemy.radius - 12, 'CORRUPTED SCRIPTURE', '#A855F7', 2500);
+            enemy.windupMs = Math.round(1580 * eliteCdMult);
           }
         }
       } else if (enemy.kind === 'celestial_arbiter') {
-        // Swift radiant judge: rushes forward, performs solar judgement thrust & holy starlight rays
-        const spd = 112 * slowFactor;
-        if (nearestDist > enemy.radius + 16) {
-          enemy.vx = Math.cos(moveAngle) * spd;
-          enemy.vy = Math.sin(moveAngle) * spd;
-          this.moveWithCollision(enemy, enemy.vx * dtSec, enemy.vy * dtSec, enemy.radius - 2);
-        } else {
-          enemy.vx = 0;
-          enemy.vy = 0;
-        }
-
-        if (enemy.windupMs <= 0) {
-          if (nearestDist <= enemy.radius + 24) {
-            // Melee Judgement Cleave
-            const baseHit = 24;
-            this.damagePlayer(nearest, this.computeEnemyDamage(baseHit, enemy), 'divine');
-            this.emitEvent('status', nearest.x, nearest.y - 14, 'JUDGEMENT!', '#FDE047');
-            enemy.windupMs = 1100;
-          } else if (nearestDist <= 220) {
-            if (enemy.silencedMs > 0) {
-              this.emitEvent('status', enemy.x, enemy.y - enemy.radius - 12, '[SILENCED]', '#C084FC');
-              enemy.windupMs = 1200;
+        // Celestial Arbiter: Swift radiant judge with Solar Thrust Dash + Judgement Cleave + Starlight Rays
+        const inCharge = this.stepMobCharge(
+          enemy,
+          335 * mobMoveMult,
+          18,
+          25,
+          'divine',
+          dtMs,
+          dtSec,
+          (p) => {
+            this.applyPlayerStatus(p, 'impaled', 2200);
+          }
+        );
+        if (!inCharge) {
+          if (
+            enemy.windupMs <= 0 &&
+            (enemy.abilityCdMs ?? 0) <= 0 &&
+            nearestDist >= 72 &&
+            nearestDist <= 190 &&
+            this.hasLineOfSight(enemy.x, enemy.y, nearest.x, nearest.y)
+          ) {
+            this.startMobCharge(enemy, directAngle, 280, 235);
+            enemy.abilityCdMs = Math.round(3500 * eliteCdMult);
+            this.emitThrottledEntityStatus(enemy.id, enemy.x, enemy.y - enemy.radius - 12, 'SOLAR THRUST', '#FBBF24', 2000);
+          } else {
+            const spd = 124 * mobMoveMult;
+            if (nearestDist > enemy.radius + 16) {
+              enemy.vx = Math.cos(moveAngle) * spd;
+              enemy.vy = Math.sin(moveAngle) * spd;
+              this.moveWithCollision(enemy, enemy.vx * dtSec, enemy.vy * dtSec, enemy.radius - 2);
             } else {
-              // Radiant Solar Starlight Ray
-              this.spawnProjectile({
-                ownerType: 'enemy',
-                ownerId: enemy.id,
-                style: 'radiant',
-                x: enemy.x,
-                y: enemy.y,
-                vx: Math.cos(angle) * 310,
-                vy: Math.sin(angle) * 310,
-                angle,
-                radius: 8,
-                damage: 22 + this.floor * 2,
-                pierce: 1,
-                ttlMs: 1600,
-              });
-              this.emitEvent('status', enemy.x, enemy.y - enemy.radius - 12, 'SOLAR THRUST', '#FBBF24');
-              enemy.windupMs = 1400;
+              enemy.vx = 0;
+              enemy.vy = 0;
+            }
+
+            if (enemy.windupMs <= 0) {
+              if (nearestDist <= enemy.radius + 26) {
+                this.damagePlayer(nearest, this.computeEnemyDamage(25, enemy), 'divine');
+                this.applyPlayerStatus(nearest, 'impaled', 2000);
+                this.emitEvent('status', nearest.x, nearest.y - 14, 'JUDGEMENT!', '#FDE047');
+                enemy.windupMs = Math.round(920 * eliteCdMult);
+              } else if (nearestDist <= 240) {
+                if (enemy.silencedMs > 0) {
+                  this.emitEvent('status', enemy.x, enemy.y - enemy.radius - 12, '[SILENCED]', '#C084FC');
+                  enemy.windupMs = 1100;
+                } else {
+                  const leadAngle = this.aimAngleWithLead(enemy, nearest, 330, 0.4);
+                  this.spawnProjectile({
+                    ownerType: 'enemy',
+                    ownerId: enemy.id,
+                    style: 'radiant',
+                    x: enemy.x,
+                    y: enemy.y,
+                    vx: Math.cos(leadAngle) * 330,
+                    vy: Math.sin(leadAngle) * 330,
+                    angle: leadAngle,
+                    radius: 8,
+                    damage: this.computeEnemyDamage(22, enemy, { skipPoison: true }),
+                    pierce: 1,
+                    ttlMs: 1650,
+                  });
+                  this.emitThrottledEntityStatus(enemy.id, enemy.x, enemy.y - enemy.radius - 12, 'SOLAR RAY', '#FBBF24', 2200);
+                  enemy.windupMs = Math.round(1180 * eliteCdMult);
+                }
+              }
             }
           }
         }
       } else if (enemy.kind === 'warden_enforcer') {
-        // Heavy bastion sentinel: advances with raised buckler, swings two-handed halberd cleave
-        const spd = 94 * slowFactor;
-        if (nearestDist > enemy.radius + 14) {
-          enemy.vx = Math.cos(moveAngle) * spd;
-          enemy.vy = Math.sin(moveAngle) * spd;
-          this.moveWithCollision(enemy, enemy.vx * dtSec, enemy.vy * dtSec, enemy.radius - 2);
-        } else {
-          enemy.vx = 0;
-          enemy.vy = 0;
-        }
-
-        if (nearestDist <= enemy.radius + 26 && enemy.windupMs <= 0) {
-          const baseHit = 25;
-          this.damagePlayer(nearest, this.computeEnemyDamage(baseHit, enemy), 'physical');
-          this.emitEvent('status', nearest.x, nearest.y - 14, 'HALBERD CLEAVE!', '#38BDF8');
-          // Brief buckler defense stance
-          enemy.shieldWallMs = 1200;
-          // Dual arc slash projectiles
-          for (let off = -0.22; off <= 0.22; off += 0.44) {
-            const a = angle + off;
-            this.spawnProjectile({
-              ownerType: 'enemy',
-              ownerId: enemy.id,
-              style: 'slash',
-              x: enemy.x,
-              y: enemy.y,
-              vx: Math.cos(a) * 230,
-              vy: Math.sin(a) * 230,
-              angle: a,
-              radius: 8,
-              damage: 18 + this.floor * 2,
-              pierce: 1,
-              ttlMs: 1200,
-            });
+        // Warden Enforcer: Bastion juggernaut with Shield Bash Rush, Shield Wall, and 3-way Halberd Arc
+        const inCharge = this.stepMobCharge(
+          enemy,
+          295 * mobMoveMult,
+          20,
+          26,
+          'physical',
+          dtMs,
+          dtSec,
+          (p) => {
+            this.applyPlayerStatus(p, 'guard_broken', 2200);
           }
-          enemy.windupMs = 1500;
+        );
+        if (!inCharge) {
+          if (
+            enemy.windupMs <= 0 &&
+            (enemy.abilityCdMs ?? 0) <= 0 &&
+            nearestDist >= 65 &&
+            nearestDist <= 175 &&
+            this.hasLineOfSight(enemy.x, enemy.y, nearest.x, nearest.y)
+          ) {
+            enemy.shieldWallMs = 1500;
+            this.startMobCharge(enemy, directAngle, 300, 235);
+            enemy.abilityCdMs = Math.round(3900 * eliteCdMult);
+            this.emitThrottledEntityStatus(enemy.id, enemy.x, enemy.y - enemy.radius - 12, 'BASTION RUSH!', '#38BDF8', 2200);
+          } else {
+            const spd = 104 * mobMoveMult;
+            if (nearestDist > enemy.radius + 14) {
+              enemy.vx = Math.cos(moveAngle) * spd;
+              enemy.vy = Math.sin(moveAngle) * spd;
+              this.moveWithCollision(enemy, enemy.vx * dtSec, enemy.vy * dtSec, enemy.radius - 2);
+            } else {
+              enemy.vx = 0;
+              enemy.vy = 0;
+            }
+
+            if (nearestDist <= enemy.radius + 28 && enemy.windupMs <= 0) {
+              this.damagePlayer(nearest, this.computeEnemyDamage(27, enemy), 'physical');
+              this.emitEvent('status', nearest.x, nearest.y - 14, 'HALBERD CLEAVE!', '#38BDF8');
+              enemy.shieldWallMs = Math.max(enemy.shieldWallMs || 0, 1200);
+              const waveDmg = this.computeEnemyDamage(19, enemy, { skipPoison: true });
+              for (let off = -0.25; off <= 0.25; off += 0.25) {
+                const a = angle + off;
+                this.spawnProjectile({
+                  ownerType: 'enemy',
+                  ownerId: enemy.id,
+                  style: 'slash',
+                  x: enemy.x,
+                  y: enemy.y,
+                  vx: Math.cos(a) * 245,
+                  vy: Math.sin(a) * 245,
+                  angle: a,
+                  radius: 8,
+                  damage: waveDmg,
+                  pierce: 1,
+                  ttlMs: 1200,
+                });
+              }
+              enemy.windupMs = Math.round(1250 * eliteCdMult);
+            }
+          }
         }
       } else if (enemy.kind === 'boss') {
         this.updateBossAi(enemy, enemyRoom, nearest, dtMs, dtSec, slowFactor);
@@ -6399,7 +6838,8 @@ export class GameRoom {
         const crateHitR = 18 + proj.radius;
         const crateHitRSq = crateHitR * crateHitR;
         for (const prop of this.props) {
-          if (!prop.opened && prop.kind === 'crate') {
+          if (prop.opened) continue;
+          if (prop.kind === 'crate') {
             const dx = prop.x - proj.x;
             const dy = prop.y - proj.y;
             if (dx * dx + dy * dy <= crateHitRSq) {
@@ -6408,6 +6848,13 @@ export class GameRoom {
                 ally.state.gold += prop.value;
               }
               this.emitEvent('gold', prop.x, prop.y - 10, `+${prop.value}g`, '#F4D378');
+            }
+          } else if (prop.kind === 'keg') {
+            const dx = prop.x - proj.x;
+            const dy = prop.y - proj.y;
+            if (dx * dx + dy * dy <= crateHitRSq) {
+              const ownerPr = this.players.get(proj.ownerId);
+              this.detonateCinderKeg(prop, ownerPr ? ownerPr.state : null);
             }
           }
         }
@@ -6766,6 +7213,299 @@ export class GameRoom {
         );
       }
     }
+
+    this.stepDungeonSpikeTraps(dtMs);
+    this.stepOverworldEvents(dtMs);
+  }
+
+  public detonateCinderKeg(
+    prop: PropState,
+    attacker: PlayerState | null = null,
+    chainDepth = 0
+  ): void {
+    if (!prop || prop.opened || prop.kind !== 'keg') return;
+    prop.opened = true;
+
+    const blastRadius = 112;
+    const blastDmg = Math.max(40, prop.value || 48 + this.floor * 14);
+    this.zones.push({
+      id: this.nextId('zone'),
+      kind: 'cinderflare_blast',
+      x: prop.x,
+      y: prop.y,
+      radius: blastRadius,
+      ttlMs: 420,
+      maxTtlMs: 420,
+      ownerId: attacker?.id || 'env',
+    });
+
+    const enemiesSnap = [...this.enemies];
+    for (const enemy of enemiesSnap) {
+      if (!enemy || enemy.hp <= 0 || !this.enemies.includes(enemy)) continue;
+      const hitR = blastRadius + enemy.radius * 0.35;
+      if (Math.hypot(enemy.x - prop.x, enemy.y - prop.y) <= hitR) {
+        this.damageEnemy(enemy, blastDmg, attacker, false, 'fire', false);
+        if (enemy.hp > 0 && this.enemies.includes(enemy)) {
+          this.applyDotStatus(enemy, 'burn', attacker, 3500, 'weapon');
+        }
+      }
+    }
+
+    for (const rival of this.getPvpTargetsFor(attacker)) {
+      if (Math.hypot(rival.x - prop.x, rival.y - prop.y) <= blastRadius + 14) {
+        this.damagePlayer(rival, Math.round(blastDmg * 0.7), 'fire', attacker);
+      }
+    }
+
+    for (const dummy of this.trainingDummies) {
+      if (Math.hypot(dummy.x - prop.x, dummy.y - prop.y) <= blastRadius + 18) {
+        this.damageDummy(dummy, blastDmg, attacker, false, false, 'fire');
+      }
+    }
+
+    this.emitEvent('status', prop.x, prop.y - 20, 'CINDER BLAST!', '#F97316');
+
+    if (chainDepth < 4) {
+      for (const other of this.props) {
+        if (!other.opened && other.kind === 'keg') {
+          if (Math.hypot(other.x - prop.x, other.y - prop.y) <= blastRadius + 12) {
+            this.detonateCinderKeg(other, attacker, chainDepth + 1);
+          }
+        }
+      }
+    }
+  }
+
+  private detonateKegsInRadius(
+    x: number,
+    y: number,
+    radius: number,
+    attacker: PlayerState | null = null
+  ): void {
+    const rSq = radius * radius;
+    for (const prop of this.props) {
+      if (!prop.opened && prop.kind === 'keg') {
+        const dx = prop.x - x;
+        const dy = prop.y - y;
+        if (dx * dx + dy * dy <= rSq) {
+          this.detonateCinderKeg(prop, attacker);
+        }
+      }
+    }
+  }
+
+  private stepDungeonSpikeTraps(dtMs: number): void {
+    if (this.isTavern || this.isOpenWorld || this.floor <= 0) return;
+
+    if (this.spikeTrapCooldowns.size > 0) {
+      for (const [key, rem] of this.spikeTrapCooldowns.entries()) {
+        const next = rem - dtMs;
+        if (next <= 0) {
+          this.spikeTrapCooldowns.delete(key);
+        } else {
+          this.spikeTrapCooldowns.set(key, next);
+        }
+      }
+    }
+
+    const cycleMs = 2800;
+    const warnStartMs = 1550;
+    const activeStartMs = 2100;
+
+    for (const prop of this.props) {
+      if (prop.kind !== 'spike_trap') continue;
+      const phaseMs = (this.simTimeMs + (prop.value || 0)) % cycleMs;
+      const isWarning = phaseMs >= warnStartMs && phaseMs < activeStartMs;
+      const isActive = phaseMs >= activeStartMs;
+      prop.locked = isWarning;
+      prop.opened = isActive;
+
+      if (!isActive) continue;
+
+      const enemyDmg = Math.round(20 + this.floor * 5);
+      const enemiesSnap = [...this.enemies];
+      for (const enemy of enemiesSnap) {
+        if (!enemy || enemy.hp <= 0 || enemy.kind === 'boss' || !this.enemies.includes(enemy)) {
+          continue;
+        }
+        const hitR = 24 + enemy.radius * 0.35;
+        if (Math.hypot(enemy.x - prop.x, enemy.y - prop.y) <= hitR) {
+          const cdKey = `${prop.id}:${enemy.id}`;
+          if ((this.spikeTrapCooldowns.get(cdKey) || 0) > 0) continue;
+          this.spikeTrapCooldowns.set(cdKey, 650);
+          this.damageEnemy(enemy, enemyDmg, null, false, 'physical', false);
+          if (enemy.hp > 0 && this.enemies.includes(enemy)) {
+            this.applyDotStatus(enemy, 'bleed', null, 2000, 'class');
+          }
+        }
+      }
+
+      const playerDmg = Math.round(14 + this.floor * 3);
+      for (const pr of this.players.values()) {
+        const p = pr.state;
+        if (!p.connected || p.downed) continue;
+        if (Math.hypot(p.x - prop.x, p.y - prop.y) <= 22) {
+          const cdKey = `${prop.id}:${p.id}`;
+          if ((this.spikeTrapCooldowns.get(cdKey) || 0) > 0) continue;
+          this.spikeTrapCooldowns.set(cdKey, 650);
+          this.damagePlayer(p, playerDmg, 'physical');
+          this.emitEvent('status', p.x, p.y - 20, 'SPIKE TRAP!', '#EF4444');
+        }
+      }
+    }
+  }
+
+  private stepOverworldEvents(dtMs: number): void {
+    if (!this.isOpenWorld || this.status !== 'playing' || !this.map?.regions?.length) {
+      return;
+    }
+
+    const connectedAlive: PlayerRuntime[] = [];
+    let anyConnected = false;
+    for (const pr of this.players.values()) {
+      if (!pr.state.connected) continue;
+      anyConnected = true;
+      if (!pr.state.downed && pr.state.hp > 0) {
+        connectedAlive.push(pr);
+      }
+    }
+    if (!anyConnected) return;
+
+    const dtSec = dtMs / 1000;
+    const fontIdx = this.zones.findIndex((z) => z.kind === 'overworld_font');
+    if (fontIdx === -1) {
+      this.overworldFontChargeAcc = 0;
+      this.overworldFontPulseAccumMs = 0;
+      this.overworldFontCooldownMs = Math.max(0, this.overworldFontCooldownMs - dtMs);
+      if (this.overworldFontCooldownMs <= 0) {
+        const regions = this.map.regions;
+        const region = regions[this.overworldFontRegionCursor % regions.length];
+        const fontKind = (this.overworldFontTypeCursor % 3) + 1; // 1=Fury, 2=Zephyr, 3=Bastion
+        const fontTitle =
+          fontKind === 1
+            ? 'Blood Fury Font'
+            : fontKind === 2
+              ? 'Zephyr Wind Font'
+              : 'Bastion Vitality Font';
+        this.overworldFontRegionCursor =
+          (this.overworldFontRegionCursor + 1 + (this.overworldFontTypeCursor % 2)) % regions.length;
+        this.overworldFontTypeCursor = (this.overworldFontTypeCursor + 1) % 3;
+        this.overworldFontChargeAcc = 0;
+        this.zones.push({
+          id: this.nextId('zone'),
+          kind: 'overworld_font',
+          x: region.x,
+          y: region.y,
+          radius: 108,
+          quadrant: fontKind,
+          stage: 0,
+          label: region.name,
+          ttlMs: 40000,
+          maxTtlMs: 40000,
+          ownerId: 'neutral',
+        });
+        this.pushSystemChat(
+          `A ${fontTitle} has awakened at ${region.name}! Stand inside to claim its bounty.`
+        );
+      }
+      return;
+    }
+
+    const font = this.zones[fontIdx];
+    const fontKind = font.quadrant || 1;
+    const fontTitle =
+      fontKind === 1
+        ? 'Blood Fury Font'
+        : fontKind === 2
+          ? 'Zephyr Wind Font'
+          : 'Bastion Vitality Font';
+
+    const occupants: PlayerRuntime[] = [];
+    for (const pr of connectedAlive) {
+      if (Math.hypot(pr.state.x - font.x, pr.state.y - font.y) <= font.radius) {
+        occupants.push(pr);
+      }
+    }
+
+    this.overworldFontPulseAccumMs += dtMs;
+    const doAuraPulse = this.overworldFontPulseAccumMs >= 500;
+    if (doAuraPulse) {
+      this.overworldFontPulseAccumMs -= 500;
+    }
+
+    for (const pr of occupants) {
+      const st = pr.state;
+      if (fontKind === 1) {
+        if (st.skillCooldownMs > 0) {
+          st.skillCooldownMs = Math.max(0, st.skillCooldownMs - Math.round(dtMs * 0.35));
+        }
+        if (st.dashCooldownMs > 0) {
+          st.dashCooldownMs = Math.max(0, st.dashCooldownMs - Math.round(dtMs * 0.35));
+        }
+      } else if (fontKind === 2) {
+        st.hasteMs = Math.max(st.hasteMs, 650);
+      } else if (doAuraPulse) {
+        const healAmt = Math.min(Math.max(0, st.maxHp - st.hp), 6);
+        if (healAmt > 0) {
+          st.hp += healAmt;
+        }
+        this.grantShield(st, 6, 'add');
+      }
+    }
+
+    if (occupants.length === 1) {
+      const capturer = occupants[0].state;
+      font.ownerId = capturer.id;
+      this.overworldFontChargeAcc = Math.min(100, this.overworldFontChargeAcc + dtSec * 20);
+      const stepStage = Math.min(100, Math.floor(this.overworldFontChargeAcc));
+      if (stepStage !== (font.stage ?? 0)) {
+        font.stage = stepStage;
+      }
+
+      if (this.overworldFontChargeAcc >= 100) {
+        this.zones.splice(fontIdx, 1);
+        this.overworldFontChargeAcc = 0;
+        this.overworldFontCooldownMs = 6000;
+
+        capturer.gold += 50;
+        this.grantXp(capturer, 45);
+        const healAmt = Math.min(
+          Math.max(0, capturer.maxHp - capturer.hp),
+          Math.max(20, Math.round(capturer.maxHp * 0.3))
+        );
+        if (healAmt > 0) {
+          capturer.hp += healAmt;
+          this.emitEvent('heal', capturer.x, capturer.y - 18, `+${healAmt}`, '#34D399');
+        }
+        this.grantShield(capturer, 35, 'add');
+        capturer.hasteMs = Math.max(capturer.hasteMs, 6000);
+        this.emitEvent('gold', capturer.x, capturer.y - 28, '+50g', '#FACC15');
+        this.emitEvent('status', font.x, font.y - 36, 'WAR FONT CLAIMED!', '#F59E0B');
+
+        for (const pr of connectedAlive) {
+          if (pr.state.id === capturer.id) continue;
+          const dx = pr.state.x - font.x;
+          const dy = pr.state.y - font.y;
+          const dist = Math.hypot(dx, dy);
+          if (dist <= font.radius + 40 && dist > 1) {
+            this.moveWithCollision(pr.state, (dx / dist) * 48, (dy / dist) * 48, 9);
+          }
+        }
+
+        const regionName = font.label || 'the Borderlands';
+        this.pushSystemChat(
+          `${capturer.username} conquered the ${fontTitle} at ${regionName} (+50g)!`
+        );
+      }
+    } else if (occupants.length >= 2) {
+      font.ownerId = 'contested';
+    } else {
+      font.ownerId = 'neutral';
+      if (this.overworldFontChargeAcc > 0) {
+        this.overworldFontChargeAcc = Math.max(0, this.overworldFontChargeAcc - dtSec * 5);
+        font.stage = Math.floor(this.overworldFontChargeAcc);
+      }
+    }
   }
 
   private awardCombatRoomClear(room: RoomNode): void {
@@ -7014,6 +7754,7 @@ export class GameRoom {
         this.damageDummy(d, burstBase, owner, false, false, burstCategory);
       }
     }
+    this.detonateKegsInRadius(cx, cy, radius + 14, owner);
     this.emitEvent('status', cx, cy - 22, 'GALEBURST!', '#38BDF8');
   }
 
@@ -7399,13 +8140,18 @@ export class GameRoom {
 
       const hitIds = new Set<string>();
       for (const prop of this.props) {
-        if (!prop.opened && prop.kind === 'crate') {
+        if (prop.opened) continue;
+        if (prop.kind === 'crate') {
           if (Math.hypot(prop.x - slamPos.x, prop.y - slamPos.y) <= slamRadius + 18) {
             prop.opened = true;
             for (const ally of this.players.values()) {
               ally.state.gold += prop.value;
             }
             this.emitEvent('gold', prop.x, prop.y - 10, `+${prop.value}g`, '#F4D378');
+          }
+        } else if (prop.kind === 'keg') {
+          if (Math.hypot(prop.x - slamPos.x, prop.y - slamPos.y) <= slamRadius + 18) {
+            this.detonateCinderKeg(prop, p);
           }
         }
       }
@@ -9706,6 +10452,20 @@ export class GameRoom {
     this.removeEntityZones(enemy.id);
     this.enemyMeta.delete(enemy.id);
 
+    if (enemy.kind === 'slime' && !this.isTavern && !this.isOpenWorld && this.status === 'playing') {
+      this.zones.push({
+        id: this.nextId('zone'),
+        kind: 'acid_pool',
+        x: enemy.x,
+        y: enemy.y,
+        radius: enemy.elite ? 40 : 32,
+        ttlMs: 2600,
+        maxTtlMs: 2600,
+        ownerId: 'slime_death',
+        damage: this.computeEnemyDamage(6, enemy),
+      });
+    }
+
     for (const pr of this.players.values()) {
       if (pr.state.predatorTargetId === enemy.id) {
         pr.state.predatorTargetId = null;
@@ -9855,6 +10615,16 @@ export class GameRoom {
     let isCrit = Boolean(opts?.isCrit);
     if (attacker && this.pvpEnabled) {
       effectiveRaw = Math.max(1, Math.round(rawDamage * 0.55));
+      if (
+        this.zones.some(
+          (z) =>
+            z.kind === 'overworld_font' &&
+            z.quadrant === 1 &&
+            Math.hypot(attacker.x - z.x, attacker.y - z.y) <= z.radius
+        )
+      ) {
+        effectiveRaw = Math.round(effectiveRaw * 1.22);
+      }
       if (attackerActivePassive === 'eagle_keenness') {
         const distToTarget = Math.hypot(p.x - attacker.x, p.y - attacker.y);
         if (distToTarget >= 180) {
@@ -10049,11 +10819,41 @@ export class GameRoom {
       }
       if (this.isOpenWorld) {
         this.pvpGaleburstStacks.delete(p.id);
+        const endedStreak = this.pvpStreaks.get(p.id) || 0;
+        this.pvpStreaks.set(p.id, 0);
         if (attacker) {
           attacker.kills += 1;
+          const nextStreak = (this.pvpStreaks.get(attacker.id) || 0) + 1;
+          this.pvpStreaks.set(attacker.id, nextStreak);
+          const shutdownBonus = endedStreak >= 3 ? Math.min(125, endedStreak * 20) : 0;
+          const bountyGold = 25 + shutdownBonus;
+          attacker.gold += bountyGold;
+          this.grantXp(attacker, 25 + (endedStreak >= 3 ? 25 : 0));
+          if (!attacker.downed && attacker.hp > 0) {
+            const healAmt = Math.min(
+              Math.max(0, attacker.maxHp - attacker.hp),
+              Math.max(8, Math.round(attacker.maxHp * 0.12))
+            );
+            if (healAmt > 0) {
+              attacker.hp += healAmt;
+              this.emitEvent('heal', attacker.x, attacker.y - 18, `+${healAmt}`, '#34D399');
+            }
+            this.grantShield(attacker, 10, 'add');
+          }
+          this.emitEvent('gold', attacker.x, attacker.y - 28, `+${bountyGold}g`, '#FACC15');
           this.onKillCallback?.(attacker.id, { isBoss: false });
           this.emitEvent('status', p.x, p.y - 30, 'SLAYED!', '#EF4444');
-          this.pushSystemChat(`${attacker.username} defeated ${p.username}!`);
+          if (endedStreak >= 3) {
+            this.pushSystemChat(
+              `SHUTDOWN! ${attacker.username} ended ${p.username}'s ${endedStreak}-kill streak (+${bountyGold}g bounty)!`
+            );
+          } else {
+            this.pushSystemChat(`${attacker.username} defeated ${p.username} (+${bountyGold}g)!`);
+          }
+          if (nextStreak === 3 || nextStreak === 5 || nextStreak === 8) {
+            this.emitEvent('status', attacker.x, attacker.y - 42, `${nextStreak} KILL STREAK!`, '#F59E0B');
+            this.pushSystemChat(`${attacker.username} is on a ${nextStreak}-kill rampage!`);
+          }
         } else {
           this.pushSystemChat(`${p.username} fell in the Open World.`);
         }
@@ -10376,7 +11176,7 @@ export class GameRoom {
     const netProps: PropState[] = [];
     for (let i = 0; i < base.props.length; i++) {
       const prop = base.props[i];
-      if (prop.opened && (prop.kind === 'crate' || prop.kind === 'coin' || prop.kind === 'potion')) {
+      if (prop.opened && (prop.kind === 'crate' || prop.kind === 'keg' || prop.kind === 'coin' || prop.kind === 'potion')) {
         continue;
       }
       netProps.push(prop);

@@ -270,6 +270,32 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
     }
     return best;
   }, [isOpenWorld, meXQuantized, meYQuantized, me, map.regions]);
+  const [regionArrival, setRegionArrival] = useState<{ name: string; subtitle: string; color: string } | null>(null);
+  const lastRegionIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!isOpenWorld) {
+      lastRegionIdRef.current = null;
+      setRegionArrival(null);
+      return;
+    }
+    const nextId = currentOverworldRegion?.id ?? null;
+    if (nextId && nextId !== lastRegionIdRef.current) {
+      const hadPrev = lastRegionIdRef.current !== null;
+      lastRegionIdRef.current = nextId;
+      if (hadPrev && currentOverworldRegion) {
+        setRegionArrival({
+          name: currentOverworldRegion.name,
+          subtitle: currentOverworldRegion.subtitle,
+          color: currentOverworldRegion.accentColor,
+        });
+        const timer = window.setTimeout(() => setRegionArrival(null), 2600);
+        return () => window.clearTimeout(timer);
+      }
+    }
+  }, [isOpenWorld, currentOverworldRegion]);
+  const activeOverworldFont = isOpenWorld
+    ? snapshot.zones.find((z) => z.kind === 'overworld_font') ?? null
+    : null;
   const voiceMyPos = useMemo(
     () => ({ x: meXQuantized, y: meYQuantized }),
     [meXQuantized, meYQuantized]
@@ -703,7 +729,7 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
   };
 
   return (
-    <div className="relative w-screen h-screen h-[100dvh] overflow-hidden select-none bg-[#111219] touch-none pt-safe pb-safe pl-safe pr-safe">
+    <div className="fixed inset-0 w-full h-[100dvh] overflow-hidden select-none bg-[#111219] touch-none pt-safe pb-safe pl-safe pr-safe">
       {/* 60 FPS Pixel-Art Canvas */}
       <GameCanvas
         playerId={playerId}
@@ -727,14 +753,14 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
       {/* Top Header HUD */}
       <header className="pointer-events-none fixed top-0 inset-x-0 z-10 flex items-center justify-between gap-1.5 sm:gap-2 px-1.5 sm:px-5 py-1.5 sm:py-3 bg-gradient-to-b from-[#111219]/90 to-transparent pt-safe">
         {/* Left: Floor, Biome, Seed */}
-        <div className="pointer-events-auto flex items-center gap-1.5 sm:gap-2 text-[10px] sm:text-sm font-mono tabular-nums text-[#D4D2E0]">
+        <div className="pointer-events-auto flex items-center gap-1 sm:gap-2 text-[10px] sm:text-sm font-mono tabular-nums text-[#D4D2E0] min-w-0 shrink">
           {isTavern ? (
             <>
               <span className="font-display text-xs sm:text-base text-[#FCD34D] font-bold whitespace-nowrap flex items-center gap-1">
                 <span></span> Tavern
               </span>
-              <span aria-hidden="true" className="text-[#78768A]">·</span>
-              <span className="text-emerald-400 font-semibold text-[10px] sm:text-xs">Hub</span>
+              <span aria-hidden="true" className="hidden sm:inline text-[#78768A]">·</span>
+              <span className="hidden sm:inline text-emerald-400 font-semibold text-xs">Hub</span>
               <span aria-hidden="true" className="hidden sm:inline text-[#78768A]">·</span>
               <span className="hidden sm:inline text-[#BDBACF]">
                 {snapshot.players.length} {snapshot.players.length === 1 ? 'Adventurer' : 'Adventurers'}
@@ -742,22 +768,23 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
             </>
           ) : isOpenWorld ? (
             <>
-              <span className="font-display text-xs sm:text-base text-white font-semibold whitespace-nowrap truncate max-w-[125px] sm:max-w-none">
+              <span className="hidden sm:inline font-display text-base text-white font-semibold whitespace-nowrap">
                 {map.biomeTitle || 'Verdant Borderlands'}
               </span>
-              <span aria-hidden="true" className="text-[#78768A]">·</span>
+              <span aria-hidden="true" className="hidden sm:inline text-[#78768A]">·</span>
               <span
-                className="font-semibold text-[10px] sm:text-xs whitespace-nowrap"
+                className="hidden sm:inline font-semibold text-xs whitespace-nowrap"
                 style={{ color: currentOverworldRegion?.accentColor || '#A7F3D0' }}
               >
                 {currentOverworldRegion?.name || 'Borderlands'}
               </span>
-              <span aria-hidden="true" className="text-[#78768A]">·</span>
+              <span aria-hidden="true" className="hidden sm:inline text-[#78768A]">·</span>
               <span className="text-[#FCA5A5] font-bold text-[10px] sm:text-xs whitespace-nowrap">
-                OPEN PVP
+                <span className="sm:hidden">PVP</span>
+                <span className="hidden sm:inline">OPEN PVP</span>
               </span>
               <span aria-hidden="true" className="text-[#78768A]">·</span>
-              <span className="text-[#FCD34D] font-mono text-[10px] sm:text-xs font-bold">
+              <span className="text-[#FCD34D] font-mono text-[10px] sm:text-xs font-bold whitespace-nowrap">
                 {me?.level >= MAX_LEVEL ? 'MAX' : `Lv.${me?.level || 1}`}
               </span>
               <span aria-hidden="true" className="hidden sm:inline text-[#78768A]">·</span>
@@ -768,16 +795,33 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
               <span className="hidden md:inline text-[#FB7185] font-semibold whitespace-nowrap">
                 PvP Kills {me?.kills || 0}
               </span>
+              {activeOverworldFont && (
+                <>
+                  <span aria-hidden="true" className="hidden lg:inline text-[#78768A]">·</span>
+                  <span
+                    className={`hidden lg:inline font-mono tabular-nums font-semibold whitespace-nowrap ${
+                      activeOverworldFont.ownerId === 'contested'
+                        ? 'text-rose-400'
+                        : 'text-amber-300'
+                    }`}
+                  >
+                    Font: {activeOverworldFont.label || 'Borderlands'}{' '}
+                    {activeOverworldFont.ownerId === 'contested'
+                      ? '(CONTESTED)'
+                      : `(${activeOverworldFont.stage ?? 0}%)`}
+                  </span>
+                </>
+              )}
             </>
           ) : (
             <>
-              <span className="font-display text-[11px] sm:text-base text-white font-semibold flex flex-wrap sm:flex-nowrap items-center gap-1 leading-tight">
+              <span className="font-display text-[11px] sm:text-base text-white font-semibold flex items-center gap-1 leading-tight whitespace-nowrap">
                 <span className="hidden sm:inline">Floor {snapshot.floor}:</span>
-                <span className="sm:hidden font-bold">F{snapshot.floor}:</span>
-                <span className="truncate max-w-[90px] sm:max-w-none">{map.biomeTitle}</span>
+                <span className="sm:hidden font-bold">F{snapshot.floor}</span>
+                <span className="hidden sm:inline truncate max-w-none">{map.biomeTitle}</span>
               </span>
               <span aria-hidden="true" className="text-[#78768A]">·</span>
-              <span className="text-[#FCD34D] font-mono text-[10px] sm:text-xs font-bold">
+              <span className="text-[#FCD34D] font-mono text-[10px] sm:text-xs font-bold whitespace-nowrap">
                 {me?.level >= MAX_LEVEL ? 'MAX' : `Lv.${me?.level || 1}`}
               </span>
               <span aria-hidden="true" className="hidden sm:inline text-[#78768A]">·</span>
@@ -806,6 +850,28 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
                   </span>
                 </>
               )}
+              {snapshot.bossDefeated ? (
+                <>
+                  <span aria-hidden="true" className="hidden lg:inline text-[#78768A]">·</span>
+                  <span className="hidden lg:inline font-mono text-emerald-400 font-semibold">
+                    Portal Open
+                  </span>
+                </>
+              ) : !snapshot.bossRoomCleared && (snapshot.bossWards ?? 0) === 0 && snapshot.floor > 0 ? (
+                <>
+                  <span aria-hidden="true" className="hidden lg:inline text-[#78768A]">·</span>
+                  <span className="hidden lg:inline font-mono text-rose-400 font-semibold">
+                    Boss Vulnerable
+                  </span>
+                </>
+              ) : (snapshot.bossWards ?? 0) > 0 ? (
+                <>
+                  <span aria-hidden="true" className="hidden lg:inline text-[#78768A]">·</span>
+                  <span className="hidden lg:inline font-mono tabular-nums text-amber-300">
+                    Wards {snapshot.bossWards}
+                  </span>
+                </>
+              ) : null}
               {(me?.floorBlessings?.length ?? 0) > 0 && (() => {
                 const counts: Record<string, number> = {};
                 for (const b of me.floorBlessings!) {
@@ -829,7 +895,7 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
         </div>
 
         {/* Right: Organized HUD Action Bar & Utilities */}
-        <div className="pointer-events-auto flex items-center gap-1 sm:gap-2 overflow-x-auto custom-scrollbar max-w-[75vw] md:max-w-[80vw] lg:max-w-none shrink-0 py-0.5 font-mono">
+        <div className="pointer-events-auto flex items-center gap-2 sm:gap-2 overflow-x-auto custom-scrollbar max-w-[82vw] sm:max-w-none shrink-0 py-0.5 font-mono">
           
           {/* Quick Expedition Gate Access inside Tavern */}
           {isTavern && (
@@ -839,7 +905,7 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
                 sfx.playUiClick();
                 setExpeditionGateOpen(true);
               }}
-              className="stone-button stone-button-gold text-[9px] sm:text-xs py-0.5 px-1.5 sm:py-1 sm:px-2.5 animate-pulse"
+              className="stone-button stone-button-gold text-[11px] sm:text-xs min-h-[36px] sm:min-h-[32px] py-1 px-2.5 whitespace-nowrap shrink-0"
               title="Open Expedition Gate"
             >
               <span className="hidden sm:inline">Expedition Gate</span>
@@ -848,14 +914,14 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
           )}
 
           {/* Group 1: Primary Gameplay Quick Shortcuts ([M] Map, [I] Inventory, [P] Attributes, Chat) */}
-          <div className="flex items-center gap-1 sm:gap-1.5 bg-[#171622]/90 p-0.5 sm:p-1 border border-[#353442]">
+          <div className="flex items-center gap-1.5 sm:gap-1.5 sm:bg-[#171622]/90 sm:p-1 sm:border sm:border-[#353442]">
             <button
               type="button"
               onClick={() => {
                 sfx.playUiClick();
                 setExpandedMapOpen(true);
               }}
-              className="stone-button stone-button-gold text-[9px] sm:text-xs py-0.5 px-1.5 sm:py-1 sm:px-2.5"
+              className="stone-button stone-button-gold text-[11px] sm:text-xs min-h-[36px] sm:min-h-[32px] py-1 px-2.5 sm:px-2.5 shrink-0"
               title="Map [M]"
             >
               <span className="hidden sm:inline">[M] Map</span>
@@ -870,13 +936,13 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
                     sfx.playUiClick();
                     setInventoryModalOpen(true);
                   }}
-                  className="stone-button stone-button-dark text-[9px] sm:text-xs relative flex items-center gap-1 py-0.5 px-1.5 sm:py-1 sm:px-2.5"
+                  className="stone-button stone-button-dark text-[11px] sm:text-xs min-h-[36px] sm:min-h-[32px] relative flex items-center gap-1 py-1 px-2.5 sm:px-2.5 shrink-0"
                   title="Inventory & Loadout [I]"
                 >
                   <span className="hidden sm:inline">[I] Inventory</span>
                   <span className="sm:hidden">Inv</span>
                   {me.relics && me.relics.length > 0 && (
-                    <span className="bg-[#252336] px-1 py-0.2 border border-[#353442] text-[#FCD34D] text-[8px] sm:text-[9px] font-mono font-bold">
+                    <span className="bg-[#252336] px-1 py-0.2 border border-[#353442] text-[#FCD34D] text-[9px] font-mono font-bold">
                       {me.relics.length}
                     </span>
                   )}
@@ -888,13 +954,13 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
                     sfx.playUiClick();
                     setAttributesModalOpen(true);
                   }}
-                  className="stone-button stone-button-gold text-[9px] sm:text-xs relative py-0.5 px-1.5 sm:py-1 sm:px-2.5"
+                  className="stone-button stone-button-gold text-[11px] sm:text-xs min-h-[36px] sm:min-h-[32px] relative py-1 px-2.5 sm:px-2.5 shrink-0"
                   title="Attributes [P]"
                 >
                   <span className="hidden sm:inline">[P] Attributes</span>
                   <span className="sm:hidden">Stats</span>
                   {me.attributePoints > 0 && (
-                    <span className="absolute -top-1.5 -right-1.5 px-1 py-0.2 bg-[#FACC15] text-black font-mono text-[8px] sm:text-[9px] font-bold rounded-full animate-pulse border border-[#854D0E] shadow">
+                    <span className="absolute -top-1.5 -right-1.5 px-1 py-0.2 bg-[#FACC15] text-black font-mono tabular-nums text-[9px] font-bold rounded-full border border-[#854D0E] shadow">
                       {me.attributePoints}
                     </span>
                   )}
@@ -908,14 +974,20 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
                 sfx.playUiClick();
                 setChatOpen((v) => !v);
               }}
-              className="stone-button stone-button-dark text-[9px] sm:text-xs py-0.5 px-1.5 sm:py-1 sm:px-2.5"
+              className="stone-button stone-button-dark text-[11px] sm:text-xs min-h-[36px] sm:min-h-[32px] relative py-1 px-2.5 sm:px-2.5 whitespace-nowrap shrink-0"
             >
-              Chat ({chatMessages.length})
+              <span className="hidden sm:inline">Chat ({chatMessages.length})</span>
+              <span className="sm:hidden">Chat</span>
+              {chatMessages.length > 0 && (
+                <span className="sm:hidden ml-1 text-[#FCD34D] text-[9px]">
+                  {chatMessages.length}
+                </span>
+              )}
             </button>
           </div>
 
           {/* Group 2: System Utilities & Session Menu */}
-          <div className="flex items-center gap-1 sm:gap-1.5 bg-[#171622]/90 p-0.5 sm:p-1 border border-[#353442]">
+          <div className="flex items-center gap-1.5 sm:gap-1.5 sm:bg-[#171622]/90 sm:p-1 sm:border sm:border-[#353442]">
             {/* Latency / Ping Monitor */}
             <div
               className="hidden sm:flex items-center gap-1 px-2 py-1 bg-[#1E1E2A] border border-[#353442] text-[10px] text-[#E6E4EE]"
@@ -952,7 +1024,7 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
                     ? 'Verdant Borderlands Open World PvP'
                     : 'Copy Party Code'
               }
-              className="stone-button stone-button-dark text-[9px] sm:text-[10px] py-0.5 px-1.5 sm:py-1 sm:px-2"
+              className="hidden sm:inline-flex stone-button stone-button-dark text-[10px] py-1 px-2"
             >
               {copiedCode ? 'Copied!' : isTavern ? 'TAVERN' : isOpenWorld ? 'WORLD' : snapshot.roomId}
             </button>
@@ -965,7 +1037,7 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
                 if (!nextMuted) sfx.playUiClick('confirm');
               }}
               title={isMuted ? 'Unmute Sound' : 'Mute Sound'}
-              className="stone-button stone-button-dark text-[9px] sm:text-[10px] py-0.5 px-1.5 sm:py-1 sm:px-2"
+              className="hidden sm:inline-flex stone-button stone-button-dark text-[10px] py-1 px-2"
             >
               {isMuted ? 'Muted' : 'SFX'}
             </button>
@@ -978,7 +1050,7 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
                   sfx.playUiClick();
                   setAdminPanelOpen(true);
                 }}
-                className="stone-button stone-button-gold text-[9px] sm:text-[10px] py-0.5 px-1.5 sm:py-1 sm:px-2 border-amber-400 text-amber-900 animate-pulse font-bold"
+                className="stone-button stone-button-gold text-[10px] sm:text-[10px] min-h-[36px] sm:min-h-[32px] py-1 px-2 border-amber-400 text-amber-950 font-bold whitespace-nowrap shrink-0"
                 title="Open Exclusive Admin Control Console"
               >
                 ADMIN
@@ -991,7 +1063,7 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
                 sfx.playUiClick();
                 setPauseOpen((v) => !v);
               }}
-              className="stone-button stone-button-gold text-[9px] sm:text-xs py-0.5 px-2 sm:py-1 sm:px-3 text-black font-bold"
+              className="stone-button stone-button-gold text-[11px] sm:text-xs min-h-[36px] sm:min-h-[32px] py-1 px-2.5 sm:px-3 text-black font-bold"
               title="Open Master Sanctuary Menu [Esc]"
             >
               Menu
@@ -1000,6 +1072,23 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
 
         </div>
       </header>
+
+      {/* Non-blocking Overworld Region Arrival Banner */}
+      {isOpenWorld && regionArrival && (
+        <div className="pointer-events-none fixed top-14 sm:top-16 inset-x-0 z-10 flex justify-center px-4">
+          <div className="stone-panel px-5 py-1.5 text-center shadow-[4px_4px_0_#0B0A10]">
+            <div
+              className="font-display text-sm sm:text-base font-bold tracking-wide drop-shadow-[0_1px_0_#0B0A10]"
+              style={{ color: regionArrival.color }}
+            >
+              {regionArrival.name}
+            </div>
+            <div className="font-mono text-[10px] sm:text-xs text-[#E2E0EC]">
+              {regionArrival.subtitle}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Boss Health Bar (Only visible when near boss or engaged in combat) */}
       {boss && me && (boss.hp < boss.maxHp || Math.hypot(boss.x - me.x, boss.y - me.y) <= 480) && (() => {
@@ -1116,7 +1205,7 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
 
         return (
           <div
-            className={`pointer-events-none fixed top-9 sm:top-14 left-1/2 -translate-x-1/2 z-10 w-[min(460px,92vw)] ${theme.bg} border ${theme.border} px-2.5 py-1 sm:px-4 sm:py-2 shadow-2xl`}
+            className={`pointer-events-none fixed top-[52px] left-[92px] right-[112px] sm:top-14 sm:left-1/2 sm:right-auto sm:-translate-x-1/2 z-10 sm:w-[min(460px,92vw)] ${theme.bg} border ${theme.border} px-2 py-1 sm:px-4 sm:py-2 shadow-2xl`}
           >
             <div className="flex items-center justify-between gap-2 text-xs font-mono tabular-nums mb-1">
               <div className="flex items-center gap-1.5 min-w-0 flex-1">
@@ -1194,14 +1283,14 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
       )}
 
       {/* Collapsible Co-op Party / Open World Roster Dropdown */}
-      <div className="pointer-events-auto fixed top-9 sm:top-14 left-1.5 sm:left-5 z-20">
+      <div className="pointer-events-auto fixed top-13 sm:top-14 left-2 sm:left-5 z-20">
         <button
           type="button"
           onClick={() => {
             sfx.playUiClick();
             setPartyOpen((v) => !v);
           }}
-          className="px-2 py-1 sm:px-2.5 sm:py-1.5 bg-[#1A1A24]/95 border border-[#38364C] hover:border-[#D9AA52] font-mono text-[10px] sm:text-xs text-[#E6E4EE] transition-colors whitespace-nowrap shadow-md flex items-center gap-1 cursor-pointer min-h-[30px] sm:min-h-[36px]"
+          className="px-2.5 py-1.5 bg-[#1A1A24]/95 border border-[#38364C] hover:border-[#D9AA52] font-mono text-[11px] sm:text-xs text-[#E6E4EE] transition-colors whitespace-nowrap shadow-md flex items-center gap-1 cursor-pointer min-h-[36px]"
           title={isOpenWorld ? 'Toggle Online Players List' : 'Toggle Party Members List'}
         >
           <span>{isOpenWorld ? `World (${snapshot.players.length})` : `Party (${snapshot.players.length})`}</span>
@@ -1289,7 +1378,7 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
 
       {/* Dedicated Fixed Player HP & Status Effects HUD */}
       {me && (
-        <div className="pointer-events-auto fixed top-20 sm:top-24 left-1.5 sm:left-5 z-20 w-52 sm:w-64 bg-[#191824]/95 border border-[#3A384C] p-2 sm:p-2.5 shadow-2xl space-y-1.5 font-mono">
+        <div className="pointer-events-auto fixed top-24 sm:top-24 left-2 sm:left-5 z-20 w-44 sm:w-64 bg-[#191824]/95 border border-[#3A384C] p-1.5 sm:p-2.5 shadow-2xl space-y-1.5 font-mono">
           <div className="flex items-center justify-between gap-1 text-xs">
             <span className="font-display text-xs sm:text-sm text-white font-bold truncate">
               {me.username}
@@ -1755,7 +1844,7 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
             }`}
           >
             <div className="flex justify-between w-full text-[10px] font-mono tabular-nums opacity-80">
-              <span>{equippedScroll?.isChannel ? '[HOLD Q/RMB]' : '[Q / RMB]'}</span>
+              <span>{equippedScroll?.isChannel ? '[HOLD 1/RMB]' : '[1 / RMB]'}</span>
               <span className={isSilenced ? 'text-[#C084FC] font-bold' : isChannelingDisintegration ? 'text-[#E9D5FF] font-bold' : ''}>
                 {isSilenced ? '[SILENCED]' : isChannelingDisintegration ? 'CHAN' : tacSec > 0 ? `${tacSec}s` : activeAimUi?.action === 'tactical' ? 'AIM' : 'READY'}
               </span>
@@ -1793,39 +1882,13 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
             }`}
           >
             <div className="flex justify-between w-full text-[10px] font-mono tabular-nums opacity-80">
-              <span>[R / Shift]</span>
+              <span>[2]</span>
               <span className={isSilenced ? 'text-[#C084FC] font-bold' : ''}>
                 {isSilenced ? '[SILENCED]' : ultSec > 0 ? `${ultSec}s` : activeAimUi?.action === 'ult' ? 'AIM' : 'READY'}
               </span>
             </div>
             <div className="font-display text-sm whitespace-nowrap">
               {myDef.ultName}
-            </div>
-          </button>
-
-          <button
-            type="button"
-            onMouseDown={(e) => {
-              if (e.button === 0) {
-                e.preventDefault();
-                startDesktopButtonAim('dash', e.clientX, e.clientY);
-              }
-            }}
-            title="Dash (hold to aim, release to dash)"
-            className={`stone-button flex-col items-start min-w-[110px] h-auto py-1.5 ${
-              activeAimUi?.action === 'dash'
-                ? 'stone-button-gold ring-2 ring-[#FDE68A]'
-                : dashSec > 0
-                ? 'stone-button-dark opacity-50 grayscale'
-                : 'stone-button-gold border-[#F59E0B]'
-            }`}
-          >
-            <div className="flex justify-between w-full text-[10px] font-mono tabular-nums opacity-80">
-              <span>[C / F]</span>
-              <span>{dashSec > 0 ? `${dashSec}s` : activeAimUi?.action === 'dash' ? 'AIM' : 'READY'}</span>
-            </div>
-            <div className="font-display text-sm whitespace-nowrap text-[#FDE68A]">
-              Dash
             </div>
           </button>
 
@@ -1843,7 +1906,7 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
               className="stone-button stone-button-red flex-col items-start h-auto py-1.5 min-w-[100px]"
             >
               <div className="text-[10px] font-mono tabular-nums opacity-80">
-                [H] Flasks: {me.potions}
+                [3] Flasks: {me.potions}
               </div>
               <div className="font-display text-sm whitespace-nowrap">
                 Heal
@@ -1888,6 +1951,32 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
               })}
             </div>
           </div>
+
+          <button
+            type="button"
+            onMouseDown={(e) => {
+              if (e.button === 0) {
+                e.preventDefault();
+                startDesktopButtonAim('dash', e.clientX, e.clientY);
+              }
+            }}
+            title="Dash (hold Shift to aim, release to dash)"
+            className={`stone-button flex-col items-start min-w-[110px] h-auto py-1.5 ${
+              activeAimUi?.action === 'dash'
+                ? 'stone-button-gold ring-2 ring-[#FDE68A]'
+                : dashSec > 0
+                ? 'stone-button-dark opacity-50 grayscale'
+                : 'stone-button-gold border-[#F59E0B]'
+            }`}
+          >
+            <div className="flex justify-between w-full text-[10px] font-mono tabular-nums opacity-80">
+              <span>[SHIFT]</span>
+              <span>{dashSec > 0 ? `${dashSec}s` : activeAimUi?.action === 'dash' ? 'AIM' : 'READY'}</span>
+            </div>
+            <div className="font-display text-sm whitespace-nowrap text-[#FDE68A]">
+              Dash
+            </div>
+          </button>
 
           <button
             type="button"
@@ -2059,15 +2148,15 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
               <div className="flex items-start justify-between gap-3">
                 <div className="space-y-1 flex-1 text-center sm:text-left">
                   <div className="text-[11px] font-mono uppercase tracking-widest text-[#A5B4FC]">
-                    Arcanist Scroll · [Q] Override
+                    Arcanist Scroll · Skill [1] Override
                   </div>
                   <h2 className="font-display text-xl sm:text-2xl text-white">
                     Choose Ancient Scroll
                   </h2>
                   <p className="text-xs text-[#D0CEDB]">
                     {me.activeChestPropId
-                      ? 'Replaces your [Q] skill. Close to leave in chest.'
-                      : 'Replaces your [Q] skill, or dismiss to keep current.'}
+                      ? 'Replaces your [1] skill. Close to leave in chest.'
+                      : 'Replaces your [1] skill, or dismiss to keep current.'}
                   </p>
                 </div>
                 <button
@@ -2110,7 +2199,7 @@ export const DungeonRunView: React.FC<DungeonRunViewProps> = ({
                     >
                       <div className="space-y-1 w-full">
                         <div className="flex items-center justify-between text-[10px] font-mono text-[#BDBBC9]">
-                          <span>Replaces Astral Nova [Q]</span>
+                          <span>Replaces Astral Nova [1]</span>
                           <span>CD {(scroll.cooldownMs / 1000).toFixed(1)}s</span>
                         </div>
                         <div

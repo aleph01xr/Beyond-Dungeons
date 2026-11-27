@@ -446,6 +446,33 @@ export function generateOpenWorldMap(seed = 777): GeneratedOverworld {
     },
   ];
 
+  const torches = [
+    // Crossroads Bastion plaza braziers
+    { x: 57.5 * TILE_SIZE, y: 42.5 * TILE_SIZE },
+    { x: 63.5 * TILE_SIZE, y: 42.5 * TILE_SIZE },
+    { x: 57.5 * TILE_SIZE, y: 48.5 * TILE_SIZE },
+    { x: 63.5 * TILE_SIZE, y: 48.5 * TILE_SIZE },
+    // Emerald Woods sylvan ring lanterns
+    { x: 27.5 * TILE_SIZE, y: 19.5 * TILE_SIZE },
+    { x: 35.5 * TILE_SIZE, y: 19.5 * TILE_SIZE },
+    { x: 27.5 * TILE_SIZE, y: 25.5 * TILE_SIZE },
+    { x: 35.5 * TILE_SIZE, y: 25.5 * TILE_SIZE },
+    // Sunlit Quarry terrace braziers
+    { x: 86.5 * TILE_SIZE, y: 21.5 * TILE_SIZE },
+    { x: 92.5 * TILE_SIZE, y: 21.5 * TILE_SIZE },
+    { x: 89.5 * TILE_SIZE, y: 26.5 * TILE_SIZE },
+    // Whispering Lake bridgehead & island pier lanterns
+    { x: 28.5 * TILE_SIZE, y: 63.5 * TILE_SIZE },
+    { x: 32.5 * TILE_SIZE, y: 63.5 * TILE_SIZE },
+    { x: 28.5 * TILE_SIZE, y: 71.5 * TILE_SIZE },
+    { x: 32.5 * TILE_SIZE, y: 71.5 * TILE_SIZE },
+    // Shattered Sanctum colonnade braziers
+    { x: 84.5 * TILE_SIZE, y: 63.5 * TILE_SIZE },
+    { x: 92.5 * TILE_SIZE, y: 63.5 * TILE_SIZE },
+    { x: 84.5 * TILE_SIZE, y: 69.5 * TILE_SIZE },
+    { x: 92.5 * TILE_SIZE, y: 69.5 * TILE_SIZE },
+  ];
+
   const map: DungeonMap = {
     floor: 1,
     biome: 'overworld',
@@ -454,7 +481,7 @@ export function generateOpenWorldMap(seed = 777): GeneratedOverworld {
     height,
     tiles,
     rooms: [],
-    torches: [],
+    torches,
     portalPos: { x: 60.5 * TILE_SIZE, y: 45.5 * TILE_SIZE },
     portalActive: false,
     seed,

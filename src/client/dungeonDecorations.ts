@@ -742,6 +742,104 @@ export function drawDungeonProp(
     ctx.fillRect(x - 10, y + 7, 1, 1);
     ctx.fillRect(x + 9, y + 7, 1, 1);
 
+  } else if (prop.kind === 'keg') {
+    // Explosive Cinder Keg: iron-banded crimson powder barrel with warning flame emblem and live spark fuse
+    const flicker = Math.sin(now * 0.022 + x * 0.13) * 0.5 + 0.5;
+    ctx.fillStyle = 'rgba(0,0,0,0.42)';
+    ctx.fillRect(x - 10, y + 8, 20, 4);
+
+    // Barrel body silhouette (slightly tapered top/bottom)
+    ctx.fillStyle = '#18181B';
+    ctx.fillRect(x - 9, y - 11, 18, 20);
+    ctx.fillStyle = '#7F1D1D';
+    ctx.fillRect(x - 8, y - 10, 16, 18);
+    ctx.fillStyle = '#B91C1C';
+    ctx.fillRect(x - 6, y - 9, 12, 16);
+    ctx.fillStyle = '#DC2626';
+    ctx.fillRect(x - 3, y - 8, 5, 14);
+
+    // Iron barrel hoops
+    ctx.fillStyle = '#334155';
+    ctx.fillRect(x - 9, y - 8, 18, 2);
+    ctx.fillRect(x - 9, y + 3, 18, 2);
+    ctx.fillStyle = '#94A3B8';
+    ctx.fillRect(x - 7, y - 8, 4, 1);
+    ctx.fillRect(x - 7, y + 3, 4, 1);
+
+    // Warning ember diamond emblem
+    ctx.fillStyle = '#FACC15';
+    ctx.fillRect(x - 2, y - 4, 4, 4);
+    ctx.fillStyle = '#FEF08A';
+    ctx.fillRect(x - 1, y - 3, 2, 2);
+
+    // Fuse & live flickering spark on top lid
+    ctx.fillStyle = '#78350F';
+    ctx.fillRect(x - 1, y - 14, 2, 3);
+    ctx.fillStyle = flicker > 0.45 ? '#F97316' : '#FDE047';
+    ctx.fillRect(x - 2, y - 17, 4, 3);
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillRect(x - 1, y - 16, 2, 2);
+
+  } else if (prop.kind === 'spike_trap') {
+    // Ancient Recessed Floor Spike Trap (Dormant -> Primed Warning -> Extended Crimson-Tipped Spikes)
+    const isActive = prop.opened;
+    const isWarning = !isActive && Boolean(prop.locked);
+    const pulse = Math.sin(now * 0.025 + x * 0.1) * 0.5 + 0.5;
+
+    // Stone recess & iron frame
+    ctx.fillStyle = '#0F172A';
+    ctx.fillRect(x - 15, y - 15, 30, 30);
+    ctx.fillStyle = isActive ? '#7F1D1D' : isWarning ? '#92400E' : '#334155';
+    ctx.fillRect(x - 14, y - 14, 28, 28);
+    ctx.fillStyle = '#1E293B';
+    ctx.fillRect(x - 12, y - 12, 24, 24);
+
+    // Subtle hazard bevel rim
+    ctx.strokeStyle = isActive
+      ? '#EF4444'
+      : isWarning
+        ? `rgba(251, 191, 36, ${(0.55 + pulse * 0.45).toFixed(2)})`
+        : '#475569';
+    ctx.lineWidth = isActive || isWarning ? 1.5 : 1;
+    ctx.strokeRect(x - 13.5, y - 13.5, 27, 27);
+
+    // Four symmetric spike sockets
+    const offsets: Array<[number, number]> = [
+      [-6, -6],
+      [6, -6],
+      [-6, 6],
+      [6, 6],
+    ];
+    for (const [ox, oy] of offsets) {
+      const sx = x + ox;
+      const sy = y + oy;
+      // Recessed socket pit
+      ctx.fillStyle = '#090D16';
+      ctx.fillRect(sx - 3, sy - 3, 6, 6);
+
+      if (isActive) {
+        // Extended steel blade spikes with crimson tips
+        ctx.fillStyle = 'rgba(0,0,0,0.45)';
+        ctx.fillRect(sx - 2, sy + 1, 5, 2);
+        ctx.fillStyle = '#94A3B8';
+        ctx.fillRect(sx - 2, sy - 7, 4, 8);
+        ctx.fillStyle = '#E2E8F0';
+        ctx.fillRect(sx - 1, sy - 9, 2, 9);
+        ctx.fillStyle = '#EF4444';
+        ctx.fillRect(sx - 1, sy - 10, 2, 3);
+      } else if (isWarning) {
+        // Primed warning: amber socket glow + glinting peeking spike tips
+        ctx.fillStyle = `rgba(245, 158, 11, ${(0.45 + pulse * 0.4).toFixed(2)})`;
+        ctx.fillRect(sx - 3, sy - 3, 6, 6);
+        ctx.fillStyle = '#E2E8F0';
+        ctx.fillRect(sx - 1, sy - 3, 2, 3);
+      } else {
+        // Dormant iron pin caps
+        ctx.fillStyle = '#475569';
+        ctx.fillRect(sx - 1, sy - 1, 2, 2);
+      }
+    }
+
   } else if (prop.kind === 'totem') {
     // Ancient Guardian Obelisk with towering stepped pedestal, tapering stone spire, and glowing runic channels
     ctx.fillStyle = 'rgba(0,0,0,0.55)';

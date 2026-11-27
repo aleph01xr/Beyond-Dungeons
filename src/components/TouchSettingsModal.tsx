@@ -351,10 +351,10 @@ export const TouchSettingsModal: React.FC<TouchSettingsModalProps> = ({
               <div className="grid grid-cols-4 gap-1.5">
                 {(
                   [
-                    { id: 'small', label: 'Small', desc: '110px' },
-                    { id: 'medium', label: 'Medium', desc: '140px' },
-                    { id: 'large', label: 'Large', desc: '175px' },
-                    { id: 'huge', label: 'Huge', desc: '215px' },
+                    { id: 'small', label: 'Small', desc: '108px' },
+                    { id: 'medium', label: 'Medium', desc: '136px' },
+                    { id: 'large', label: 'Large', desc: '166px' },
+                    { id: 'huge', label: 'Huge', desc: '204px' },
                   ] as const
                 ).map((opt) => {
                   const active = settings.joystickSize === opt.id;
@@ -421,9 +421,9 @@ export const TouchSettingsModal: React.FC<TouchSettingsModalProps> = ({
               </div>
               <div className="grid grid-cols-3 gap-1.5">
                 {[
-                  { id: 'compact', label: 'Compact', desc: 'Space-saving' },
-                  { id: 'standard', label: 'Standard', desc: 'Balanced' },
-                  { id: 'large', label: 'Large', desc: 'Comfortable' },
+                  { id: 'compact', label: 'Compact', desc: '58px / 78px' },
+                  { id: 'standard', label: 'Standard', desc: '68px / 90px' },
+                  { id: 'large', label: 'Large', desc: '78px / 104px' },
                 ].map((opt) => {
                   const active = settings.buttonSize === opt.id;
                   return (

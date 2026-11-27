@@ -168,7 +168,11 @@ export function projectOpenWorldSnapshotForClient(
     const maxReach = OPEN_WORLD_ENTITY_INTEREST_RADIUS + (z.radius || 0);
     const dx = z.x - vxCenter;
     const dy = z.y - vyCenter;
-    if (dx * dx + dy * dy <= maxReach * maxReach || z.ownerId === viewerId) {
+    if (
+      dx * dx + dy * dy <= maxReach * maxReach ||
+      z.ownerId === viewerId ||
+      z.kind === 'overworld_font'
+    ) {
       if (z.maxTtlMs >= 1500) {
         projectedZones.push({
           ...z,

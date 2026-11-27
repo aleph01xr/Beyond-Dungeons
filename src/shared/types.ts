@@ -817,7 +817,7 @@ export interface ProjectileState {
 
 export interface PropState {
   id: string;
-  kind: 'crate' | 'chest' | 'relic_chest' | 'shrine' | 'coin' | 'potion' | 'warden_gate' | 'totem';
+  kind: 'crate' | 'keg' | 'spike_trap' | 'chest' | 'relic_chest' | 'shrine' | 'coin' | 'potion' | 'warden_gate' | 'totem';
   x: number;
   y: number;
   opened: boolean;
@@ -871,7 +871,11 @@ export interface FieldZoneState {
     | 'sacred_retribution'
     | 'bulwark_dash_shockwave'
     | 'frost_volley_cone'
-    | 'sanctified_pulse_wave';
+    | 'sanctified_pulse_wave'
+    | 'acid_pool'
+    | 'seismic_ring'
+    | 'void_sigil'
+    | 'overworld_font';
   x: number;
   y: number;
   radius: number;

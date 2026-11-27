@@ -179,25 +179,25 @@ export const VoiceHUD: React.FC<VoiceHUDProps> = React.memo(({
 
   // Compute exact minimap outer bounds (mirrors GameCanvas.tsx) so VoiceHUD sits neatly near the map
   // without overlapping the minimap, top header, or mobile LV/skills cluster.
-  const isMobileScreen = viewport.w < 640;
+  const isMobileScreen = viewport.w < 640 || viewport.h < 520;
   let mmScale = 2.5;
   if (isMobileScreen) {
-    const targetMaxW = Math.min(100, Math.floor(viewport.w * 0.24));
-    mmScale = Math.max(1.0, Math.min(1.5, targetMaxW / Math.max(1, mapWidth)));
+    const targetMaxW = Math.min(96, Math.floor(viewport.w * 0.24));
+    mmScale = Math.max(0.85, Math.min(1.5, targetMaxW / Math.max(1, mapWidth)));
   }
   const mmW = mapWidth * mmScale;
   const mmH = mapHeight * mmScale;
   const mmPad = isMobileScreen ? 4 : 6;
   const mmRightOffset = isMobileScreen ? 8 : 20;
-  const mmY = isMobileScreen ? 42 : 74;
+  const mmY = isMobileScreen ? 52 : 74;
   const mmFrameBottom = mmY + mmH + mmPad;
   const mmFrameRightEdgeOffset = mmW + mmRightOffset + mmPad;
-  const isShortLandscapeTouch = hasTouchControls && viewport.h < 460;
+  const isShortLandscapeTouch = hasTouchControls && viewport.h < 520;
 
   const hudAnchorStyle: React.CSSProperties = isShortLandscapeTouch
     ? {
-        top: `${Math.max(88, Math.round(mmFrameBottom - 40))}px`,
-        right: `${Math.round(mmFrameRightEdgeOffset + 8)}px`,
+        top: `${Math.max(54, Math.round(mmY - 4))}px`,
+        right: `${Math.round(mmFrameRightEdgeOffset + 10)}px`,
       }
     : {
         top: `${Math.round(mmFrameBottom + 6)}px`,

@@ -35,6 +35,13 @@ import {
   drawOriphielBoss,
 } from './src/client/npcSprites.ts';
 import {
+  drawSlimeSprite,
+  drawGoblinSprite,
+  drawSkeletonSprite,
+  drawCultistSprite,
+  drawKnightSprite,
+  drawShadowStalkerSprite,
+  drawAstralSentinelSprite,
   drawHymnPhantomSprite,
   drawRelicGolemSprite,
   drawVeiledHereticSprite,
@@ -13347,6 +13354,765 @@ async function runRegressionTests() {
     room.setPlayerLevel(p1.id, MAX_LEVEL);
     assert.strictEqual(p1.level, MAX_LEVEL);
     assert.strictEqual(p1.attributePoints, (MAX_LEVEL - 1) * 3);
+  });
+
+  await test('145. Dungeon Regular Mob Threat Overhaul & Visual Design Upgrade', async () => {
+    const { resolveEnemyDirection8 } = await import('./src/client/directionalFacing.ts');
+
+    // 1. Verify all 12 regular mob sprite renderers handle all states, elite/shield/charge flags, and 8 directional poses
+    const noop = () => {};
+    const mockCtx = {
+      fillStyle: '#000',
+      strokeStyle: '#000',
+      lineWidth: 1,
+      lineCap: 'butt',
+      lineJoin: 'miter',
+      globalAlpha: 1,
+      font: '10px sans-serif',
+      textAlign: 'center',
+      save: noop,
+      restore: noop,
+      translate: noop,
+      rotate: noop,
+      scale: noop,
+      setLineDash: noop,
+      beginPath: noop,
+      closePath: noop,
+      moveTo: noop,
+      lineTo: noop,
+      quadraticCurveTo: noop,
+      bezierCurveTo: noop,
+      arc: noop,
+      ellipse: noop,
+      fill: noop,
+      stroke: noop,
+      fillRect: noop,
+      strokeRect: noop,
+      fillText: noop,
+      createRadialGradient: () => ({ addColorStop: noop }),
+    } as unknown as CanvasRenderingContext2D;
+
+    const mobRenderers: Array<{ kind: any; fn: Function }> = [
+      { kind: 'slime', fn: drawSlimeSprite },
+      { kind: 'goblin', fn: drawGoblinSprite },
+      { kind: 'skeleton', fn: drawSkeletonSprite },
+      { kind: 'cultist', fn: drawCultistSprite },
+      { kind: 'knight', fn: drawKnightSprite },
+      { kind: 'shadow_stalker', fn: drawShadowStalkerSprite },
+      { kind: 'astral_sentinel', fn: drawAstralSentinelSprite },
+      { kind: 'hymn_phantom', fn: drawHymnPhantomSprite },
+      { kind: 'relic_golem', fn: drawRelicGolemSprite },
+      { kind: 'veiled_heretic', fn: drawVeiledHereticSprite },
+      { kind: 'celestial_arbiter', fn: drawCelestialArbiterSprite },
+      { kind: 'warden_enforcer', fn: drawWardenEnforcerSprite },
+    ];
+
+    const dirVectors: Array<[number, number]> = [
+      [0, -80], [60, -60], [80, 0], [60, 60], [0, 80], [-60, 60], [-80, 0], [-60, -60],
+    ];
+    for (const { kind, fn } of mobRenderers) {
+      const baseMob: EnemyState = {
+        id: `spr_${kind}`,
+        kind,
+        name: kind,
+        roomId: 1,
+        x: 200,
+        y: 200,
+        vx: 0,
+        vy: 0,
+        hp: 120,
+        maxHp: 120,
+        radius: 13,
+        state: 'idle',
+        windupMs: 0,
+        targetX: 200,
+        targetY: 200,
+        markedMs: 0,
+        slowedMs: 0,
+        stunnedMs: 0,
+        burnedMs: 0,
+        frozenMs: 0,
+        shockedMs: 0,
+        poisonedMs: 0,
+        bleedingMs: 0,
+        silencedMs: 0,
+        elite: false,
+      };
+      const variants: Partial<EnemyState>[] = [
+        { state: 'idle' },
+        { state: 'chase', vx: 60, vy: 20 },
+        { state: 'windup', windupMs: 400 },
+        { state: 'charge', charging: true, chargeWindupMs: 200, chargeAngle: 0.4, elite: true },
+        { state: 'chase', charging: true, chargeWindupMs: 0, shieldWallMs: 900, elite: true },
+      ];
+      for (const variant of variants) {
+        for (const [vx, vy] of dirVectors) {
+          const en: EnemyState = { ...baseMob, ...variant, vx, vy, targetX: 200 + vx, targetY: 200 + vy };
+          const pose = resolveEnemyDirection8(en);
+          assert.doesNotThrow(() => {
+            if (kind === 'slime') {
+              fn(mockCtx, en, 200, 200, 10000, 'courtyard', pose);
+              fn(mockCtx, en, 200, 200, 10000, 'void', pose);
+            } else {
+              fn(mockCtx, en, 200, 200, 10000, pose);
+            }
+          }, `Sprite ${kind} should render cleanly across poses/states`);
+        }
+      }
+    }
+
+    // 2. Dungeon pack threat scaling, elite damage bonus, and skipPoison parity
+    const room = new GameRoom({
+      roomId: 'R_TEST_MOB_OVERHAUL_145',
+      name: 'Mob Overhaul Room',
+      hostName: 'Tester',
+      difficulty: 'Normal',
+      seed: 14501,
+      initialFloor: 1,
+      initialStatus: 'playing',
+    });
+    const combatRooms = room.map.rooms.filter((r) => r.type === 'combat');
+    const totalRegularMobs = room.enemies.filter((e) => e.kind !== 'boss').length;
+    assert.ok(totalRegularMobs >= combatRooms.length * 4, `Expected >= 4 regular mobs per combat room (got ${totalRegularMobs} across ${combatRooms.length} rooms)`);
+
+    const p = room.addOrReconnectPlayer('p_145', 'Tester', 'vanguard');
+    p.x = room.map.rooms[0].cx * TILE_SIZE + 16;
+    p.y = room.map.rooms[0].cy * TILE_SIZE + 16;
+    p.hp = 800;
+    p.maxHp = 800;
+
+    // Reset enemies to isolate individual mob ability checks
+    room.enemies = [];
+    const normGoblin = room.spawnEnemyForTesting('goblin', p.x + 90, p.y, false);
+    const eliteGoblin = room.spawnEnemyForTesting('goblin', p.x + 120, p.y, true);
+    const normalDmg = room.computeEnemyDamage(20, normGoblin);
+    const eliteDmg = room.computeEnemyDamage(20, eliteGoblin);
+    assert.ok(eliteDmg > normalDmg, `Elite non-boss mob damage (${eliteDmg}) must exceed normal (${normalDmg})`);
+
+    // Shadow Stalker telegraphed lunge charge
+    room.enemies = [];
+    const stalker = room.spawnEnemyForTesting('shadow_stalker', p.x + 110, p.y, false);
+    stalker.roomId = room.map.rooms[0].id;
+    stalker.abilityCdMs = 0;
+    stalker.windupMs = 0;
+    room.tick(50);
+    assert.strictEqual(stalker.charging, true, 'Shadow Stalker must initiate telegraphed charge lunge');
+    assert.ok((stalker.chargeWindupMs ?? 0) > 0, 'Shadow Stalker charge must start with readable windup telegraph');
+
+    // Knight raises Shield Wall when closing distance
+    room.enemies = [];
+    const knight = room.spawnEnemyForTesting('knight', p.x + 100, p.y, false);
+    knight.roomId = room.map.rooms[0].id;
+    knight.abilityCdMs = 0;
+    knight.windupMs = 0;
+    room.tick(50);
+    assert.ok((knight.shieldWallMs ?? 0) > 0, 'Knight must raise Shield Wall when closing on player');
+
+    // Skeleton fires 3-bone fan volley on 3rd shot, and silenced caster skips casting
+    room.enemies = [];
+    const skel = room.spawnEnemyForTesting('skeleton', p.x + 80, p.y, false);
+    skel.roomId = room.map.rooms[0].id;
+    skel.windupMs = 0;
+    room.projectiles = [];
+    room.tick(50);
+    assert.strictEqual(room.projectiles.length, 1, 'Skeleton shots 1-2 fire single bone');
+    skel.windupMs = 0;
+    room.projectiles = [];
+    room.tick(50);
+    assert.strictEqual(room.projectiles.length, 1, 'Skeleton shot 2 fires single bone');
+    skel.windupMs = 0;
+    room.projectiles = [];
+    room.tick(50);
+    assert.strictEqual(room.projectiles.length, 3, 'Skeleton shot 3 must fire 3-bone fan volley');
+
+    // Silenced cultist does not cast projectiles or void_sigil
+    room.enemies = [];
+    const cultist = room.spawnEnemyForTesting('cultist', p.x + 80, p.y, false);
+    cultist.roomId = room.map.rooms[0].id;
+    cultist.windupMs = 0;
+    cultist.abilityCdMs = 0;
+    cultist.silencedMs = 1500;
+    room.projectiles = [];
+    room.zones = [];
+    room.tick(50);
+    assert.strictEqual(room.projectiles.length, 0, 'Silenced cultist must not fire projectiles');
+    assert.strictEqual(room.zones.length, 0, 'Silenced cultist must not cast void_sigil');
+
+    // Slime death spawns caustic acid_pool in dungeon mode
+    room.enemies = [];
+    room.zones = [];
+    const slime = room.spawnEnemyForTesting('slime', p.x + 30, p.y, false);
+    slime.roomId = room.map.rooms[0].id;
+    room.damageEnemy(slime, slime.maxHp * 5, p, false, 'physical');
+    assert.ok(room.zones.some((z) => z.kind === 'acid_pool'), 'Slime death in dungeon must leave behind an acid_pool hazard zone');
+
+    // 3. GameCanvas telegraph & hazard zone wiring check
+    const canvasSrc = fs.readFileSync(path.join(process.cwd(), 'src/components/GameCanvas.tsx'), 'utf8');
+    for (const sym of ["z.kind === 'acid_pool'", "z.kind === 'seismic_ring'", "z.kind === 'void_sigil'", "en.kind !== 'boss'"]) {
+      assert.ok(canvasSrc.includes(sym), `GameCanvas.tsx must handle ${sym}`);
+    }
+
+    // 4. Open World remains completely clean of mobs
+    const owRoom = new GameRoom({
+      roomId: 'OPEN-WORLD',
+      name: 'Verdant Borderlands (Open World)',
+      hostName: 'Frontier',
+      difficulty: 'Normal',
+      seed: 777,
+      initialFloor: 1,
+      initialStatus: 'playing',
+    });
+    assert.strictEqual(owRoom.enemies.length, 0, 'Open World must keep 0 enemies');
+  });
+
+  await test('146. Tactical Dungeon Props: Explosive Cinder Kegs & Periodic Floor Spike Traps', async () => {
+    const room = new GameRoom({
+      roomId: 'R_TEST_ENV_PROPS_146',
+      name: 'Environmental Props Room',
+      hostName: 'Tester',
+      difficulty: 'Normal',
+      seed: 14601,
+      initialFloor: 2,
+      initialStatus: 'playing',
+    });
+    const p = room.addOrReconnectPlayer('p_146', 'Tester', 'ranger');
+
+    // 1. Dungeon floor spawns kegs & spike traps, while Tavern & Open World stay free of them
+    const kegs = room.props.filter((pr) => pr.kind === 'keg');
+    const traps = room.props.filter((pr) => pr.kind === 'spike_trap');
+    assert.ok(kegs.length >= 2, `Expected >= 2 explosive kegs on floor 2 (got ${kegs.length})`);
+    assert.ok(traps.length >= 1, `Expected >= 1 floor spike trap on floor 2 (got ${traps.length})`);
+
+    const owRoom = new GameRoom({
+      roomId: 'OPEN-WORLD',
+      name: 'Open World',
+      hostName: 'Host',
+      difficulty: 'Normal',
+      seed: 777,
+      initialFloor: 1,
+      initialStatus: 'playing',
+    });
+    assert.strictEqual(owRoom.props.length, 0, 'Open World must have 0 props');
+
+    const tavernRoom = new GameRoom({
+      roomId: 'TAVERN-HUB',
+      name: 'Tavern',
+      hostName: 'Host',
+      difficulty: 'Normal',
+      seed: 1,
+      initialFloor: 0,
+      initialStatus: 'playing',
+    });
+    assert.strictEqual(
+      tavernRoom.props.some((pr) => pr.kind === 'keg' || pr.kind === 'spike_trap'),
+      false,
+      'Tavern Hub must never spawn kegs or spike traps'
+    );
+
+    // 2. Shooting a keg triggers Cinder Blast + Burn + chain detonation to adjacent kegs
+    room.enemies = [];
+    room.zones = [];
+    const baseX = room.map.rooms[0].cx * TILE_SIZE + 16;
+    const baseY = room.map.rooms[0].cy * TILE_SIZE + 16;
+    p.x = baseX - 50;
+    p.y = baseY;
+    p.hp = p.maxHp;
+
+    const kegA: PropState = { id: 'keg_a', kind: 'keg', x: baseX, y: baseY, opened: false, value: 65 };
+    const kegB: PropState = { id: 'keg_b', kind: 'keg', x: baseX + 70, y: baseY, opened: false, value: 65 };
+    room.props = [kegA, kegB];
+    const targetMob = room.spawnEnemyForTesting('knight', baseX + 85, baseY, false);
+    const mobHpBefore = targetMob.hp;
+
+    room.spawnProjectile({
+      ownerType: 'player',
+      ownerId: p.id,
+      style: 'arrow',
+      x: kegA.x - 10,
+      y: kegA.y,
+      vx: 400,
+      vy: 0,
+      angle: 0,
+      radius: 6,
+      damage: 10,
+      pierce: 1,
+      ttlMs: 300,
+    });
+    room.tick(50);
+
+    assert.strictEqual(kegA.opened, true, 'Primary keg must detonate on projectile hit');
+    assert.strictEqual(kegB.opened, true, 'Adjacent keg within blast radius must chain detonate');
+    assert.ok(targetMob.hp < mobHpBefore, 'Chain-detonated keg must damage nearby enemy');
+    assert.ok((targetMob.burnedMs || 0) > 0, 'Cinder Keg blast must apply Burn to surviving enemies');
+    assert.ok(room.zones.some((z) => z.kind === 'cinderflare_blast'), 'Keg blast must emit cinderflare_blast zone');
+
+    // 3. Spike trap 3-phase cycle: Dormant -> Warning (locked=true) -> Active (opened=true, damages enemy & player)
+    room.enemies = [];
+    room.zones = [];
+    const trapRoom = new GameRoom({
+      roomId: 'R_TEST_TRAP_146',
+      name: 'Trap Cycle Room',
+      hostName: 'Tester',
+      difficulty: 'Normal',
+      seed: 14602,
+      initialFloor: 1,
+      initialStatus: 'playing',
+    });
+    const tp = trapRoom.addOrReconnectPlayer('tp_1', 'TrapTester', 'vanguard');
+    const trapX = trapRoom.map.rooms[0].cx * TILE_SIZE + 16;
+    const trapY = trapRoom.map.rooms[0].cy * TILE_SIZE + 16;
+    tp.x = trapX;
+    tp.y = trapY;
+    tp.shield = 0;
+    tp.hp = tp.maxHp;
+    const trapProp: PropState = { id: 'trap_1', kind: 'spike_trap', x: trapX, y: trapY, opened: false, locked: false, value: 0 };
+    trapRoom.props = [trapProp];
+    trapRoom.enemies = [];
+    const trapMob = trapRoom.spawnEnemyForTesting('goblin', trapX + 8, trapY, false);
+
+    // Phase 1: Dormant (t = 100ms)
+    trapRoom.tick(100);
+    assert.strictEqual(trapProp.locked, false);
+    assert.strictEqual(trapProp.opened, false);
+    assert.strictEqual(tp.hp, tp.maxHp, 'Dormant trap must not damage player');
+
+    // Phase 2: Warning (advance to t = 1650ms)
+    trapRoom.tick(1550);
+    assert.strictEqual(trapProp.locked, true, 'Trap must enter warning phase (locked=true) before firing');
+    assert.strictEqual(trapProp.opened, false);
+    assert.strictEqual(tp.hp, tp.maxHp, 'Warning phase must still allow player time to step off safely');
+
+    // Phase 3: Active (advance to t = 2200ms)
+    tp.shield = 0;
+    const mobHpPreTrap = trapMob.hp;
+    trapRoom.tick(550);
+    assert.strictEqual(trapProp.opened, true, 'Trap must extend spikes in active phase (opened=true)');
+    assert.ok(tp.hp < tp.maxHp, 'Active spike trap must damage standing player');
+    assert.ok(trapMob.hp < mobHpPreTrap, 'Active spike trap must damage standing enemy');
+    assert.ok((trapMob.bleedingMs || 0) > 0, 'Active spike trap must inflict bleed on enemy');
+
+    // 4. Client rendering & snapshot parity check
+    const decoSrc = fs.readFileSync(path.join(process.cwd(), 'src/client/dungeonDecorations.ts'), 'utf8');
+    const canvasSrc = fs.readFileSync(path.join(process.cwd(), 'src/components/GameCanvas.tsx'), 'utf8');
+    assert.ok(decoSrc.includes("prop.kind === 'keg'") && decoSrc.includes("prop.kind === 'spike_trap'"));
+    assert.ok(canvasSrc.includes("prop.kind === 'keg'") && !trapRoom.buildNetworkSnapshot().props.some((pr) => pr.id === trapProp.id && !pr.opened));
+  });
+
+  await test('147. Objective Compass, Minimap Loot Markers, PvP Leader Crown & Killstreak Shutdown Bounties', async () => {
+    // 1. UI & Canvas markers exist for Dungeon compass, minimap props, HUD status, and PvP crown
+    const canvasSrc = fs.readFileSync(path.join(process.cwd(), 'src/components/GameCanvas.tsx'), 'utf8');
+    const mapModalSrc = fs.readFileSync(path.join(process.cwd(), 'src/components/ExpandedMapModal.tsx'), 'utf8');
+    const hudSrc = fs.readFileSync(path.join(process.cwd(), 'src/components/DungeonRunView.tsx'), 'utf8');
+
+    assert.ok(canvasSrc.includes('OFF-SCREEN OBJECTIVE COMPASS'), 'GameCanvas should render Dungeon off-screen objective compass');
+    assert.ok(canvasSrc.includes('pvpLeaderId'), 'GameCanvas should render Open World PvP Leader crown');
+    assert.ok(canvasSrc.includes('Unclaimed Dungeon Loot & Shrine Markers'), 'GameCanvas minimap should render unclaimed relic/shrine markers');
+    assert.ok(mapModalSrc.includes('Unclaimed Relic Vault') && mapModalSrc.includes('isPvpLeader'), 'ExpandedMapModal should display unclaimed dungeon loot and PvP leader ring');
+    assert.ok(hudSrc.includes('Portal Open') && hudSrc.includes('Boss Vulnerable'), 'DungeonRunView top HUD should show dungeon objective cue');
+
+    // 2. Open World PvP Killstreaks & Shutdown Bounties
+    const ow = new GameRoom({
+      roomId: 'OPEN-WORLD',
+      name: 'Verdant Borderlands (Open World)',
+      hostName: 'Frontier',
+      difficulty: 'Normal',
+      seed: 14701,
+      initialFloor: 1,
+      initialStatus: 'playing',
+    });
+    const hunter = ow.addOrReconnectPlayer('p_hunter', 'Hunter', 'vanguard');
+    const prey = ow.addOrReconnectPlayer('p_prey', 'Prey', 'arcanist');
+    const chats: string[] = [];
+    ow.onChatMessageCallback = (msg) => {
+      chats.push(msg.text);
+    };
+    hunter.spawnProtectionMs = 0;
+    prey.spawnProtectionMs = 0;
+    const startGoldHunter = hunter.gold;
+
+    // Give Hunter a 3-kill streak against Prey (clearing respawn grace in test)
+    for (let k = 0; k < 3; k++) {
+      prey.downed = false;
+      prey.downedTimerMs = 0;
+      prey.spawnProtectionMs = 0;
+      prey.shield = 0;
+      prey.hp = 10;
+      ow.damagePlayer(prey, 100, 'physical', hunter);
+      assert.strictEqual(prey.downed, true, `Prey must be downed on kill ${k + 1}`);
+    }
+    assert.strictEqual(hunter.kills, 3, 'Hunter must have 3 kills');
+    assert.strictEqual(hunter.gold, startGoldHunter + 75, 'Each standard PvP kill grants 25g bounty (3x25=75g)');
+    assert.ok(
+      chats.some((text) => text.includes('3-kill rampage!')),
+      '3-kill streak must announce rampage in system chat'
+    );
+
+    // Now Prey ends Hunter's 3-kill streak for a Shutdown Bounty
+    const startGoldPrey = prey.gold;
+    prey.downed = false;
+    prey.downedTimerMs = 0;
+    prey.spawnProtectionMs = 0;
+    hunter.spawnProtectionMs = 0;
+    hunter.shield = 0;
+    hunter.hp = 10;
+    ow.damagePlayer(hunter, 100, 'arcane', prey);
+    assert.strictEqual(hunter.downed, true, 'Hunter must be downed when killed');
+    // 3-kill streak shutdown = 25 base + 3*20 = 85g total
+    assert.strictEqual(prey.gold, startGoldPrey + 85, 'Shutdown of 3-kill streak must award 85g bounty (25 + 60)');
+    assert.ok(
+      chats.some((text) => text.includes('SHUTDOWN!') && text.includes('3-kill streak')),
+      'Shutdown kill must announce SHUTDOWN bounty in chat'
+    );
+    assert.strictEqual(ow.enemies.length, 0, 'Open World must keep 0 enemies');
+    assert.strictEqual(ow.props.length, 0, 'Open World must keep 0 props');
+  });
+
+  await test('148. Living Open World: Rotating War Fonts, Borderlands Road Stride, Landmarks & Global Font Sync', async () => {
+    const { generateOpenWorldMap } = await import('./src/server/overworldGenerator.ts');
+    const {
+      OPEN_WORLD_ENTITY_INTEREST_RADIUS,
+      projectOpenWorldSnapshotForClient,
+    } = await import('./src/server/openWorldNetwork.ts');
+
+    // 1. Overworld map populates landmark torches while keeping 0 enemies/props/npcs
+    const gen = generateOpenWorldMap(777);
+    assert.ok(gen.map.torches.length >= 12, `Expected >= 12 landmark torches across Borderlands (got ${gen.map.torches.length})`);
+    assert.strictEqual(gen.enemies.length, 0);
+    assert.strictEqual(gen.props.length, 0);
+    assert.strictEqual(gen.npcs.length, 0);
+
+    // 2. Borderlands Road Stride (+12% movement speed on roads/plazas when not slowed)
+    let grassTile: { tx: number; ty: number } | null = null;
+    let roadTile: { tx: number; ty: number } | null = null;
+    for (let ty = 4; ty < gen.map.height - 4 && (!grassTile || !roadTile); ty++) {
+      for (let tx = 4; tx < gen.map.width - 4; tx++) {
+        const t = gen.map.tiles[ty * gen.map.width + tx];
+        if (t === 1 && !grassTile) grassTile = { tx, ty };
+        if ((t === 4 || t === 5) && !roadTile) roadTile = { tx, ty };
+      }
+    }
+    assert.ok(grassTile && roadTile, 'Expected both grass and road/plaza tiles in Overworld map');
+    const speedBase = {
+      heroClass: 'vanguard' as const,
+      dexterity: 0,
+      relics: [] as string[],
+      hasteMs: 0,
+      slowedMs: 0,
+      equippedVestment: null,
+    };
+    const grassSpeed = computePlayerMoveSpeed(
+      { ...speedBase, x: grassTile!.tx * TILE_SIZE + 16, y: grassTile!.ty * TILE_SIZE + 16 },
+      gen.map
+    );
+    const roadSpeed = computePlayerMoveSpeed(
+      { ...speedBase, x: roadTile!.tx * TILE_SIZE + 16, y: roadTile!.ty * TILE_SIZE + 16 },
+      gen.map
+    );
+    assert.ok(
+      Math.abs(roadSpeed / grassSpeed - 1.12) < 0.02,
+      `Road Stride should boost Overworld road/plaza speed by +12% (grass=${grassSpeed}, road=${roadSpeed})`
+    );
+    const slowedRoadSpeed = computePlayerMoveSpeed(
+      { ...speedBase, slowedMs: 800, x: roadTile!.tx * TILE_SIZE + 16, y: roadTile!.ty * TILE_SIZE + 16 },
+      gen.map
+    );
+    assert.ok(slowedRoadSpeed < grassSpeed, 'Slowed player must not keep Road Stride bonus');
+
+    // 3. Rotating War Fonts: Awakening, Global Sync, Capture, Contested Pause, Conquest Bounty & Rotation
+    const ow = new GameRoom({
+      roomId: 'OPEN-WORLD',
+      name: 'Verdant Borderlands (Open World)',
+      hostName: 'Frontier',
+      difficulty: 'Normal',
+      seed: 777,
+      initialFloor: 1,
+      initialStatus: 'playing',
+    });
+    const chats: string[] = [];
+    ow.onChatMessageCallback = (msg) => {
+      chats.push(msg.text);
+    };
+
+    const capturer = ow.addOrReconnectPlayer('wf_cap', 'Capturer', 'vanguard');
+    const rival = ow.addOrReconnectPlayer('wf_riv', 'Rival', 'arcanist');
+    capturer.spawnProtectionMs = 0;
+    rival.spawnProtectionMs = 0;
+
+    // Move players far apart first and tick past initial 1500ms awakening cooldown
+    capturer.x = 60.5 * TILE_SIZE;
+    capturer.y = 45.5 * TILE_SIZE;
+    rival.x = 12 * TILE_SIZE;
+    rival.y = 12 * TILE_SIZE;
+    ow.tick(1600);
+
+    const font1 = ow.zones.find((z) => z.kind === 'overworld_font');
+    assert.ok(font1, 'War Font must awaken in Open World after initial cooldown');
+    assert.strictEqual(font1!.ownerId, 'neutral');
+    assert.strictEqual(font1!.stage, 0);
+    assert.ok(chats.some((c) => c.includes('has awakened at')), 'War Font awakening must announce in system chat');
+
+    // Global snapshot projection must keep overworld_font visible even beyond interest radius
+    rival.x = Math.max(TILE_SIZE * 2, font1!.x + (font1!.x > TILE_SIZE * 60 ? -(OPEN_WORLD_ENTITY_INTEREST_RADIUS + 400) : OPEN_WORLD_ENTITY_INTEREST_RADIUS + 400));
+    rival.y = font1!.y;
+    const farSnap = projectOpenWorldSnapshotForClient(ow.buildNetworkSnapshot(), rival.id, 0, null);
+    assert.ok(
+      farSnap.zones.some((z) => z.id === font1!.id && z.kind === 'overworld_font'),
+      'Overworld War Font must sync globally across the map regardless of interest radius'
+    );
+
+    // Capturer stands alone inside font -> gains capture progress
+    capturer.x = font1!.x;
+    capturer.y = font1!.y;
+    ow.tick(1500); // ~30%
+    assert.strictEqual(font1!.ownerId, capturer.id);
+    assert.ok((font1!.stage ?? 0) >= 28 && (font1!.stage ?? 0) <= 32, `Expected ~30% capture stage, got ${font1!.stage}`);
+
+    // Rival steps inside -> contested state freezes progress
+    rival.x = font1!.x + 24;
+    rival.y = font1!.y;
+    const stageBeforeContest = font1!.stage!;
+    ow.tick(1000);
+    assert.strictEqual(font1!.ownerId, 'contested', '2+ alive players in War Font must mark it contested');
+    assert.strictEqual(font1!.stage, stageBeforeContest, 'Contested War Font capture progress must pause');
+
+    // Rival steps out; Capturer finishes remaining capture -> +50g, shield, haste, chat, rotates next region
+    rival.x = font1!.x + 300;
+    const goldBefore = capturer.gold;
+    const xpBefore = capturer.xp;
+    const shieldBefore = capturer.shield;
+    for (let i = 0; i < 8; i++) ow.tick(500);
+    assert.strictEqual(ow.zones.some((z) => z.kind === 'overworld_font'), false, 'Claimed War Font must clear during cooldown');
+    assert.strictEqual(capturer.gold, goldBefore + 50, 'Conquering a War Font must award +50g');
+    assert.ok(capturer.xp > xpBefore || capturer.level > 1, 'Conquering a War Font must award XP');
+    assert.ok(capturer.shield >= shieldBefore + 35, 'Conquering a War Font must grant +35 Shield');
+    assert.ok(capturer.hasteMs >= 5000, 'Conquering a War Font must grant 6s Haste');
+    assert.ok(chats.some((c) => c.includes('conquered the')), 'War Font conquest must broadcast in system chat');
+
+    // Advance past 6000ms rotation cooldown -> new War Font spawns in a different region
+    ow.tick(6200);
+    const font2 = ow.zones.find((z) => z.kind === 'overworld_font');
+    assert.ok(font2, 'A fresh War Font must spawn after rotation cooldown');
+    assert.notStrictEqual(font2!.label, font1!.label, 'Rotating War Font should advance to another Borderlands region');
+    assert.strictEqual(ow.enemies.length, 0, 'Open World must still keep 0 enemies');
+    assert.strictEqual(ow.props.length, 0, 'Open World must still keep 0 props');
+
+    // 4. Client landmark & War Font rendering wiring check
+    const canvasSrc = fs.readFileSync(path.join(process.cwd(), 'src/components/GameCanvas.tsx'), 'utf8');
+    const modalSrc = fs.readFileSync(path.join(process.cwd(), 'src/components/ExpandedMapModal.tsx'), 'utf8');
+    const hudSrc = fs.readFileSync(path.join(process.cwd(), 'src/components/DungeonRunView.tsx'), 'utf8');
+    assert.ok(canvasSrc.includes("z.kind === 'overworld_font'") && canvasSrc.includes('Overworld Landmark Centerpieces'));
+    assert.ok(modalSrc.includes("z.kind === 'overworld_font'") && modalSrc.includes('War Font'));
+    assert.ok(hudSrc.includes('regionArrival') && hudSrc.includes("z.kind === 'overworld_font'"));
+  });
+
+  await test('149. Authentic Pixel-Art Pipeline: 1:1 Pixel Framebuffer, Stepped Overworld Terrain/Landmarks/War Font & Pixelify Typography', async () => {
+    const { generateOpenWorldMap } = await import('./src/server/overworldGenerator.ts');
+    const {
+      drawPixelFilledDisc,
+      drawPixelCircleOutline,
+      renderOverworldTileMap,
+      drawOverworldPixelLandmarks,
+      drawOverworldFontZonePixel,
+    } = await import('./src/client/pixelArtWorld.ts');
+
+    const createHeadlessPixelCtx = () => {
+      let fillRectOps = 0;
+      let arcCalls = 0;
+      let ellipseCalls = 0;
+      const noop = () => {};
+      const ctx: any = {
+        fillStyle: '#000',
+        strokeStyle: '#000',
+        lineWidth: 1,
+        globalAlpha: 1,
+        imageSmoothingEnabled: false,
+        save: noop,
+        restore: noop,
+        translate: noop,
+        scale: noop,
+        rotate: noop,
+        beginPath: noop,
+        closePath: noop,
+        moveTo: noop,
+        lineTo: noop,
+        stroke: noop,
+        fill: noop,
+        strokeRect: noop,
+        clearRect: noop,
+        setLineDash: noop,
+        fillRect: () => {
+          fillRectOps++;
+        },
+        arc: () => {
+          arcCalls++;
+        },
+        ellipse: () => {
+          ellipseCalls++;
+        },
+      };
+      return {
+        ctx: ctx as CanvasRenderingContext2D,
+        getStats: () => ({ fillRectOps, arcCalls, ellipseCalls }),
+      };
+    };
+
+    const gen = generateOpenWorldMap(909);
+
+    // 1. Stepped pixel disc & circle outline emit zero smooth vector arcs
+    const discTracker = createHeadlessPixelCtx();
+    drawPixelFilledDisc(discTracker.ctx, 100, 100, 18, 2);
+    drawPixelCircleOutline(discTracker.ctx, 100, 100, 24, 2, 2, 4);
+    assert.ok(discTracker.getStats().fillRectOps > 20, 'Pixel disc/outline must draw stepped pixel blocks');
+    assert.strictEqual(discTracker.getStats().arcCalls, 0);
+    assert.strictEqual(discTracker.getStats().ellipseCalls, 0);
+
+    // 2. Seamless 16-bit pixel Overworld terrain renderer executes cleanly with zero smooth vector calls
+    const mapTracker = createHeadlessPixelCtx();
+    renderOverworldTileMap(mapTracker.ctx, gen.map);
+    const mapStats = mapTracker.getStats();
+    assert.ok(mapStats.fillRectOps > 50000, `Expected dense pixel-art tile rendering (got ${mapStats.fillRectOps} fillRect ops)`);
+    assert.strictEqual(mapStats.arcCalls, 0, 'Overworld pixel tile renderer must not rely on smooth vector arc()');
+    assert.strictEqual(mapStats.ellipseCalls, 0, 'Overworld pixel tile renderer must not rely on smooth vector ellipse()');
+
+    // 3. Landmark centerpieces & drifting pixel cloud shadows render across full world view without smooth ellipses/arcs
+    const lmTracker = createHeadlessPixelCtx();
+    drawOverworldPixelLandmarks(
+      lmTracker.ctx,
+      {
+        left: 0,
+        top: 0,
+        right: gen.map.width * TILE_SIZE,
+        bottom: gen.map.height * TILE_SIZE,
+        width: gen.map.width * TILE_SIZE,
+        height: gen.map.height * TILE_SIZE,
+      },
+      42000
+    );
+    const lmStats = lmTracker.getStats();
+    assert.ok(lmStats.fillRectOps > 400, `Expected pixel-art landmark & cloud clusters (got ${lmStats.fillRectOps})`);
+    assert.strictEqual(lmStats.arcCalls, 0, 'Pixel landmarks must not draw smooth arc()');
+    assert.strictEqual(lmStats.ellipseCalls, 0, 'Pixel landmarks must not draw smooth ellipse()');
+
+    // 4. Rotating War Font renders stepped pixel rings, capture pips & crystal spire
+    const wfTracker = createHeadlessPixelCtx();
+    drawOverworldFontZonePixel(
+      wfTracker.ctx,
+      {
+        id: 'wf_pixel_test',
+        kind: 'overworld_font',
+        x: 60.5 * TILE_SIZE,
+        y: 45.5 * TILE_SIZE,
+        radius: 112,
+        ttlMs: 30000,
+        maxTtlMs: 60000,
+        ownerId: 'p_1',
+        quadrant: 1,
+        stage: 65,
+      },
+      42000
+    );
+    const wfStats = wfTracker.getStats();
+    assert.ok(wfStats.fillRectOps > 120, `Expected stepped War Font pixel rendering (got ${wfStats.fillRectOps})`);
+    assert.strictEqual(wfStats.arcCalls, 0);
+    assert.strictEqual(wfStats.ellipseCalls, 0);
+
+    // 5. GameCanvas & npcSprites wiring checks for 1:1 nearest-neighbor framebuffer + Pixelify Sans
+    const canvasSrc = fs.readFileSync(path.join(process.cwd(), 'src/components/GameCanvas.tsx'), 'utf8');
+    const npcSrc = fs.readFileSync(path.join(process.cwd(), 'src/client/npcSprites.ts'), 'utf8');
+    assert.ok(canvasSrc.includes('worldPixelCanvasRef'), 'GameCanvas must render world onto 1:1 worldPixelCanvasRef');
+    assert.ok(canvasSrc.includes('imageSmoothingEnabled = false'), 'GameCanvas must disable image smoothing for crisp nearest-neighbor scaling');
+    assert.ok(canvasSrc.includes('createSteppedTorchGlowCanvas'), 'GameCanvas must use stepped pixel torchlight');
+    assert.ok(canvasSrc.includes('createQuantizedRadialZoneSprite'), 'GameCanvas must use quantized pixel zone sprites');
+    assert.ok(canvasSrc.includes('renderOverworldTileMap'), 'GameCanvas must use pixelArtWorld Overworld tile renderer');
+    assert.ok(canvasSrc.includes('drawOverworldPixelLandmarks'), 'GameCanvas must use pixelArtWorld landmarks');
+    assert.ok(canvasSrc.includes('drawOverworldFontZonePixel'), 'GameCanvas must use pixelArtWorld War Font renderer');
+    assert.ok(canvasSrc.includes('Pixelify Sans'), 'GameCanvas must render HUD/combat text in Pixelify Sans');
+    assert.ok(npcSrc.includes('Pixelify Sans'), 'npcSprites must render NPC overhead labels in Pixelify Sans');
+  });
+
+  await test('150. PC Controls Remap: Shift Dash, 1/2/3 Skills & Heal Flask, Dialogue Priority & Hotbar Labels', async () => {
+    const canvasSrc = fs.readFileSync(path.join(process.cwd(), 'src/components/GameCanvas.tsx'), 'utf8');
+    const runViewSrc = fs.readFileSync(path.join(process.cwd(), 'src/components/DungeonRunView.tsx'), 'utf8');
+    const lobbySrc = fs.readFileSync(path.join(process.cwd(), 'src/components/SanctuaryLobby.tsx'), 'utf8');
+    const invSrc = fs.readFileSync(path.join(process.cwd(), 'src/components/CharacterInventoryModal.tsx'), 'utf8');
+    const shopSrc = fs.readFileSync(path.join(process.cwd(), 'src/components/ArmamentShopPanel.tsx'), 'utf8');
+
+    // 1. GameCanvas maps Shift -> dash, 1 -> tactical, 2 -> ult, 3 -> potion, and handles Digit1-3 / ShiftLeft-Right safely
+    assert.ok(canvasSrc.includes("e.code === 'ShiftLeft' || e.code === 'ShiftRight' || e.key === 'Shift'"));
+    assert.ok(canvasSrc.includes("e.code === 'Digit1' || e.key === '1'"));
+    assert.ok(canvasSrc.includes("e.code === 'Digit2' || e.key === '2'"));
+    assert.ok(canvasSrc.includes("e.code === 'Digit3' || e.key === '3'"));
+    assert.ok(canvasSrc.includes("k === '1' || k === 'q'\n            ? 'tactical'\n            : k === '2' || k === 'r'\n              ? 'ult'\n              : 'dash'"));
+    assert.ok(canvasSrc.includes("else if (k === '3' || k === 'h')"));
+    assert.ok(
+      canvasSrc.includes("(k === '1' || k === '2') && me?.npcDialogue?.options && me.npcDialogue.options.length > 0"),
+      'NPC dialogue [1-2] choices must take priority over skills [1] and [2]'
+    );
+
+    // 2. Desktop hotbar & Sanctuary guides clearly display [1], [2], [3], and [SHIFT] Dash
+    assert.ok(runViewSrc.includes('[1 / RMB]') && runViewSrc.includes('[HOLD 1/RMB]'));
+    assert.ok(runViewSrc.includes('[2]') && runViewSrc.includes('[3] Flasks:'));
+    assert.ok(runViewSrc.includes('[SHIFT]') && !runViewSrc.includes('[R / Shift]'));
+    assert.ok(lobbySrc.includes('Evade Dash [Shift]') && lobbySrc.includes('Skill 1 · Tactical [1]'));
+    assert.ok(lobbySrc.includes('Skill 2 · Ultimate [2]') && lobbySrc.includes('Skill 3 · Heal Flask [3]'));
+    assert.ok(invSrc.includes('Skill [1]') && invSrc.includes('Ultimate [2]'));
+    assert.ok(shopSrc.includes('Skill [1]'));
+  });
+
+  await test('151. Mobile Viewport Lock & Enlarged Touch Controls (>=44px utility, >=58px skills, >=78px attack, 100dvh, visualViewport)', async () => {
+    const touchSrc = fs.readFileSync(path.join(process.cwd(), 'src/components/TouchControls.tsx'), 'utf8');
+    const touchModalSrc = fs.readFileSync(path.join(process.cwd(), 'src/components/TouchSettingsModal.tsx'), 'utf8');
+    const canvasSrc = fs.readFileSync(path.join(process.cwd(), 'src/components/GameCanvas.tsx'), 'utf8');
+    const runViewSrc = fs.readFileSync(path.join(process.cwd(), 'src/components/DungeonRunView.tsx'), 'utf8');
+
+    // 1. Default button preset is standard & compact/standard/large presets enforce >=44px mobile touch minimums
+    assert.ok(touchSrc.includes("buttonSize: 'standard'"), 'Default touch buttonSize must be standard');
+    assert.ok(
+      touchSrc.includes('compact: { util: 44, skill: 58, attack: 78, icon: 20 }'),
+      'Compact touch preset must still meet 44px+ minimum targets'
+    );
+    assert.ok(
+      touchSrc.includes('standard: { util: 50, skill: 68, attack: 90, icon: 24 }'),
+      'Standard touch preset must provide generous 50px/68px/90px buttons'
+    );
+    assert.ok(
+      touchSrc.includes('large: { util: 56, skill: 78, attack: 104, icon: 28 }'),
+      'Large touch preset must provide 56px/78px/104px buttons'
+    );
+    assert.ok(
+      touchSrc.includes('Math.max(44,') && touchSrc.includes('Math.max(56,') && touchSrc.includes('Math.max(76,'),
+      'Viewport scaling must enforce hard pixel floors so buttons never shrink below playable touch targets'
+    );
+    assert.ok(
+      touchSrc.includes('visualViewport') && touchSrc.includes('orientationchange'),
+      'TouchControls must track resize, orientationchange, and visualViewport'
+    );
+    assert.ok(
+      touchModalSrc.includes('68px / 90px') && touchModalSrc.includes('78px / 104px'),
+      'TouchSettingsModal must reflect updated button dimensions'
+    );
+
+    // 2. GameCanvas locks canvas to container, tracks visualViewport + ResizeObserver, and handles mobile landscape
+    assert.ok(canvasSrc.includes('fixed inset-0 block w-full h-full'), 'GameCanvas must lock to fixed inset-0 container');
+    assert.ok(
+      canvasSrc.includes('orientationchange') && canvasSrc.includes('visualViewport') && canvasSrc.includes('ResizeObserver'),
+      'GameCanvas must sync pixel resolution on ResizeObserver, orientationchange, and visualViewport'
+    );
+    assert.ok(canvasSrc.includes('cw < 640 || ch < 520'), 'GameCanvas must detect both mobile portrait and mobile landscape');
+
+    // 3. DungeonRunView locks gameplay viewport to 100dvh, enlarges mobile top HUD controls, and clears Boss Bar from Party/Minimap
+    assert.ok(
+      runViewSrc.includes('fixed inset-0 w-full h-[100dvh] overflow-hidden'),
+      'DungeonRunView must lock root to 100dvh to prevent mobile browser bar clipping'
+    );
+    assert.ok(runViewSrc.includes('min-h-[36px]') && runViewSrc.includes('text-[11px]'), 'Mobile top HUD buttons must use readable >=36px targets');
+    assert.ok(runViewSrc.includes('left-[92px] right-[112px]'), 'Mobile Boss Bar must center between Party toggle and Minimap without overlapping');
+
+    // 4. Anti-crowding TouchControls geometry & VoiceHUD alignment
+    assert.ok(touchSrc.includes('isLandscapeMobile') && touchSrc.includes('arcDims'), 'TouchControls must adapt cluster geometry for portrait and landscape mobile screens');
+    assert.ok(touchSrc.includes("w-[40vw] max-w-[240px]") && touchSrc.includes("w-[35vw] max-w-[300px]"), 'Joystick catch area must stay bounded on the left without colliding with right combat buttons');
+    const voiceSrc = fs.readFileSync(path.join(process.cwd(), 'src/components/VoiceHUD.tsx'), 'utf8');
+    assert.ok(voiceSrc.includes('const mmY = isMobileScreen ? 52 : 74;'), 'VoiceHUD must track GameCanvas mobile minimap Y offset');
   });
 
   console.log(`\nAll regression tests completed: ${passed}/${total} passed.`);
